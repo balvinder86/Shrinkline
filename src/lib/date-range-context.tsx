@@ -2,9 +2,14 @@ import { createContext, useContext, useState, type ReactNode } from "react";
 
 import { type DateRange, addDays, startOfDay } from "@/lib/date-range";
 
+// 30 days, not 7 — real invoice volume is low enough (a handful
+// spread across months) that a 7-day default made the Invoices page
+// look empty on every fresh visit even though nothing was missing.
+// 30 days is still a meaningful "recent activity" window for the
+// daily-cadence pages (Home, Product Mix) without hiding sparser data.
 function defaultRange(): DateRange {
   const today = startOfDay(new Date());
-  return { from: addDays(today, -6), to: today };
+  return { from: addDays(today, -29), to: today };
 }
 
 const DateRangeContext = createContext<{
