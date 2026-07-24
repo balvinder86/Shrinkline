@@ -60,6 +60,29 @@ export async function listStuckInvoices(): Promise<{ id: string }[]> {
   return data ?? [];
 }
 
+// Invoices whose OCR was never even enqueued — email-ingest calls
+// enqueueOcr() right after creating the row, but that call can fail
+// for reasons that have nothing to do with the specific invoice (e.g.
+// Mindee's own subscription lapsing), and email-ingest deliberately
+// doesn't retry the same email forever (that previously caused a real
+// duplicate-invoice storm — one failed enqueue meant the source email
+// was never marked processed, so every ~15-min cron run re-created a
+// fresh invoice for the same message). The 2-minute age floor avoids
+// racing a legitimate first-attempt enqueue that just hasn't happened
+// yet for a brand-new row.
+export async function listNeverEnqueuedInvoices(): Promise<{ id: string }[]> {
+  const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+  const { data, error } = await supabase
+    .from("invoices")
+    .select("id")
+    .is("ocr_status", null)
+    .is("mindee_job_id", null)
+    .not("source_file_url", "is", null)
+    .lt("created_at", twoMinutesAgo);
+  if (error) throw new Error(`list never-enqueued invoices failed: ${error.message}`);
+  return data ?? [];
+}
+
 export async function persistResult(
   invoice: Invoice,
   result: { invoiceNumber: string | null; date: string | null; totalAmount: number | null },
@@ -78,7 +101,13 @@ export async function persistResult(
 
 export async function insertInvoiceLine(
   invoice: Invoice,
-  line: { description: string; quantity: number | null; unit: string | null; unitCostCents: number | null; totalCents: number | null },
+  line: {
+    description: string;
+    quantity: number | null;
+    unit: string | null;
+    unitCostCents: number | null;
+    totalCents: number | null;
+  },
 ) {
   const { data: matchedIngredientId } = await supabase.rpc("match_ingredient", {
     p_restaurant_id: invoice.restaurant_id,

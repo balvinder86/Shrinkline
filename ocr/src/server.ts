@@ -21,6 +21,7 @@ import {
   persistResult,
   insertInvoiceLine,
   listStuckInvoices,
+  listNeverEnqueuedInvoices,
 } from "./db.js";
 import { enqueue, checkJob } from "./mindee.js";
 
@@ -143,6 +144,22 @@ async function recheckStuckInvoices() {
       }
     } catch (e) {
       console.error(`[background-recheck] ${id} failed:`, e);
+    }
+  }
+
+  let neverEnqueued: { id: string }[];
+  try {
+    neverEnqueued = await listNeverEnqueuedInvoices();
+  } catch (e) {
+    console.error("[background-recheck] failed to list never-enqueued invoices:", e);
+    return;
+  }
+  for (const { id } of neverEnqueued) {
+    try {
+      await handleEnqueue(id);
+      console.log(`[background-recheck] ${id}: enqueued (was never started)`);
+    } catch (e) {
+      console.error(`[background-recheck] ${id} enqueue retry failed:`, e);
     }
   }
 }

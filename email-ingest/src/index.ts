@@ -30,7 +30,9 @@ async function syncCredential(cred: EmailCredential) {
 
   const query = buildQuery(cred.label_filter);
   const messages = await listMessages(accessToken, query);
-  console.log(`[email-ingest] ${cred.connected_email}: query "${query}" matched ${messages.length} message(s)`);
+  console.log(
+    `[email-ingest] ${cred.connected_email}: query "${query}" matched ${messages.length} message(s)`,
+  );
 
   let created = 0;
   let skipped = 0;
@@ -55,7 +57,11 @@ async function syncCredential(cred: EmailCredential) {
 
       for (const attachment of parsed.pdfAttachments) {
         const bytes = await getAttachmentBytes(accessToken, messageId, attachment.attachmentId);
-        const sourceFileUrl = await uploadInvoicePdf(cred.restaurant_id, attachment.filename, bytes);
+        const sourceFileUrl = await uploadInvoicePdf(
+          cred.restaurant_id,
+          attachment.filename,
+          bytes,
+        );
         const invoiceId = await createPendingInvoice({
           restaurantId: cred.restaurant_id,
           locationId,
@@ -63,10 +69,27 @@ async function syncCredential(cred: EmailCredential) {
           fromEmail: parsed.fromEmail,
           subject: parsed.subject,
         });
-        await enqueueOcr(invoiceId);
+        // The invoice row already exists at this point — if enqueueOcr
+        // fails (e.g. Mindee's own subscription lapsed, nothing to do
+        // with this specific email), don't let that fall through to
+        // the outer catch below and skip markMessageProcessed, or this
+        // same message gets "retried" every run forever, each retry
+        // creating a brand-new duplicate invoice for a row that
+        // already exists. ocr/'s background sweep retries any invoice
+        // that was never successfully enqueued, so it's safe to just
+        // log and move on — the row still gets its OCR eventually.
+        try {
+          await enqueueOcr(invoiceId);
+        } catch (enqueueError) {
+          console.error(
+            `[email-ingest] ${cred.connected_email}: enqueue OCR failed for invoice ${invoiceId} (will retry via ocr/'s background sweep) — ${enqueueError}`,
+          );
+        }
         lastInvoiceId = invoiceId;
         created++;
-        console.log(`[email-ingest] ${cred.connected_email}: created invoice ${invoiceId} from "${parsed.subject}" (${attachment.filename})`);
+        console.log(
+          `[email-ingest] ${cred.connected_email}: created invoice ${invoiceId} from "${parsed.subject}" (${attachment.filename})`,
+        );
       }
 
       await markMessageProcessed(cred.restaurant_id, "gmail", messageId, lastInvoiceId);
@@ -78,7 +101,9 @@ async function syncCredential(cred: EmailCredential) {
   }
 
   await updateLastSyncedAt(cred.id, new Date());
-  console.log(`[email-ingest] ${cred.connected_email}: done — ${created} invoice(s) created, ${skipped} already processed`);
+  console.log(
+    `[email-ingest] ${cred.connected_email}: done — ${created} invoice(s) created, ${skipped} already processed`,
+  );
 }
 
 async function main() {
