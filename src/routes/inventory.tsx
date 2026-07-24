@@ -25,6 +25,7 @@ import {
   type ExtractedInventoryItem,
   type BulkCreateResult,
 } from "@/lib/boh/queries";
+import { isFreeEmailProviderDomain } from "@/lib/boh/emailDomains";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   AlertTriangle,
@@ -338,6 +339,7 @@ function InventoryPage() {
   // fight the cursor position while typing "a, b, ". Parsed into
   // vendorDraft.invoicingSenderEmails only in saveVendor.
   const [vendorSenderEmailsText, setVendorSenderEmailsText] = useState("");
+  const [vendorSenderEmailsError, setVendorSenderEmailsError] = useState<string | null>(null);
   const [vendorToDelete, setVendorToDelete] = useState<Vendor | null>(null);
 
   const vendorNames = useMemo(() => vendors.map((v) => v.name), [vendors]);
@@ -553,6 +555,7 @@ function InventoryPage() {
       invoicingSenderEmails: [],
     });
     setVendorSenderEmailsText("");
+    setVendorSenderEmailsError(null);
     setVendorDialogOpen(true);
   };
   const openEditVendor = (v: Vendor) => {
@@ -560,6 +563,7 @@ function InventoryPage() {
     const { id: _id, ...rest } = v;
     setVendorDraft(rest);
     setVendorSenderEmailsText(v.invoicingSenderEmails.join(", "));
+    setVendorSenderEmailsError(null);
     setVendorDialogOpen(true);
   };
   const saveVendor = () => {
@@ -569,6 +573,19 @@ function InventoryPage() {
       .split(",")
       .map((e) => e.trim())
       .filter(Boolean);
+    // A free-email-provider domain entry (@gmail.com etc) would trust
+    // literally anyone with an account there — only an exact address
+    // on those providers is allowed, never the whole domain.
+    const badDomainEntry = invoicingSenderEmails.find(
+      (e) => e.startsWith("@") && isFreeEmailProviderDomain(e.slice(1)),
+    );
+    if (badDomainEntry) {
+      setVendorSenderEmailsError(
+        `"${badDomainEntry}" is a free email provider — add the specific address(es) this vendor invoices from instead of the whole domain.`,
+      );
+      return;
+    }
+    setVendorSenderEmailsError(null);
     if (vendorEditing) {
       updateVendor.mutate({ id: vendorEditing.id, ...vendorDraft, name, invoicingSenderEmails });
       // Items still reference vendors by name (mock data, not yet wired
@@ -2058,17 +2075,28 @@ function InventoryPage() {
               </select>
             </div>
             <div className="col-span-2">
-              <Label htmlFor="v-senders">Invoicing sender emails</Label>
+              <Label htmlFor="v-senders">Invoicing senders</Label>
               <Input
                 id="v-senders"
                 value={vendorSenderEmailsText}
-                onChange={(e) => setVendorSenderEmailsText(e.target.value)}
-                placeholder="e.g. invoices@vendor.com, ap@vendor.com"
+                onChange={(e) => {
+                  setVendorSenderEmailsText(e.target.value);
+                  if (vendorSenderEmailsError) setVendorSenderEmailsError(null);
+                }}
+                placeholder="e.g. invoices@vendor.com, @vendor.com"
+                className={vendorSenderEmailsError ? "border-[hsl(var(--terracotta))]" : ""}
               />
-              <p className="mt-1 text-xs text-stone-500">
-                Comma-separated. When an invoice email arrives from one of these addresses, it's
-                auto-matched to this vendor instead of needing a manual pick.
-              </p>
+              {vendorSenderEmailsError ? (
+                <p className="mt-1 text-xs text-[hsl(var(--terracotta))]">{vendorSenderEmailsError}</p>
+              ) : (
+                <p className="mt-1 text-xs text-stone-500">
+                  Comma-separated — full addresses (invoices@vendor.com) and/or whole domains
+                  (@vendor.com) this vendor invoices from. An invoice email matching one of these
+                  is auto-assigned to this vendor instead of needing a manual pick. Free providers
+                  (Gmail, Outlook, etc) can only be added as specific addresses, never a whole
+                  domain.
+                </p>
+              )}
             </div>
             <div className="col-span-2">
               <Label htmlFor="v-notes">Notes</Label>

@@ -70,30 +70,80 @@ export async function getFirstLocationId(restaurantId: string): Promise<string> 
   return data.id;
 }
 
-export async function uploadInvoicePdf(restaurantId: string, filename: string, bytes: Buffer): Promise<string> {
+export async function uploadInvoiceFile(
+  restaurantId: string,
+  filename: string,
+  bytes: Buffer,
+  contentType: string,
+): Promise<string> {
   const path = `${restaurantId}/gmail-${Date.now()}-${filename}`;
-  const { error } = await supabase.storage.from("invoice-uploads").upload(path, bytes, { contentType: "application/pdf" });
+  const { error } = await supabase.storage.from("invoice-uploads").upload(path, bytes, { contentType });
   if (error) throw new Error(`upload to invoice-uploads failed: ${error.message}`);
   return path;
 }
 
-// Matches a sender address (already lowercased, plain — see
-// extractEmailAddress) against vendors.invoicing_sender_emails, which
-// the app normalizes to lowercase on write, so this is a plain
-// case-sensitive array-containment lookup, no citext needed.
-export async function findVendorIdBySenderEmail(
-  restaurantId: string,
-  senderEmail: string,
-): Promise<string | null> {
+export type SenderMatchVendor = { id: string; invoicingSenderEmails: string[] };
+
+// One query per syncCredential() run (not per message) — vendor
+// counts per restaurant are small (tens, not thousands), so matching
+// happens in JS below rather than round-tripping SQL per message.
+export async function listVendorsForSenderMatch(restaurantId: string): Promise<SenderMatchVendor[]> {
   const { data, error } = await supabase
     .from("vendors")
-    .select("id")
-    .eq("restaurant_id", restaurantId)
-    .contains("invoicing_sender_emails", [senderEmail])
-    .limit(1)
-    .maybeSingle();
-  if (error) throw new Error(`vendor lookup by sender email failed: ${error.message}`);
-  return data?.id ?? null;
+    .select("id, invoicing_sender_emails")
+    .eq("restaurant_id", restaurantId);
+  if (error) throw new Error(`list vendors for sender match failed: ${error.message}`);
+  return (data ?? []).map((v) => ({ id: v.id, invoicingSenderEmails: v.invoicing_sender_emails ?? [] }));
+}
+
+const BARE_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const DOMAIN_ENTRY_RE = /^@[^\s@]+\.[^\s@]+$/;
+
+// Malformed entries can predate UI validation or be hand-edited via
+// SQL — skip them rather than let one bad row throw the whole cron
+// run, or (worse) have a malformed pattern accidentally match
+// everything.
+function isValidSenderListEntry(entry: string): boolean {
+  return BARE_EMAIL_RE.test(entry) || DOMAIN_ENTRY_RE.test(entry);
+}
+
+// Exact-address match OR "@domain" suffix match. Both sides are
+// already lowercased (extractEmailAddress lowercases the sender;
+// invoicing_sender_emails is lowercased on write in the app's toRow),
+// so this is plain string comparison.
+export function matchVendorForSender(vendors: SenderMatchVendor[], senderEmail: string): string | null {
+  const senderDomain = senderEmail.split("@")[1];
+  for (const vendor of vendors) {
+    for (const entry of vendor.invoicingSenderEmails) {
+      if (!isValidSenderListEntry(entry)) continue;
+      if (entry === senderEmail) return vendor.id;
+      if (entry.startsWith("@") && entry.slice(1) === senderDomain) return vendor.id;
+    }
+  }
+  return null;
+}
+
+export async function logIngestionEvent(input: {
+  restaurantId: string;
+  messageId: string;
+  filename: string | null;
+  mimeType: string | null;
+  sizeBytes: number | null;
+  outcome: "processed" | "skipped";
+  reason: string;
+  invoiceId: string | null;
+}) {
+  const { error } = await supabase.from("email_ingestion_events").insert({
+    restaurant_id: input.restaurantId,
+    message_id: input.messageId,
+    filename: input.filename,
+    mime_type: input.mimeType,
+    size_bytes: input.sizeBytes,
+    outcome: input.outcome,
+    reason: input.reason,
+    invoice_id: input.invoiceId,
+  });
+  if (error) throw new Error(`insert email_ingestion_events failed: ${error.message}`);
 }
 
 export async function createPendingInvoice(input: {
@@ -103,6 +153,8 @@ export async function createPendingInvoice(input: {
   fromEmail: string | null;
   subject: string | null;
   vendorId: string | null;
+  flags: string[];
+  senderAuthStatus: "pass" | "fail" | "unknown";
 }): Promise<string> {
   const { data, error } = await supabase
     .from("invoices")
@@ -114,6 +166,8 @@ export async function createPendingInvoice(input: {
       source_file_url: input.sourceFileUrl,
       source_email_from: input.fromEmail,
       source_email_subject: input.subject,
+      flags: input.flags,
+      sender_auth_status: input.senderAuthStatus,
     })
     .select("id")
     .single();

@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   AlertTriangle,
   ArrowDownRight,
@@ -87,6 +87,7 @@ import {
   useIngredients,
   useCategorySpend,
   dateInRange,
+  usePromoteSenderAndAssignVendor,
   useRealInvoiceLines,
   useRealInvoices,
   useSavingsSummary,
@@ -679,7 +680,10 @@ function InvoicesPage() {
                           <span className="text-muted-foreground">—</span>
                         )}
                       </TableCell>
-                      <TableCell>{ocrStatusBadge(inv.ocrStatus, inv.status)}</TableCell>
+                      <TableCell>
+                        {ocrStatusBadge(inv.ocrStatus, inv.status)}
+                        {flagBadges(inv.flags, inv.documentType)}
+                      </TableCell>
                       <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-1">
                           <Button size="sm" variant="ghost" className="h-8">
@@ -1048,6 +1052,61 @@ function ocrStatusBadge(ocrStatus: string | null, status: "pending_review" | "ap
   );
 }
 
+const FLAG_LABELS: Record<string, string> = {
+  unknown_sender: "Unknown sender",
+  sender_auth_failed: "Sender auth failed",
+  not_an_invoice: "Not an invoice",
+  totals_mismatch: "Totals don't match",
+  low_confidence: "Low confidence",
+  duplicate: "Possible duplicate",
+};
+
+const SKIP_REASON_LABELS: Record<string, string> = {
+  wrong_type: "Unsupported file type",
+  too_large: "File too large (>25MB)",
+  too_small: "File too small — likely a logo/signature",
+  no_attachment: "No attachment on this email",
+};
+
+// Sibling to ocrStatusBadge, not folded into it — that function is
+// single-purpose (OCR pipeline state: processing/ready/failed/
+// approved). Flags and document_type are a separate, cross-cutting
+// concern that can be true on top of any of those states.
+function flagBadges(flags: string[], documentType: string | null) {
+  const badges: ReactNode[] = [];
+  if (documentType === "credit_memo" || documentType === "statement") {
+    badges.push(
+      <Badge
+        key="doc-type"
+        variant="outline"
+        className="border-purple-200 bg-purple-50 text-purple-700"
+      >
+        {documentType === "credit_memo" ? "Credit memo" : "Statement"}
+      </Badge>,
+    );
+  }
+  for (const flag of flags) {
+    const label = FLAG_LABELS[flag];
+    if (!label) continue;
+    const severe = flag === "duplicate" || flag === "not_an_invoice";
+    badges.push(
+      <Badge
+        key={flag}
+        variant="outline"
+        className={
+          severe
+            ? "border-rose-200 bg-rose-50 text-rose-700"
+            : "border-amber-200 bg-amber-50 text-amber-800"
+        }
+      >
+        {label}
+      </Badge>,
+    );
+  }
+  if (badges.length === 0) return null;
+  return <div className="mt-1 flex flex-wrap gap-1">{badges}</div>;
+}
+
 function RealInvoiceUploadsCard({ onOpenInvoice }: { onOpenInvoice: (id: string) => void }) {
   const { data: invoices = [], isLoading } = useRealInvoices();
 
@@ -1090,7 +1149,10 @@ function RealInvoiceUploadsCard({ onOpenInvoice }: { onOpenInvoice: (id: string)
               <TableCell className="text-right font-medium">
                 {inv.totalCents != null ? formatMoney(inv.totalCents / 100) : "—"}
               </TableCell>
-              <TableCell>{ocrStatusBadge(inv.ocrStatus, inv.status)}</TableCell>
+              <TableCell>
+                {ocrStatusBadge(inv.ocrStatus, inv.status)}
+                {flagBadges(inv.flags, inv.documentType)}
+              </TableCell>
               <TableCell className="text-right">
                 <Button size="sm" variant="ghost" className="h-8">
                   Review
@@ -1551,11 +1613,25 @@ function SavingsTab({ dateRange }: { dateRange: DateRange }) {
 // processed_email_messages, and the real pending-review queue.
 // =====================================================
 
+// The From: header is "Display Name <address@domain.com>" (or just a
+// bare address) — same extraction email-ingest does server-side, kept
+// duplicated here since the frontend doesn't share code with the
+// Railway services.
+function extractEmailFromHeader(raw: string | null): string | null {
+  if (!raw) return null;
+  const match = raw.match(/<([^>]+)>/);
+  const candidate = (match ? match[1] : raw).trim().toLowerCase();
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(candidate) ? candidate : null;
+}
+
 function AutomationTab() {
   const { data: status } = useEmailIngestionStatus();
   const { data: activity = [] } = useEmailIngestionActivity();
   const { data: allInvoices = [] } = useRealInvoices();
+  const { data: vendors = [] } = useRealVendors();
+  const promoteSender = usePromoteSenderAndAssignVendor();
   const pending = allInvoices.filter((i) => i.status === "pending_review");
+  const unknownSenderQueue = allInvoices.filter((i) => i.flags.includes("unknown_sender"));
 
   return (
     <div className="space-y-4">
@@ -1591,6 +1667,68 @@ function AutomationTab() {
         </div>
       </Card>
 
+      {unknownSenderQueue.length > 0 && (
+        <Card className="border-amber-200 bg-amber-50/40 p-5">
+          <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-amber-800">
+            <AlertTriangle className="h-3.5 w-3.5" /> Unknown sender queue
+          </div>
+          <h3 className="mt-1 font-display text-xl">
+            {unknownSenderQueue.length} invoice{unknownSenderQueue.length === 1 ? "" : "s"} from an
+            unrecognized sender
+          </h3>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Pick the real vendor for each — the sender gets remembered on that vendor's invoicing
+            list, so future emails from them are matched automatically.
+          </p>
+          <div className="mt-4 space-y-3">
+            {unknownSenderQueue.map((inv) => {
+              const senderEmail = extractEmailFromHeader(inv.sourceEmailFrom);
+              return (
+                <div key={inv.id} className="rounded-xl border border-amber-200 bg-white p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium">
+                        {inv.sourceEmailFrom ?? "Unknown sender"}
+                      </div>
+                      {inv.sourceEmailSubject && (
+                        <div className="truncate text-xs text-muted-foreground">
+                          {inv.sourceEmailSubject}
+                        </div>
+                      )}
+                    </div>
+                    <div className="font-display text-sm">
+                      {inv.totalCents != null ? formatMoney(inv.totalCents / 100) : "—"}
+                    </div>
+                  </div>
+                  <select
+                    defaultValue=""
+                    disabled={promoteSender.isPending}
+                    onChange={(e) => {
+                      if (e.target.value) {
+                        promoteSender.mutate({
+                          invoiceId: inv.id,
+                          vendorId: e.target.value,
+                          currentFlags: inv.flags,
+                          senderEmail,
+                        });
+                      }
+                    }}
+                    className="mt-2.5 h-9 w-full rounded-md border border-amber-300 bg-white px-3 text-sm"
+                  >
+                    <option value="">Assign vendor &amp; remember this sender…</option>
+                    {vendors.map((v) => (
+                      <option key={v.id} value={v.id}>
+                        {v.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+      )}
+
       <div className="grid gap-4 lg:grid-cols-3">
         <Card className="p-5 lg:col-span-2">
           <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
@@ -1601,22 +1739,31 @@ function AutomationTab() {
             {activity.map((e) => (
               <div key={e.id} className="border-l-2 border-primary/40 pl-3">
                 <div className="text-xs text-muted-foreground">
-                  {new Date(e.processedAt).toLocaleString()}
+                  {new Date(e.createdAt).toLocaleString()}
                 </div>
-                <div className="mt-0.5 flex items-center gap-2">
+                <div className="mt-0.5 flex flex-wrap items-center gap-2">
                   <span className="text-sm font-medium">
-                    {e.vendorName ?? (e.invoiceId ? "Needs vendor" : "No PDF found")}
+                    {e.vendorName ?? (e.invoiceId ? "Needs vendor" : (e.filename ?? "No attachment"))}
                   </span>
-                  {e.invoiceId ? (
-                    <Badge variant="outline" className="border-sky-200 bg-sky-50 text-sky-700">
-                      Invoice created
-                    </Badge>
+                  {e.outcome === "processed" ? (
+                    e.flags.length > 0 ? (
+                      <Badge
+                        variant="outline"
+                        className="border-amber-200 bg-amber-50 text-amber-800"
+                      >
+                        Flagged: {e.flags.map((f) => FLAG_LABELS[f] ?? f).join(", ")}
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline" className="border-sky-200 bg-sky-50 text-sky-700">
+                        Invoice created
+                      </Badge>
+                    )
                   ) : (
                     <Badge
                       variant="outline"
                       className="border-muted bg-muted/40 text-muted-foreground"
                     >
-                      Skipped
+                      Skipped: {SKIP_REASON_LABELS[e.reason] ?? e.reason}
                     </Badge>
                   )}
                 </div>

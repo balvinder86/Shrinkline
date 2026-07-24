@@ -1017,6 +1017,14 @@ export type RealInvoice = {
   // go on when picking the vendor, instead of guessing blind.
   sourceEmailFrom: string | null;
   sourceEmailSubject: string | null;
+  // Issues on an otherwise-real invoice (unknown_sender,
+  // sender_auth_failed, not_an_invoice, totals_mismatch,
+  // low_confidence, duplicate) — can co-occur, hence an array.
+  flags: string[];
+  // What kind of document this is; a credit memo or statement is
+  // never a normal invoice regardless of anything else, so this is a
+  // separate axis from `flags`, not folded into it.
+  documentType: string | null;
 };
 
 export function useRealInvoices() {
@@ -1028,7 +1036,7 @@ export function useRealInvoices() {
       const { data, error } = await supabase
         .from("invoices")
         .select(
-          "id, vendor_id, invoice_number, invoice_date, total_cents, discount_cents, status, ocr_status, source_file_url, created_at, source_email_from, source_email_subject, vendors(name)",
+          "id, vendor_id, invoice_number, invoice_date, total_cents, discount_cents, status, ocr_status, source_file_url, created_at, source_email_from, source_email_subject, flags, document_type, vendors(name)",
         )
         .order("created_at", { ascending: false });
       if (error) throw error;
@@ -1045,6 +1053,8 @@ export function useRealInvoices() {
         created_at: string;
         source_email_from: string | null;
         source_email_subject: string | null;
+        flags: string[] | null;
+        document_type: string | null;
         vendors: { name: string } | null;
       };
       return ((data ?? []) as unknown as Row[]).map((row) => ({
@@ -1061,6 +1071,8 @@ export function useRealInvoices() {
         createdAt: row.created_at,
         sourceEmailFrom: row.source_email_from,
         sourceEmailSubject: row.source_email_subject,
+        flags: row.flags ?? [],
+        documentType: row.document_type,
       }));
     },
   });
@@ -1150,6 +1162,61 @@ export function useSetInvoiceVendor() {
       queryClient.invalidateQueries({ queryKey: ["savings-summary"] });
       queryClient.invalidateQueries({ queryKey: ["top-line-items"] });
       queryClient.invalidateQueries({ queryKey: ["category-spend"] });
+    },
+  });
+}
+
+// One-click action from the Unknown sender queue: assigns the vendor
+// AND remembers this sender for next time, both in one mutation.
+// Always appends the exact sender address (never a domain), so this
+// path can never violate the free-email-provider rule the manual
+// vendor-edit path enforces — there's no extra guard needed here.
+export function usePromoteSenderAndAssignVendor() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      invoiceId,
+      vendorId,
+      currentFlags,
+      senderEmail,
+    }: {
+      invoiceId: string;
+      vendorId: string;
+      currentFlags: string[];
+      senderEmail: string | null;
+    }) => {
+      // Both sender-trust flags are resolved by this action — a human
+      // just explicitly vouched for this sender on this vendor.
+      const nextFlags = currentFlags.filter(
+        (f) => f !== "unknown_sender" && f !== "sender_auth_failed",
+      );
+      const { error: invoiceError } = await supabase
+        .from("invoices")
+        .update({ vendor_id: vendorId, flags: nextFlags })
+        .eq("id", invoiceId);
+      if (invoiceError) throw invoiceError;
+
+      if (senderEmail) {
+        const { data: vendor, error: vendorReadError } = await supabase
+          .from("vendors")
+          .select("invoicing_sender_emails")
+          .eq("id", vendorId)
+          .single();
+        if (vendorReadError) throw vendorReadError;
+        const existing: string[] = vendor?.invoicing_sender_emails ?? [];
+        const normalized = senderEmail.trim().toLowerCase();
+        if (!existing.some((e) => e.toLowerCase() === normalized)) {
+          const { error: vendorWriteError } = await supabase
+            .from("vendors")
+            .update({ invoicing_sender_emails: [...existing, normalized] })
+            .eq("id", vendorId);
+          if (vendorWriteError) throw vendorWriteError;
+        }
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["real-invoices"] });
+      queryClient.invalidateQueries({ queryKey: ["vendors"] });
     },
   });
 }
@@ -1532,12 +1599,24 @@ export function useEmailIngestionStatus() {
   });
 }
 
+// One row per attachment candidate email-ingest ever evaluated
+// (whether it became an invoice or was rejected before OCR), sourced
+// from email_ingestion_events — the per-attachment audit log the
+// agent-rules spec requires ("log every decision"). Replaces the old
+// processed_email_messages-backed feed, which was message-level only
+// and had no column for *why* something was skipped.
+// processed_email_messages itself is unchanged — it's still the
+// dedup table, a separate concern from this activity feed.
 export type EmailIngestionEvent = {
   id: string;
-  processedAt: string;
+  createdAt: string;
+  outcome: "processed" | "skipped";
+  reason: string;
+  filename: string | null;
   invoiceId: string | null;
   vendorName: string | null;
   totalCents: number | null;
+  flags: string[];
 };
 
 export function useEmailIngestionActivity() {
@@ -1547,23 +1626,36 @@ export function useEmailIngestionActivity() {
     enabled: !!restaurantId,
     queryFn: async (): Promise<EmailIngestionEvent[]> => {
       const { data, error } = await supabase
-        .from("processed_email_messages")
-        .select("id, processed_at, invoice_id, invoices(total_cents, vendors(name))")
-        .order("processed_at", { ascending: false })
+        .from("email_ingestion_events")
+        .select(
+          "id, created_at, outcome, reason, filename, invoice_id, invoices(total_cents, flags, vendors(name))",
+        )
+        .order("created_at", { ascending: false })
         .limit(20);
       if (error) throw error;
       type Row = {
         id: string;
-        processed_at: string;
+        created_at: string;
+        outcome: "processed" | "skipped";
+        reason: string;
+        filename: string | null;
         invoice_id: string | null;
-        invoices: { total_cents: number | null; vendors: { name: string } | null } | null;
+        invoices: {
+          total_cents: number | null;
+          flags: string[] | null;
+          vendors: { name: string } | null;
+        } | null;
       };
       return ((data ?? []) as unknown as Row[]).map((row) => ({
         id: row.id,
-        processedAt: row.processed_at,
+        createdAt: row.created_at,
+        outcome: row.outcome,
+        reason: row.reason,
+        filename: row.filename,
         invoiceId: row.invoice_id,
         vendorName: row.invoices?.vendors?.name ?? null,
         totalCents: row.invoices?.total_cents ?? null,
+        flags: row.invoices?.flags ?? [],
       }));
     },
   });

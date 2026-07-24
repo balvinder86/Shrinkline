@@ -19,8 +19,19 @@ export type MindeeLineItem = {
   unit_price: number | null;
 };
 
-export async function enqueue(fileBuffer: Buffer, filename: string): Promise<{ jobId: string }> {
-  const blob = new Blob([Uint8Array.from(fileBuffer)], { type: "application/pdf" });
+// Was hardcoded to application/pdf regardless of the actual file —
+// harmless while only PDFs ever reached this function, but wrong now
+// that email-ingest's attachment gate also allows JPG/PNG. Whether
+// this custom-trained Mindee model actually extracts line items from
+// an image (vs. just PDFs) is unverified — if it rejects the upload,
+// the existing ocr_status='failed' path already surfaces that for
+// human review, so there's no new failure mode to build for.
+export async function enqueue(
+  fileBuffer: Buffer,
+  filename: string,
+  mimeType: string = "application/pdf",
+): Promise<{ jobId: string }> {
+  const blob = new Blob([Uint8Array.from(fileBuffer)], { type: mimeType });
   const form = new FormData();
   form.set("model_id", MINDEE_MODEL_ID);
   form.set("file", blob, filename);
@@ -52,10 +63,20 @@ export type JobCheckResult =
       date: string | null;
       totalAmount: number | null;
       lineItems: MindeeLineItem[];
+      // Best-effort — average of the 4 key fields' confidence, only
+      // when Mindee actually returns a `.confidence` on every one of
+      // them (unverified whether this custom model does). null means
+      // "no confidence signal available," not "low confidence" — the
+      // caller must not treat null as a flag-worthy value.
+      confidence: number | null;
     };
 
 function fieldValue(field: any): any {
   return field?.value ?? null;
+}
+
+function fieldConfidence(field: any): number | null {
+  return typeof field?.confidence === "number" ? field.confidence : null;
 }
 
 export async function checkJob(jobId: string): Promise<JobCheckResult> {
@@ -90,6 +111,13 @@ export async function checkJob(jobId: string): Promise<JobCheckResult> {
   const fields = resultBody?.inference?.result?.fields;
   if (!fields) throw new Error(`unexpected result shape: ${JSON.stringify(resultBody)}`);
 
+  const keyFieldConfidences = [
+    fieldConfidence(fields.supplier_name),
+    fieldConfidence(fields.invoice_number),
+    fieldConfidence(fields.date),
+    fieldConfidence(fields.total_amount),
+  ].filter((c): c is number => c !== null);
+
   return {
     status: "ready",
     supplierName: fieldValue(fields.supplier_name),
@@ -107,5 +135,9 @@ export async function checkJob(jobId: string): Promise<JobCheckResult> {
         unit_price: fieldValue(f.unit_price),
       };
     }),
+    confidence:
+      keyFieldConfidences.length === 4
+        ? keyFieldConfidences.reduce((a, b) => a + b, 0) / keyFieldConfidences.length
+        : null,
   };
 }

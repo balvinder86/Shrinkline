@@ -41,16 +41,26 @@ type GmailPart = {
   parts?: GmailPart[];
 };
 
+export type AttachmentCandidate = {
+  filename: string;
+  attachmentId: string;
+  mimeType: string | null;
+  sizeBytes: number | null;
+};
+
+export type SenderAuthStatus = "pass" | "fail" | "unknown";
+
 export type ParsedMessage = {
   fromEmail: string | null;
   subject: string | null;
-  pdfAttachments: { filename: string; attachmentId: string }[];
+  senderAuthStatus: SenderAuthStatus;
+  attachments: AttachmentCandidate[];
 };
 
 // The From: header is "Display Name <address@domain.com>" (or just a
 // bare address) — pull out the plain address so it can be matched
-// against a vendor's invoicing_sender_emails, which is a list of
-// plain addresses, not header strings.
+// against a vendor's invoicing_senders list, not the (spoofable)
+// display name.
 export function extractEmailAddress(raw: string | null): string | null {
   if (!raw) return null;
   const angleMatch = raw.match(/<([^>]+)>/);
@@ -58,13 +68,42 @@ export function extractEmailAddress(raw: string | null): string | null {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(candidate) ? candidate : null;
 }
 
-function findPdfAttachments(part: GmailPart | undefined, acc: { filename: string; attachmentId: string }[]) {
-  if (!part) return;
-  const isPdf = part.mimeType === "application/pdf" || (part.filename?.toLowerCase().endsWith(".pdf") ?? false);
-  if (isPdf && part.body?.attachmentId) {
-    acc.push({ filename: part.filename || "invoice.pdf", attachmentId: part.body.attachmentId });
+// Gmail's own Authentication-Results header records the receiving
+// server's SPF/DKIM/DMARC verdicts on the actual envelope, which is
+// the closest thing to "did this really come from where it claims"
+// available without running our own auth checks. Any single "fail"
+// wins (conservative); "unknown" if the header is absent or none of
+// the three mechanisms are present in it.
+function parseSenderAuthStatus(headerValue: string | null): SenderAuthStatus {
+  if (!headerValue) return "unknown";
+  const results: SenderAuthStatus[] = [];
+  for (const mechanism of ["spf", "dkim", "dmarc"]) {
+    const match = headerValue.match(new RegExp(`\\b${mechanism}=([a-z]+)`, "i"));
+    if (!match) continue;
+    const verdict = match[1].toLowerCase();
+    results.push(verdict === "pass" ? "pass" : verdict === "fail" ? "fail" : "unknown");
   }
-  for (const child of part.parts ?? []) findPdfAttachments(child, acc);
+  if (results.length === 0) return "unknown";
+  if (results.includes("fail")) return "fail";
+  return results.every((r) => r === "pass") ? "pass" : "unknown";
+}
+
+// Collects every real attachment part (has attachmentId — excludes
+// inline content like a signature image referenced but not attached)
+// regardless of type; the attachment gate (type/size allow-list)
+// runs downstream in index.ts, not here — this just reports what's
+// actually on the message.
+function findAllAttachments(part: GmailPart | undefined, acc: AttachmentCandidate[]) {
+  if (!part) return;
+  if (part.body?.attachmentId) {
+    acc.push({
+      filename: part.filename || "attachment",
+      attachmentId: part.body.attachmentId,
+      mimeType: part.mimeType ?? null,
+      sizeBytes: part.body.size ?? null,
+    });
+  }
+  for (const child of part.parts ?? []) findAllAttachments(child, acc);
 }
 
 export async function getMessage(accessToken: string, messageId: string): Promise<ParsedMessage> {
@@ -76,11 +115,17 @@ export async function getMessage(accessToken: string, messageId: string): Promis
   const headers: { name: string; value: string }[] = body.payload?.headers ?? [];
   const fromHeader = headers.find((h) => h.name.toLowerCase() === "from")?.value ?? null;
   const subjectHeader = headers.find((h) => h.name.toLowerCase() === "subject")?.value ?? null;
+  const authHeader = headers.find((h) => h.name.toLowerCase() === "authentication-results")?.value ?? null;
 
-  const pdfAttachments: { filename: string; attachmentId: string }[] = [];
-  findPdfAttachments(body.payload, pdfAttachments);
+  const attachments: AttachmentCandidate[] = [];
+  findAllAttachments(body.payload, attachments);
 
-  return { fromEmail: fromHeader, subject: subjectHeader, pdfAttachments };
+  return {
+    fromEmail: fromHeader,
+    subject: subjectHeader,
+    senderAuthStatus: parseSenderAuthStatus(authHeader),
+    attachments,
+  };
 }
 
 export async function getAttachmentBytes(accessToken: string, messageId: string, attachmentId: string): Promise<Buffer> {
@@ -90,4 +135,36 @@ export async function getAttachmentBytes(accessToken: string, messageId: string,
   if (!res.ok || !body.data) throw new Error(`get attachment failed (${res.status}): ${JSON.stringify(body)}`);
   // Gmail attachment data is base64url-encoded.
   return Buffer.from(body.data, "base64url");
+}
+
+// ------------------------------------------------------------
+// Attachment gate — allow-list of types the pipeline can actually
+// review (PDF for now, JPG/PNG reach Claude's document-type
+// classification either way; whether Mindee's custom model can
+// extract line items from an image is unverified, see ocr/src/mindee.ts).
+// Refuse everything else (exe/zip/html/macro Office docs etc) rather
+// than silently ignoring it, and gate on size so multi-MB noise and
+// tiny signature/logo images never reach OCR.
+// ------------------------------------------------------------
+export const MAX_ATTACHMENT_SIZE_BYTES = 25 * 1024 * 1024; // 25 MB
+export const MIN_ATTACHMENT_SIZE_BYTES = 20 * 1024; // 20 KB — below this is almost always a signature/logo image, not a document
+
+const ALLOWED_ATTACHMENT_MIME_TYPES = new Set(["application/pdf", "image/jpeg", "image/jpg", "image/png"]);
+
+export function isAllowedAttachmentType(candidate: AttachmentCandidate): boolean {
+  const mime = candidate.mimeType?.toLowerCase();
+  if (mime && ALLOWED_ATTACHMENT_MIME_TYPES.has(mime)) return true;
+  const name = candidate.filename.toLowerCase();
+  return name.endsWith(".pdf") || name.endsWith(".jpg") || name.endsWith(".jpeg") || name.endsWith(".png");
+}
+
+// Type gate returns a normalized mime type for downstream use (Claude
+// classification and, eventually, Mindee) even when Gmail only gave
+// us a filename to go on.
+export function normalizedMimeType(candidate: AttachmentCandidate): string {
+  if (candidate.mimeType) return candidate.mimeType.toLowerCase();
+  const name = candidate.filename.toLowerCase();
+  if (name.endsWith(".pdf")) return "application/pdf";
+  if (name.endsWith(".png")) return "image/png";
+  return "image/jpeg";
 }

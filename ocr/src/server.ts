@@ -22,6 +22,7 @@ import {
   insertInvoiceLine,
   listStuckInvoices,
   listNeverEnqueuedInvoices,
+  mimeTypeFromPath,
 } from "./db.js";
 import { enqueue, checkJob } from "./mindee.js";
 
@@ -41,7 +42,7 @@ async function handleEnqueue(invoiceId: string) {
   if (!invoice.source_file_url) throw new Error("invoice has no source_file_url");
   const fileBuffer = await downloadInvoiceFile(invoice.source_file_url);
   const filename = invoice.source_file_url.split("/").pop() ?? "invoice.pdf";
-  const { jobId } = await enqueue(fileBuffer, filename);
+  const { jobId } = await enqueue(fileBuffer, filename, mimeTypeFromPath(invoice.source_file_url));
   await setEnqueued(invoiceId, jobId);
   return { jobId };
 }
@@ -57,7 +58,7 @@ async function handleCheck(invoiceId: string) {
     return { status: "failed", error: result.error };
   }
 
-  await persistResult(invoice, result);
+  const outcome = await persistResult(invoice, result);
 
   const insertedLines = [];
   for (const item of result.lineItems) {
@@ -80,6 +81,9 @@ async function handleCheck(invoiceId: string) {
     totalAmount: result.totalAmount,
     lineItemsExtracted: insertedLines.length,
     lineItemsAutoMatched: insertedLines.filter((l) => l.matched).length,
+    flags: outcome.flags,
+    documentType: outcome.documentType,
+    vendorId: outcome.vendorId,
   };
 }
 
