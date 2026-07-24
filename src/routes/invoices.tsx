@@ -58,6 +58,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Table,
   TableBody,
@@ -81,6 +82,7 @@ import {
   useApproveInvoice,
   useCheckOcr,
   useDeleteInvoice,
+  useDeleteInvoices,
   useEmailIngestionActivity,
   useEmailIngestionStatus,
   useEnqueueOcr,
@@ -450,6 +452,44 @@ function InvoicesPage() {
     [filteredInvoices, page],
   );
 
+  // Selection persists across page turns (same "build it up across
+  // several views, act once" shape as Inventory's bulk vendor assign)
+  // — "select all" toggles only the current page, since deleting is
+  // destructive enough that silently selecting every filtered invoice
+  // across every page from one click would be too easy to fire by
+  // accident.
+  const [selectedInvoiceIds, setSelectedInvoiceIds] = useState<Set<string>>(new Set());
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  const toggleInvoiceSelected = (id: string, checked: boolean) => {
+    setSelectedInvoiceIds((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  };
+  const allPagedSelected =
+    pagedInvoices.length > 0 && pagedInvoices.every((inv) => selectedInvoiceIds.has(inv.id));
+  const toggleSelectAllPaged = (checked: boolean) => {
+    setSelectedInvoiceIds((prev) => {
+      const next = new Set(prev);
+      for (const inv of pagedInvoices) {
+        if (checked) next.add(inv.id);
+        else next.delete(inv.id);
+      }
+      return next;
+    });
+  };
+  const deleteInvoices = useDeleteInvoices();
+  const selectedInvoices = filteredInvoices.filter((inv) => selectedInvoiceIds.has(inv.id));
+  const confirmBulkDelete = () => {
+    deleteInvoices.mutate(
+      selectedInvoices.map((inv) => ({ id: inv.id, sourceFileUrl: inv.sourceFileUrl })),
+      { onSuccess: () => setSelectedInvoiceIds(new Set()) },
+    );
+    setBulkDeleteOpen(false);
+  };
+
   return (
     <>
       <Topbar eyebrow="Accounts payable" title="Invoices" />
@@ -697,14 +737,48 @@ function InvoicesPage() {
               </div>
             </Card>
 
+            {selectedInvoiceIds.size > 0 && (
+              <Card className="border-primary/30 bg-primary/[0.04] p-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-sm font-medium">
+                    {selectedInvoiceIds.size} invoice{selectedInvoiceIds.size === 1 ? "" : "s"}{" "}
+                    selected
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    className="gap-1.5"
+                    onClick={() => setBulkDeleteOpen(true)}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" /> Delete selected
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setSelectedInvoiceIds(new Set())}
+                  >
+                    Clear selection
+                  </Button>
+                </div>
+              </Card>
+            )}
+
             <Card className="overflow-hidden">
               <Table>
                 <TableHeader>
                   <TableRow className="bg-muted/40">
+                    <TableHead className="w-[44px]">
+                      <Checkbox
+                        checked={allPagedSelected}
+                        onCheckedChange={(checked) => toggleSelectAllPaged(checked === true)}
+                        aria-label="Select all invoices on this page"
+                      />
+                    </TableHead>
                     <TableHead>Vendor</TableHead>
                     <TableHead>Invoice #</TableHead>
                     <TableHead>Date</TableHead>
                     <TableHead className="text-right">Total</TableHead>
+                    <TableHead className="text-right">Savings</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead />
                   </TableRow>
@@ -716,6 +790,15 @@ function InvoicesPage() {
                       className="cursor-pointer"
                       onClick={() => setOcrSheetInvoiceId(inv.id)}
                     >
+                      <TableCell onClick={(e) => e.stopPropagation()}>
+                        <Checkbox
+                          checked={selectedInvoiceIds.has(inv.id)}
+                          onCheckedChange={(checked) =>
+                            toggleInvoiceSelected(inv.id, checked === true)
+                          }
+                          aria-label={`Select invoice${inv.vendorName ? ` from ${inv.vendorName}` : ""}`}
+                        />
+                      </TableCell>
                       <TableCell className="font-medium">
                         {inv.vendorName ?? (
                           <Badge
@@ -730,6 +813,15 @@ function InvoicesPage() {
                       <TableCell className="text-sm">{inv.invoiceDate ?? "—"}</TableCell>
                       <TableCell className="text-right font-medium">
                         {inv.totalCents != null ? formatMoney(inv.totalCents / 100) : "—"}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {inv.discountCents ? (
+                          <span className="text-emerald-700">
+                            {formatMoney(inv.discountCents / 100)}
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
                       </TableCell>
                       <TableCell>{ocrStatusBadge(inv.ocrStatus, inv.status)}</TableCell>
                       <TableCell className="text-right">
@@ -756,7 +848,7 @@ function InvoicesPage() {
                   {filteredInvoices.length === 0 && (
                     <TableRow>
                       <TableCell
-                        colSpan={6}
+                        colSpan={8}
                         className="py-10 text-center text-sm text-muted-foreground"
                       >
                         {isDateFiltered
@@ -1032,6 +1124,30 @@ function InvoicesPage() {
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               Delete invoice
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={bulkDeleteOpen} onOpenChange={setBulkDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Delete {selectedInvoices.length} invoice{selectedInvoices.length === 1 ? "" : "s"}?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Removes each invoice, its line items, and any uploaded file.
+              {selectedInvoices.some((inv) => inv.status === "approved") &&
+                " Some of these were approved — deleting them will also remove their spend from every KPI, savings, and vendor total on this page."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmBulkDelete}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete {selectedInvoices.length} invoice{selectedInvoices.length === 1 ? "" : "s"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

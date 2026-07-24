@@ -1084,6 +1084,43 @@ export function useDeleteInvoice() {
   });
 }
 
+// Same real deletion as useDeleteInvoice, just batched — one
+// .in("id", ids) delete for the rows plus one storage .remove() call
+// for every uploaded file, instead of N round trips for a multi-select
+// delete.
+export function useDeleteInvoices() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (invoices: { id: string; sourceFileUrl: string | null }[]) => {
+      if (invoices.length === 0) return;
+      const { error } = await supabase
+        .from("invoices")
+        .delete()
+        .in(
+          "id",
+          invoices.map((i) => i.id),
+        );
+      if (error) throw error;
+
+      const sourceFileUrls = invoices
+        .map((i) => i.sourceFileUrl)
+        .filter((url): url is string => !!url);
+      if (sourceFileUrls.length > 0) {
+        // Best-effort — a storage cleanup failure shouldn't block the
+        // real deletion the user asked for, which already succeeded.
+        await supabase.storage.from("invoice-uploads").remove(sourceFileUrls);
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["real-invoices"] });
+      queryClient.invalidateQueries({ queryKey: ["vendor-spend-summary"] });
+      queryClient.invalidateQueries({ queryKey: ["savings-summary"] });
+      queryClient.invalidateQueries({ queryKey: ["top-line-items"] });
+      queryClient.invalidateQueries({ queryKey: ["category-spend"] });
+    },
+  });
+}
+
 export function useSetInvoiceVendor() {
   const queryClient = useQueryClient();
   return useMutation({
