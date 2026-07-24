@@ -47,6 +47,17 @@ export type ParsedMessage = {
   pdfAttachments: { filename: string; attachmentId: string }[];
 };
 
+// The From: header is "Display Name <address@domain.com>" (or just a
+// bare address) — pull out the plain address so it can be matched
+// against a vendor's invoicing_sender_emails, which is a list of
+// plain addresses, not header strings.
+export function extractEmailAddress(raw: string | null): string | null {
+  if (!raw) return null;
+  const angleMatch = raw.match(/<([^>]+)>/);
+  const candidate = (angleMatch ? angleMatch[1] : raw).trim().toLowerCase();
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(candidate) ? candidate : null;
+}
+
 function findPdfAttachments(part: GmailPart | undefined, acc: { filename: string; attachmentId: string }[]) {
   if (!part) return;
   const isPdf = part.mimeType === "application/pdf" || (part.filename?.toLowerCase().endsWith(".pdf") ?? false);

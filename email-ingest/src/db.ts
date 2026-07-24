@@ -77,19 +77,39 @@ export async function uploadInvoicePdf(restaurantId: string, filename: string, b
   return path;
 }
 
+// Matches a sender address (already lowercased, plain — see
+// extractEmailAddress) against vendors.invoicing_sender_emails, which
+// the app normalizes to lowercase on write, so this is a plain
+// case-sensitive array-containment lookup, no citext needed.
+export async function findVendorIdBySenderEmail(
+  restaurantId: string,
+  senderEmail: string,
+): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("vendors")
+    .select("id")
+    .eq("restaurant_id", restaurantId)
+    .contains("invoicing_sender_emails", [senderEmail])
+    .limit(1)
+    .maybeSingle();
+  if (error) throw new Error(`vendor lookup by sender email failed: ${error.message}`);
+  return data?.id ?? null;
+}
+
 export async function createPendingInvoice(input: {
   restaurantId: string;
   locationId: string;
   sourceFileUrl: string;
   fromEmail: string | null;
   subject: string | null;
+  vendorId: string | null;
 }): Promise<string> {
   const { data, error } = await supabase
     .from("invoices")
     .insert({
       restaurant_id: input.restaurantId,
       location_id: input.locationId,
-      vendor_id: null,
+      vendor_id: input.vendorId,
       status: "pending_review",
       source_file_url: input.sourceFileUrl,
       source_email_from: input.fromEmail,

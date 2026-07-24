@@ -31,6 +31,12 @@ export type Vendor = {
   deliveryDays: string;
   terms: string;
   notes?: string;
+  // Inbound addresses this vendor's invoices actually arrive from
+  // (distinct from `email`, the outbound order-contact address) —
+  // email-ingest matches an incoming message's From: header against
+  // this list to auto-assign vendor_id instead of leaving every
+  // email-ingested invoice for manual review.
+  invoicingSenderEmails: string[];
 };
 
 function fromRow(row: any): Vendor {
@@ -44,6 +50,7 @@ function fromRow(row: any): Vendor {
     deliveryDays: row.delivery_days ?? "",
     terms: row.payment_terms ?? "",
     notes: row.notes ?? undefined,
+    invoicingSenderEmails: row.invoicing_sender_emails ?? [],
   };
 }
 
@@ -72,6 +79,12 @@ function toRow(input: VendorInput) {
     delivery_days: input.deliveryDays || null,
     payment_terms: input.terms || null,
     notes: input.notes || null,
+    // Normalized here (not just trimmed) so email-ingest's lookup can
+    // do a plain case-sensitive array match against a lowercased
+    // From: address, no matter how the user typed it in the UI.
+    invoicing_sender_emails: (input.invoicingSenderEmails ?? [])
+      .map((e) => e.trim().toLowerCase())
+      .filter(Boolean),
   };
 }
 
@@ -1131,7 +1144,13 @@ export function useSetInvoiceVendor() {
         .eq("id", invoiceId);
       if (error) throw error;
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["real-invoices"] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["real-invoices"] });
+      queryClient.invalidateQueries({ queryKey: ["vendor-spend-summary"] });
+      queryClient.invalidateQueries({ queryKey: ["savings-summary"] });
+      queryClient.invalidateQueries({ queryKey: ["top-line-items"] });
+      queryClient.invalidateQueries({ queryKey: ["category-spend"] });
+    },
   });
 }
 
@@ -1151,7 +1170,10 @@ export function useSetInvoiceDiscount() {
         .eq("id", invoiceId);
       if (error) throw error;
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["real-invoices"] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["real-invoices"] });
+      queryClient.invalidateQueries({ queryKey: ["savings-summary"] });
+    },
   });
 }
 
@@ -1717,6 +1739,10 @@ export function useApproveInvoice() {
       queryClient.invalidateQueries({ queryKey: ["ingredients"] });
       queryClient.invalidateQueries({ queryKey: ["inventory-items"] });
       queryClient.invalidateQueries({ queryKey: ["food-cost-summary"] });
+      queryClient.invalidateQueries({ queryKey: ["vendor-spend-summary"] });
+      queryClient.invalidateQueries({ queryKey: ["savings-summary"] });
+      queryClient.invalidateQueries({ queryKey: ["top-line-items"] });
+      queryClient.invalidateQueries({ queryKey: ["category-spend"] });
     },
   });
 }
@@ -1737,6 +1763,10 @@ export function useUpdateInvoiceLineIngredient() {
         .eq("id", lineId);
       if (error) throw error;
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["real-invoice-lines"] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["real-invoice-lines"] });
+      queryClient.invalidateQueries({ queryKey: ["top-line-items"] });
+      queryClient.invalidateQueries({ queryKey: ["category-spend"] });
+    },
   });
 }

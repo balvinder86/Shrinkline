@@ -1,4 +1,10 @@
-import { refreshAccessToken, listMessages, getMessage, getAttachmentBytes } from "./gmail.js";
+import {
+  refreshAccessToken,
+  listMessages,
+  getMessage,
+  getAttachmentBytes,
+  extractEmailAddress,
+} from "./gmail.js";
 import {
   getEmailCredentials,
   getVaultSecret,
@@ -7,6 +13,7 @@ import {
   getFirstLocationId,
   uploadInvoicePdf,
   createPendingInvoice,
+  findVendorIdBySenderEmail,
   updateLastSyncedAt,
   enqueueOcr,
   type EmailCredential,
@@ -55,6 +62,15 @@ async function syncCredential(cred: EmailCredential) {
       const locationId = await getFirstLocationId(cred.restaurant_id);
       let lastInvoiceId: string | null = null;
 
+      // Looked up once per message (same sender for every attachment
+      // on it) rather than per-attachment — a vendor match here just
+      // pre-fills vendor_id; the reviewer can still change it in the
+      // UI like any other invoice.
+      const senderEmail = extractEmailAddress(parsed.fromEmail);
+      const matchedVendorId = senderEmail
+        ? await findVendorIdBySenderEmail(cred.restaurant_id, senderEmail)
+        : null;
+
       for (const attachment of parsed.pdfAttachments) {
         const bytes = await getAttachmentBytes(accessToken, messageId, attachment.attachmentId);
         const sourceFileUrl = await uploadInvoicePdf(
@@ -68,6 +84,7 @@ async function syncCredential(cred: EmailCredential) {
           sourceFileUrl,
           fromEmail: parsed.fromEmail,
           subject: parsed.subject,
+          vendorId: matchedVendorId,
         });
         // The invoice row already exists at this point — if enqueueOcr
         // fails (e.g. Mindee's own subscription lapsed, nothing to do
@@ -88,7 +105,8 @@ async function syncCredential(cred: EmailCredential) {
         lastInvoiceId = invoiceId;
         created++;
         console.log(
-          `[email-ingest] ${cred.connected_email}: created invoice ${invoiceId} from "${parsed.subject}" (${attachment.filename})`,
+          `[email-ingest] ${cred.connected_email}: created invoice ${invoiceId} from "${parsed.subject}" (${attachment.filename})` +
+            (matchedVendorId ? ` — matched vendor ${matchedVendorId}` : " — no vendor match"),
         );
       }
 

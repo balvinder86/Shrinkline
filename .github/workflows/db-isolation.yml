@@ -140,6 +140,9 @@ jobs:
       - name: Apply Phase 2 membership permissions column
         run: $PSQL -f db/phase2/42_membership_permissions.sql
 
+      - name: Apply Phase 2 vendor invoicing sender emails column
+        run: $PSQL -f db/phase2/43_vendor_invoicing_senders.sql
+
       - name: Seed test tenants
         run: $PSQL -f db/phase0/02_seed.sql
 

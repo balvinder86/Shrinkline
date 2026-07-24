@@ -331,7 +331,13 @@ function InventoryPage() {
     deliveryDays: "",
     terms: "Net 30",
     notes: "",
+    invoicingSenderEmails: [],
   });
+  // Kept as free-typed text, not the draft's string[] directly — parsing
+  // every keystroke into an array and joining it back for display would
+  // fight the cursor position while typing "a, b, ". Parsed into
+  // vendorDraft.invoicingSenderEmails only in saveVendor.
+  const [vendorSenderEmailsText, setVendorSenderEmailsText] = useState("");
   const [vendorToDelete, setVendorToDelete] = useState<Vendor | null>(null);
 
   const vendorNames = useMemo(() => vendors.map((v) => v.name), [vendors]);
@@ -544,26 +550,33 @@ function InventoryPage() {
       deliveryDays: "",
       terms: "Net 30",
       notes: "",
+      invoicingSenderEmails: [],
     });
+    setVendorSenderEmailsText("");
     setVendorDialogOpen(true);
   };
   const openEditVendor = (v: Vendor) => {
     setVendorEditing(v);
     const { id: _id, ...rest } = v;
     setVendorDraft(rest);
+    setVendorSenderEmailsText(v.invoicingSenderEmails.join(", "));
     setVendorDialogOpen(true);
   };
   const saveVendor = () => {
     if (!vendorDraft.name.trim()) return;
     const name = vendorDraft.name.trim();
+    const invoicingSenderEmails = vendorSenderEmailsText
+      .split(",")
+      .map((e) => e.trim())
+      .filter(Boolean);
     if (vendorEditing) {
-      updateVendor.mutate({ id: vendorEditing.id, ...vendorDraft, name });
+      updateVendor.mutate({ id: vendorEditing.id, ...vendorDraft, name, invoicingSenderEmails });
       // Items still reference vendors by name (mock data, not yet wired
       // to real ingredients) — this cascade is dropped since it can't
       // stay correct once vendors are real and items aren't. Revisit
       // when ingredients/items are wired to real data.
     } else {
-      createVendor.mutate({ ...vendorDraft, name });
+      createVendor.mutate({ ...vendorDraft, name, invoicingSenderEmails });
     }
     setVendorDialogOpen(false);
   };
@@ -1121,8 +1134,9 @@ function InventoryPage() {
               <Table>
                 <TableHeader>
                   <TableRow className="bg-stone-50/60">
-                    <TableHead className="w-[22%]">Vendor</TableHead>
+                    <TableHead className="w-[18%]">Vendor</TableHead>
                     <TableHead>Contact</TableHead>
+                    <TableHead>Invoicing senders</TableHead>
                     <TableHead>Account</TableHead>
                     <TableHead>Delivery</TableHead>
                     <TableHead>Terms</TableHead>
@@ -1147,6 +1161,23 @@ function InventoryPage() {
                           <p className="text-xs text-stone-500 flex items-center gap-1">
                             <Phone className="h-3 w-3" /> {v.phone}
                           </p>
+                        </TableCell>
+                        <TableCell>
+                          {v.invoicingSenderEmails.length === 0 ? (
+                            <span className="text-xs text-stone-400">— none set</span>
+                          ) : (
+                            <div className="flex flex-wrap gap-1 max-w-[200px]">
+                              {v.invoicingSenderEmails.map((email) => (
+                                <Badge
+                                  key={email}
+                                  variant="outline"
+                                  className="font-normal text-[11px] font-mono"
+                                >
+                                  {email}
+                                </Badge>
+                              ))}
+                            </div>
+                          )}
                         </TableCell>
                         <TableCell className="text-sm font-mono text-stone-700">
                           {v.accountNo}
@@ -1187,7 +1218,7 @@ function InventoryPage() {
                   })}
                   {vendors.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={7} className="text-center py-10 text-sm text-stone-500">
+                      <TableCell colSpan={8} className="text-center py-10 text-sm text-stone-500">
                         No vendors yet. Add one to start assigning items.
                       </TableCell>
                     </TableRow>
@@ -2025,6 +2056,19 @@ function InventoryPage() {
                   </option>
                 ))}
               </select>
+            </div>
+            <div className="col-span-2">
+              <Label htmlFor="v-senders">Invoicing sender emails</Label>
+              <Input
+                id="v-senders"
+                value={vendorSenderEmailsText}
+                onChange={(e) => setVendorSenderEmailsText(e.target.value)}
+                placeholder="e.g. invoices@vendor.com, ap@vendor.com"
+              />
+              <p className="mt-1 text-xs text-stone-500">
+                Comma-separated. When an invoice email arrives from one of these addresses, it's
+                auto-matched to this vendor instead of needing a manual pick.
+              </p>
             </div>
             <div className="col-span-2">
               <Label htmlFor="v-notes">Notes</Label>

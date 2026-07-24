@@ -5,7 +5,6 @@ import {
   ArrowDownRight,
   ArrowUpRight,
   Bot,
-  CalendarDays,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
@@ -40,6 +39,8 @@ import {
 } from "recharts";
 
 import { Topbar } from "@/components/dashboard/Topbar";
+import { useDateRange } from "@/lib/date-range-context";
+import { isoDate, formatDateRange } from "@/lib/date-range";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -55,7 +56,6 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Table,
@@ -206,127 +206,6 @@ function KPI({
   );
 }
 
-// Drives the header date filter — either a single month, a single day,
-// or no filter at all ("all"). Kept as small primitives (not a raw
-// DateRange) so the popover UI has something concrete to bind inputs
-// to; derivePeriodRange() below turns it into the DateRange the data
-// hooks actually consume.
-type DatePeriod =
-  | { kind: "all" }
-  | { kind: "month"; value: string } // "YYYY-MM"
-  | { kind: "day"; value: string }; // "YYYY-MM-DD"
-
-function derivePeriodRange(period: DatePeriod): DateRange {
-  if (period.kind === "day" && period.value) return { from: period.value, to: period.value };
-  if (period.kind === "month" && period.value) {
-    const [y, m] = period.value.split("-").map(Number);
-    const lastDay = new Date(y, m, 0).getDate();
-    return {
-      from: `${period.value}-01`,
-      to: `${period.value}-${String(lastDay).padStart(2, "0")}`,
-    };
-  }
-  return { from: null, to: null };
-}
-
-function periodLabel(period: DatePeriod): string {
-  if (period.kind === "day" && period.value) {
-    return new Date(`${period.value}T00:00:00`).toLocaleDateString("en-US", {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-    });
-  }
-  if (period.kind === "month" && period.value) {
-    const [y, m] = period.value.split("-").map(Number);
-    return new Date(y, m - 1, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" });
-  }
-  return "All time";
-}
-
-function DateFilterControl({
-  period,
-  onChange,
-  open,
-  onOpenChange,
-}: {
-  period: DatePeriod;
-  onChange: (p: DatePeriod) => void;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-}) {
-  const mode = period.kind === "all" ? "month" : period.kind;
-
-  return (
-    <Popover open={open} onOpenChange={onOpenChange}>
-      <PopoverTrigger asChild>
-        <Button
-          variant="outline"
-          size="sm"
-          className={`h-9 gap-1.5 ${period.kind !== "all" ? "border-primary/40 text-primary" : ""}`}
-        >
-          <CalendarDays className="h-3.5 w-3.5" />
-          {periodLabel(period)}
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent align="start" className="w-72 space-y-3">
-        <div className="flex gap-1.5">
-          <Button
-            variant={mode === "month" ? "default" : "outline"}
-            size="sm"
-            className="h-7 flex-1 text-xs"
-            onClick={() =>
-              onChange({ kind: "month", value: period.kind === "month" ? period.value : "" })
-            }
-          >
-            By month
-          </Button>
-          <Button
-            variant={mode === "day" ? "default" : "outline"}
-            size="sm"
-            className="h-7 flex-1 text-xs"
-            onClick={() =>
-              onChange({ kind: "day", value: period.kind === "day" ? period.value : "" })
-            }
-          >
-            By day
-          </Button>
-        </div>
-
-        {mode === "month" ? (
-          <input
-            type="month"
-            value={period.kind === "month" ? period.value : ""}
-            onChange={(e) => onChange({ kind: "month", value: e.target.value })}
-            className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-          />
-        ) : (
-          <input
-            type="date"
-            value={period.kind === "day" ? period.value : ""}
-            onChange={(e) => onChange({ kind: "day", value: e.target.value })}
-            className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-          />
-        )}
-
-        {period.kind !== "all" && (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 w-full text-xs text-muted-foreground"
-            onClick={() => {
-              onChange({ kind: "all" });
-              onOpenChange(false);
-            }}
-          >
-            Clear — show all time
-          </Button>
-        )}
-      </PopoverContent>
-    </Popover>
-  );
-}
-
 const INVOICES_PAGE_SIZE = 25;
 
 function InvoicesPage() {
@@ -334,8 +213,6 @@ function InvoicesPage() {
   const [statusFilter, setStatusFilter] = useState<"all" | "pending_review" | "approved">("all");
   const [vendorFilter, setVendorFilter] = useState<string>("all");
   const [ocrSheetInvoiceId, setOcrSheetInvoiceId] = useState<string | null | undefined>(undefined);
-  const [datePeriod, setDatePeriod] = useState<DatePeriod>({ kind: "all" });
-  const [dateFilterOpen, setDateFilterOpen] = useState(false);
   const [page, setPage] = useState(1);
   const [invoiceToDelete, setInvoiceToDelete] = useState<RealInvoice | null>(null);
   const deleteInvoice = useDeleteInvoice();
@@ -345,8 +222,15 @@ function InvoicesPage() {
     setInvoiceToDelete(null);
   };
 
-  const dateRange = useMemo(() => derivePeriodRange(datePeriod), [datePeriod]);
-  const isDateFiltered = datePeriod.kind !== "all";
+  // Same global range as every other page (Home, Product Mix, etc.) —
+  // set once in the Topbar, applies everywhere. Converted to the
+  // "YYYY-MM-DD" string form the invoice queries/dateInRange expect.
+  const { dateRange: globalDateRange } = useDateRange();
+  const dateRange = useMemo(
+    () => ({ from: isoDate(globalDateRange.from), to: isoDate(globalDateRange.to) }),
+    [globalDateRange],
+  );
+  const rangeLabel = useMemo(() => formatDateRange(globalDateRange), [globalDateRange]);
 
   // Any change to what's being filtered should land back on page 1 —
   // otherwise a narrower filter can strand you on a now-empty page.
@@ -361,32 +245,26 @@ function InvoicesPage() {
   const { data: categorySpend = [] } = useCategorySpend(dateRange);
   const { data: savingsSummary } = useSavingsSummary(dateRange);
 
-  // Every invoice-derived calc on this page (KPIs, weekly trend, the
-  // "All invoices" table) filters from this one place, so the date
-  // picker in the header affects everything consistently.
-  const dateFilteredInvoices = useMemo(() => {
-    if (!isDateFiltered) return realInvoices;
-    return realInvoices.filter((i) => dateInRange(i.invoiceDate ?? i.createdAt, dateRange));
-  }, [realInvoices, dateRange, isDateFiltered]);
+  // Every invoice-derived calc on this page (KPIs, charts, the
+  // "All invoices" table) filters from this one place, so the global
+  // date range in the Topbar affects everything on this page
+  // consistently.
+  const dateFilteredInvoices = useMemo(
+    () => realInvoices.filter((i) => dateInRange(i.invoiceDate ?? i.createdAt, dateRange)),
+    [realInvoices, dateRange],
+  );
 
   const realKpis = useMemo(() => {
     const approved = dateFilteredInvoices.filter((i) => i.status === "approved");
     const pending = dateFilteredInvoices.filter((i) => i.status === "pending_review");
-    const now = new Date();
-    const thisMonthCount = isDateFiltered
-      ? dateFilteredInvoices.length
-      : realInvoices.filter((i) => {
-          const d = new Date(i.createdAt);
-          return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
-        }).length;
     return {
       approvedSpendCents: approved.reduce((a, b) => a + (b.totalCents ?? 0), 0),
       approvedCount: approved.length,
       pendingCents: pending.reduce((a, b) => a + (b.totalCents ?? 0), 0),
       pendingCount: pending.length,
-      thisMonthCount,
+      thisMonthCount: dateFilteredInvoices.length,
     };
-  }, [dateFilteredInvoices, isDateFiltered, realInvoices]);
+  }, [dateFilteredInvoices]);
 
   // Real approved spend by vendor, biggest first — savings is
   // deliberately left out of this chart, since it already has its own
@@ -527,9 +405,9 @@ function InvoicesPage() {
             icon={Truck}
           />
           <KPI
-            label={isDateFiltered ? "Invoices in period" : "Invoices this month"}
+            label="Invoices in period"
             value={String(realKpis.thisMonthCount)}
-            hint={isDateFiltered ? periodLabel(datePeriod) : "uploaded or emailed in"}
+            hint={rangeLabel}
             icon={Inbox}
           />
         </div>
@@ -543,9 +421,9 @@ function InvoicesPage() {
             <h3 className="mt-1 font-display text-xl">Where spend goes</h3>
             {vendorSpendMix.length === 0 ? (
               <div className="mt-4 flex h-[260px] items-center justify-center rounded-xl border border-dashed text-center text-sm text-muted-foreground">
-                {isDateFiltered
-                  ? `No approved invoices in ${periodLabel(datePeriod)} — try a different period.`
-                  : "No approved invoices yet — approve invoices to see spend by vendor appear here."}
+                {realInvoices.length === 0
+                  ? "No approved invoices yet — approve invoices to see spend by vendor appear here."
+                  : `No approved invoices in ${rangeLabel} — try a different period.`}
               </div>
             ) : (
               <div className="mt-4 flex flex-col items-center gap-6 sm:flex-row">
@@ -663,12 +541,6 @@ function InvoicesPage() {
               </TabsTrigger>
             </TabsList>
             <div className="flex items-center gap-2">
-              <DateFilterControl
-                period={datePeriod}
-                onChange={setDatePeriod}
-                open={dateFilterOpen}
-                onOpenChange={setDateFilterOpen}
-              />
               <Button
                 variant="outline"
                 size="sm"
@@ -835,9 +707,9 @@ function InvoicesPage() {
                         colSpan={8}
                         className="py-10 text-center text-sm text-muted-foreground"
                       >
-                        {isDateFiltered
-                          ? `No invoices in ${periodLabel(datePeriod)} — try a different period.`
-                          : "No invoices yet — upload one or connect email ingestion to get started."}
+                        {realInvoices.length === 0
+                          ? "No invoices yet — upload one or connect email ingestion to get started."
+                          : `No invoices in ${rangeLabel} — try a different period.`}
                       </TableCell>
                     </TableRow>
                   )}
