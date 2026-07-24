@@ -27,8 +27,6 @@ import {
   XCircle,
 } from "lucide-react";
 import {
-  Area,
-  AreaChart,
   Bar,
   BarChart,
   CartesianGrid,
@@ -122,9 +120,12 @@ function formatMoney(n: number, opts: { compact?: boolean } = {}) {
 }
 
 // Palette applied deterministically to real category names so the pie
-// stays stable across renders.
+// stays stable across renders. First entry is bare var(--primary), not
+// wrapped in hsl(...) — the app's CSS vars are OKLCH already, and
+// wrapping one in hsl() silently fails (renders solid black, no error)
+// rather than throwing — see feedback_thrasherspub_oklch_charts memory.
 const CATEGORY_COLORS = [
-  "hsl(var(--primary))",
+  "var(--primary)",
   "hsl(15 65% 52%)",
   "hsl(120 25% 45%)",
   "hsl(38 60% 55%)",
@@ -367,61 +368,31 @@ function InvoicesPage() {
     };
   }, [dateFilteredInvoices, isDateFiltered, realInvoices]);
 
-  // Weekly spend + savings trend, computed from approved invoices within
-  // the active date filter. Bucketed by ISO week (Mon-based) using
-  // invoice_date when present, falling back to created_at. The window
-  // itself adapts to the filter — last 8 weeks with no filter, the
-  // filtered month's own weeks when filtering by month, the single week
-  // containing the day when filtering to one day — so switching the
-  // filter never just leaves the chart looking empty.
-  const spendTrend = useMemo(() => {
-    const buckets = new Map<string, { spend: number; savings: number; date: Date }>();
-    const startOfWeek = (d: Date) => {
-      const c = new Date(d);
-      c.setHours(0, 0, 0, 0);
-      const day = c.getDay();
-      const diff = (day + 6) % 7; // days since Monday
-      c.setDate(c.getDate() - diff);
-      return c;
-    };
+  // Real approved spend by vendor, biggest first — savings is
+  // deliberately left out of this chart, since it already has its own
+  // KPI card above and its own tab.
+  const VENDOR_MIX_TOP_N = 8;
+  const vendorSpendMix = useMemo(() => {
+    const withSpend = vendorSpend
+      .filter((v) => v.approvedSpendCents > 0)
+      .sort((a, b) => b.approvedSpendCents - a.approvedSpendCents);
+    const total = withSpend.reduce((a, v) => a + v.approvedSpendCents, 0);
+    if (total === 0) return [] as { name: string; value: number; color: string; pct: number }[];
 
-    let windowStart: Date;
-    let windowEnd: Date;
-    if (datePeriod.kind === "month" && datePeriod.value) {
-      const [y, m] = datePeriod.value.split("-").map(Number);
-      windowStart = startOfWeek(new Date(y, m - 1, 1));
-      windowEnd = startOfWeek(new Date(y, m, 0));
-    } else if (datePeriod.kind === "day" && datePeriod.value) {
-      windowStart = startOfWeek(new Date(`${datePeriod.value}T00:00:00`));
-      windowEnd = windowStart;
-    } else {
-      const now = new Date();
-      windowStart = startOfWeek(new Date(now.getTime() - 7 * 7 * 86400000));
-      windowEnd = startOfWeek(now);
-    }
-    for (const w = new Date(windowStart); w <= windowEnd; w.setDate(w.getDate() + 7)) {
-      buckets.set(w.toISOString().slice(0, 10), { spend: 0, savings: 0, date: new Date(w) });
-    }
-
-    for (const inv of dateFilteredInvoices) {
-      if (inv.status !== "approved") continue;
-      const raw = inv.invoiceDate ?? inv.createdAt;
-      if (!raw) continue;
-      const w = startOfWeek(new Date(raw));
-      const key = w.toISOString().slice(0, 10);
-      const bucket = buckets.get(key);
-      if (!bucket) continue; // outside the window
-      bucket.spend += (inv.totalCents ?? 0) / 100;
-      bucket.savings += (inv.discountCents ?? 0) / 100;
-    }
-    return Array.from(buckets.values()).map((b) => ({
-      week: b.date.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
-      spend: Math.round(b.spend),
-      savings: Math.round(b.savings),
+    const top = withSpend.slice(0, VENDOR_MIX_TOP_N);
+    const rest = withSpend.slice(VENDOR_MIX_TOP_N);
+    const restCents = rest.reduce((a, v) => a + v.approvedSpendCents, 0);
+    const slices = [
+      ...top.map((v) => ({ name: v.name, cents: v.approvedSpendCents })),
+      ...(restCents > 0 ? [{ name: "Other vendors", cents: restCents }] : []),
+    ];
+    return slices.map((s, i) => ({
+      name: s.name,
+      value: s.cents / 100,
+      pct: Math.round((s.cents / total) * 100),
+      color: CATEGORY_COLORS[i % CATEGORY_COLORS.length],
     }));
-  }, [dateFilteredInvoices, datePeriod]);
-
-  const totalSpendInWindow = spendTrend.reduce((a, b) => a + b.spend, 0);
+  }, [vendorSpend]);
 
   const categoryMix = useMemo(() => {
     const total = categorySpend.reduce((a, b) => a + b.spendCents, 0);
@@ -541,73 +512,54 @@ function InvoicesPage() {
         {/* Charts row */}
         <div className="grid gap-4 lg:grid-cols-3">
           <Card className="p-5 lg:col-span-2">
-            <div className="flex items-start justify-between">
-              <div>
-                <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
-                  Weekly trend
-                </div>
-                <h3 className="mt-1 font-display text-xl">Spend & savings · last 8 weeks</h3>
-              </div>
-              <div className="flex gap-2 text-xs">
-                <span className="inline-flex items-center gap-1.5">
-                  <span className="h-2 w-2 rounded-full bg-primary" /> Spend
-                </span>
-                <span className="inline-flex items-center gap-1.5">
-                  <span className="h-2 w-2 rounded-full bg-emerald-500" /> Savings
-                </span>
-              </div>
+            <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+              By vendor
             </div>
-            {totalSpendInWindow === 0 ? (
+            <h3 className="mt-1 font-display text-xl">Where spend goes</h3>
+            {vendorSpendMix.length === 0 ? (
               <div className="mt-4 flex h-[260px] items-center justify-center rounded-xl border border-dashed text-center text-sm text-muted-foreground">
                 {isDateFiltered
                   ? `No approved invoices in ${periodLabel(datePeriod)} — try a different period.`
-                  : "No approved invoices in the last 8 weeks yet — approve invoices to see weekly spend and savings appear here."}
+                  : "No approved invoices yet — approve invoices to see spend by vendor appear here."}
               </div>
             ) : (
-              <div className="mt-4 h-[260px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={spendTrend}>
-                    <defs>
-                      <linearGradient id="sp" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity={0.35} />
-                        <stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity={0} />
-                      </linearGradient>
-                      <linearGradient id="sv" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#10b981" stopOpacity={0.3} />
-                        <stop offset="100%" stopColor="#10b981" stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid
-                      stroke="hsl(var(--border))"
-                      strokeDasharray="3 3"
-                      vertical={false}
-                    />
-                    <XAxis dataKey="week" stroke="hsl(var(--muted-foreground))" fontSize={11} />
-                    <YAxis
-                      stroke="hsl(var(--muted-foreground))"
-                      fontSize={11}
-                      tickFormatter={(v) => `$${v / 1000}k`}
-                    />
-                    <Tooltip
-                      formatter={(v: number) => formatMoney(v)}
-                      contentStyle={{ borderRadius: 10, border: "1px solid hsl(var(--border))" }}
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey="spend"
-                      stroke="hsl(var(--primary))"
-                      fill="url(#sp)"
-                      strokeWidth={2}
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey="savings"
-                      stroke="#10b981"
-                      fill="url(#sv)"
-                      strokeWidth={2}
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
+              <div className="mt-4 flex flex-col items-center gap-6 sm:flex-row">
+                <div className="h-[260px] w-full max-w-[260px] shrink-0">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={vendorSpendMix}
+                        dataKey="value"
+                        innerRadius={70}
+                        outerRadius={110}
+                        paddingAngle={2}
+                        isAnimationActive={false}
+                      >
+                        {vendorSpendMix.map((v) => (
+                          <Cell key={v.name} fill={v.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip formatter={(v: number) => formatMoney(v)} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+                <div className="w-full space-y-2">
+                  {vendorSpendMix.map((v) => (
+                    <div key={v.name} className="flex items-center justify-between text-sm">
+                      <span className="inline-flex min-w-0 items-center gap-2">
+                        <span
+                          className="h-2.5 w-2.5 shrink-0 rounded-full"
+                          style={{ background: v.color }}
+                        />
+                        <span className="truncate">{v.name}</span>
+                      </span>
+                      <span className="ml-3 shrink-0 font-medium text-foreground">
+                        {formatMoney(v.value)}{" "}
+                        <span className="text-muted-foreground">({v.pct}%)</span>
+                      </span>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </Card>
@@ -1063,7 +1015,7 @@ function InvoicesPage() {
                         margin={{ left: 10, right: 10 }}
                       >
                         <CartesianGrid
-                          stroke="hsl(var(--border))"
+                          stroke="var(--border)"
                           strokeDasharray="3 3"
                           horizontal={false}
                         />
@@ -1071,12 +1023,12 @@ function InvoicesPage() {
                         <YAxis
                           type="category"
                           dataKey="name"
-                          stroke="hsl(var(--muted-foreground))"
+                          stroke="var(--muted-foreground)"
                           fontSize={11}
                           width={100}
                         />
                         <Tooltip formatter={(v: number) => formatMoney(v)} />
-                        <Bar dataKey="value" radius={[0, 6, 6, 0]} fill="hsl(var(--primary))" />
+                        <Bar dataKey="value" radius={[0, 6, 6, 0]} fill="var(--primary)" />
                       </BarChart>
                     </ResponsiveContainer>
                   </div>
