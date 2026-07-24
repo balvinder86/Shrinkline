@@ -570,21 +570,22 @@ function InvoicesPage() {
             </div>
             <h3 className="mt-1 font-display text-xl">Where your dollars go</h3>
             {categoryMix.length === 0 ? (
-              <div className="mt-4 flex h-[180px] items-center justify-center rounded-xl border border-dashed p-4 text-center text-xs text-muted-foreground">
+              <div className="mt-4 flex h-[200px] items-center justify-center rounded-xl border border-dashed p-4 text-center text-xs text-muted-foreground">
                 Category mix appears once invoice line items are matched to ingredients with a
                 category.
               </div>
             ) : (
               <>
-                <div className="mt-2 h-[180px]">
+                <div className="mt-2 h-[200px]">
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
                       <Pie
                         data={categoryMix}
                         dataKey="value"
-                        innerRadius={48}
-                        outerRadius={72}
+                        innerRadius={56}
+                        outerRadius={84}
                         paddingAngle={2}
+                        isAnimationActive={false}
                       >
                         {categoryMix.map((c) => (
                           <Cell key={c.name} fill={c.color} />
@@ -594,14 +595,20 @@ function InvoicesPage() {
                     </PieChart>
                   </ResponsiveContainer>
                 </div>
-                <div className="space-y-1.5">
+                <div className="mt-2 space-y-2">
                   {categoryMix.map((c) => (
-                    <div key={c.name} className="flex items-center justify-between text-xs">
-                      <span className="inline-flex items-center gap-2">
-                        <span className="h-2 w-2 rounded-full" style={{ background: c.color }} />
-                        {c.name}
+                    <div key={c.name} className="flex items-center justify-between text-sm">
+                      <span className="inline-flex min-w-0 items-center gap-2">
+                        <span
+                          className="h-2.5 w-2.5 shrink-0 rounded-full"
+                          style={{ background: c.color }}
+                        />
+                        <span className="truncate">{c.name}</span>
                       </span>
-                      <span className="font-medium text-foreground">{c.pct}%</span>
+                      <span className="ml-3 shrink-0 font-medium text-foreground">
+                        {formatMoney(c.value)}{" "}
+                        <span className="text-muted-foreground">({c.pct}%)</span>
+                      </span>
                     </div>
                   ))}
                 </div>
