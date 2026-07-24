@@ -1683,47 +1683,82 @@ function AutomationTab() {
           <div className="mt-4 space-y-3">
             {unknownSenderQueue.map((inv) => {
               const senderEmail = extractEmailFromHeader(inv.sourceEmailFrom);
+              const suggestedVendor = inv.vendorId
+                ? vendors.find((v) => v.id === inv.vendorId)
+                : null;
               return (
-                <div key={inv.id} className="rounded-xl border border-amber-200 bg-white p-3">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="min-w-0">
-                      <div className="text-sm font-medium">
-                        {inv.sourceEmailFrom ?? "Unknown sender"}
-                      </div>
-                      {inv.sourceEmailSubject && (
-                        <div className="truncate text-xs text-muted-foreground">
-                          {inv.sourceEmailSubject}
+                  <div key={inv.id} className="rounded-xl border border-amber-200 bg-white p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="text-sm font-medium">
+                          {inv.sourceEmailFrom ?? "Unknown sender"}
                         </div>
-                      )}
+                        {inv.sourceEmailSubject && (
+                          <div className="truncate text-xs text-muted-foreground">
+                            {inv.sourceEmailSubject}
+                          </div>
+                        )}
+                      </div>
+                      <div className="font-display text-sm">
+                        {inv.totalCents != null ? formatMoney(inv.totalCents / 100) : "—"}
+                      </div>
                     </div>
-                    <div className="font-display text-sm">
-                      {inv.totalCents != null ? formatMoney(inv.totalCents / 100) : "—"}
-                    </div>
-                  </div>
-                  <select
-                    defaultValue=""
-                    disabled={promoteSender.isPending}
-                    onChange={(e) => {
-                      if (e.target.value) {
-                        promoteSender.mutate({
-                          invoiceId: inv.id,
-                          vendorId: e.target.value,
-                          currentFlags: inv.flags,
-                          senderEmail,
-                        });
-                      }
-                    }}
-                    className="mt-2.5 h-9 w-full rounded-md border border-amber-300 bg-white px-3 text-sm"
-                  >
-                    <option value="">Assign vendor &amp; remember this sender…</option>
-                    {vendors.map((v) => (
-                      <option key={v.id} value={v.id}>
-                        {v.name}
+                    {/* Vendor-name fallback (ocr/'s persistResult) may have already
+                        resolved this from the invoice content itself, even though
+                        the sender is unrecognized — surfaced as an explicit confirm
+                        rather than a pre-selected <select> option, since re-picking
+                        an already-selected <option> doesn't fire onChange. */}
+                    {suggestedVendor && (
+                      <div className="mt-2.5 flex flex-wrap items-center gap-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                        <span>
+                          Matched to <span className="font-medium">{suggestedVendor.name}</span>{" "}
+                          from the invoice content — confirm to also remember this sender.
+                        </span>
+                        <Button
+                          size="sm"
+                          className="h-7 gap-1 text-xs"
+                          disabled={promoteSender.isPending}
+                          onClick={() =>
+                            promoteSender.mutate({
+                              invoiceId: inv.id,
+                              vendorId: suggestedVendor.id,
+                              currentFlags: inv.flags,
+                              senderEmail,
+                            })
+                          }
+                        >
+                          Confirm {suggestedVendor.name}
+                        </Button>
+                      </div>
+                    )}
+                    <select
+                      defaultValue=""
+                      disabled={promoteSender.isPending}
+                      onChange={(e) => {
+                        if (e.target.value) {
+                          promoteSender.mutate({
+                            invoiceId: inv.id,
+                            vendorId: e.target.value,
+                            currentFlags: inv.flags,
+                            senderEmail,
+                          });
+                        }
+                      }}
+                      className="mt-2.5 h-9 w-full rounded-md border border-amber-300 bg-white px-3 text-sm"
+                    >
+                      <option value="">
+                        {suggestedVendor
+                          ? "Or pick a different vendor…"
+                          : "Assign vendor & remember this sender…"}
                       </option>
-                    ))}
-                  </select>
-                </div>
-              );
+                      {vendors.map((v) => (
+                        <option key={v.id} value={v.id}>
+                          {v.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                );
             })}
           </div>
         </Card>
