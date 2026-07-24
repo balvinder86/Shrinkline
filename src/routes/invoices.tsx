@@ -119,11 +119,12 @@ function formatMoney(n: number, opts: { compact?: boolean } = {}) {
   return `$${n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
 }
 
-// Palette applied deterministically to real category names so the pie
-// stays stable across renders. First entry is bare var(--primary), not
-// wrapped in hsl(...) — the app's CSS vars are OKLCH already, and
-// wrapping one in hsl() silently fails (renders solid black, no error)
-// rather than throwing — see feedback_thrasherspub_oklch_charts memory.
+// Generic index-cycling palette — used where the slices don't have an
+// inherent real-world identity to color by (e.g. by vendor). First
+// entry is bare var(--primary), not wrapped in hsl(...) — the app's
+// CSS vars are OKLCH already, and wrapping one in hsl() silently fails
+// (renders solid black, no error) rather than throwing — see
+// feedback_thrasherspub_oklch_charts memory.
 const CATEGORY_COLORS = [
   "var(--primary)",
   "hsl(15 65% 52%)",
@@ -134,6 +135,25 @@ const CATEGORY_COLORS = [
   "hsl(280 40% 55%)",
   "hsl(190 55% 45%)",
 ];
+
+// Real ingredient categories (confirmed live: Alcohol, Beverages, Dry
+// Goods, Food, Miscellaneous, Seafood) get a fixed, semantically
+// chosen color each — deterministic by name, not by array position, so
+// "Alcohol" is always the same color regardless of what other
+// categories exist that period, and two categories never coincidentally
+// land on near-identical hues the way index-cycling risked (Alcohol and
+// Seafood previously both landed on similar warm orange-reds). Any
+// category not in this map (a new one added later) falls back to
+// CATEGORY_COLORS, cycled only among the unmapped ones so it doesn't
+// collide with a named color either.
+const CATEGORY_COLOR_MAP: Record<string, string> = {
+  alcohol: "hsl(35 65% 48%)",
+  beverages: "hsl(190 55% 45%)",
+  "dry goods": "hsl(28 35% 42%)",
+  food: "hsl(120 30% 42%)",
+  miscellaneous: "hsl(220 12% 55%)",
+  seafood: "hsl(205 60% 48%)",
+};
 
 function KPI({
   label,
@@ -397,12 +417,17 @@ function InvoicesPage() {
   const categoryMix = useMemo(() => {
     const total = categorySpend.reduce((a, b) => a + b.spendCents, 0);
     if (total === 0) return [] as { name: string; value: number; color: string; pct: number }[];
-    return categorySpend.map((c, i) => ({
-      name: c.category,
-      value: c.spendCents / 100,
-      pct: Math.round((c.spendCents / total) * 100),
-      color: CATEGORY_COLORS[i % CATEGORY_COLORS.length],
-    }));
+    let fallbackIndex = 0;
+    return categorySpend.map((c) => {
+      const mapped = CATEGORY_COLOR_MAP[c.category.trim().toLowerCase()];
+      const color = mapped ?? CATEGORY_COLORS[fallbackIndex++ % CATEGORY_COLORS.length];
+      return {
+        name: c.category,
+        value: c.spendCents / 100,
+        pct: Math.round((c.spendCents / total) * 100),
+        color,
+      };
+    });
   }, [categorySpend]);
 
   const filteredInvoices = useMemo(() => {
