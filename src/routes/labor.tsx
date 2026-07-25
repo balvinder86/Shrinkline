@@ -7,6 +7,7 @@ import { Topbar } from "@/components/dashboard/Topbar";
 import { useDateRange } from "@/lib/date-range-context";
 import { formatDateRange } from "@/lib/date-range";
 import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   useLaborCostSummary,
@@ -90,7 +91,11 @@ function LaborPage() {
           <KPI
             label="Total labor cost"
             value={isSummaryLoading ? "—" : formatMoney((summary?.laborCostCents ?? 0) / 100, { compact: true })}
-            hint={rangeLabel}
+            hint={
+              summary && summary.liveShiftCount > 0
+                ? `${rangeLabel} · includes ${summary.liveShiftCount} live shift${summary.liveShiftCount === 1 ? "" : "s"} still clocked in`
+                : rangeLabel
+            }
             icon={Wallet}
           />
           <KPI
@@ -115,7 +120,11 @@ function LaborPage() {
           <KPI
             label="Total hours"
             value={isSummaryLoading ? "—" : formatHours(totalHours)}
-            hint="regular + overtime"
+            hint={
+              summary && summary.liveShiftCount > 0
+                ? "regular + overtime, live shifts estimated to now"
+                : "regular + overtime"
+            }
             icon={Clock3}
           />
           <KPI
@@ -253,9 +262,21 @@ function LaborPage() {
                 ) : (
                   byEmployee.map((e) => (
                     <TableRow key={e.employeeName}>
-                      <TableCell className="font-medium">{e.employeeName}</TableCell>
+                      <TableCell className="font-medium">
+                        <span className="inline-flex items-center gap-2">
+                          {e.employeeName}
+                          {e.onShift && (
+                            <Badge className="bg-emerald-50 text-emerald-700 hover:bg-emerald-50">
+                              On shift
+                            </Badge>
+                          )}
+                        </span>
+                      </TableCell>
                       <TableCell className="text-sm text-muted-foreground">{e.roles}</TableCell>
-                      <TableCell className="text-right">{formatHours(e.regularHours)}</TableCell>
+                      <TableCell className="text-right">
+                        {formatHours(e.regularHours)}
+                        {e.onShift && <span className="ml-1 text-xs text-muted-foreground">(so far)</span>}
+                      </TableCell>
                       <TableCell className="text-right">
                         {e.overtimeHours > 0 ? (
                           <span className="text-amber-700">{formatHours(e.overtimeHours)}</span>

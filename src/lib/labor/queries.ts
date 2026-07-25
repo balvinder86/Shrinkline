@@ -12,6 +12,43 @@ import { fetchAllRows } from "@/lib/pos/queries";
 // other cost metric on this dashboard (Food cost %) already uses —
 // never recomputed independently.
 
+type OpenShiftRow = {
+  regular_hours: number;
+  overtime_hours: number;
+  labor_cost_cents: number;
+  in_at: string;
+  out_at: string | null;
+  wage_cents: number;
+};
+
+// Toast doesn't compute regular_hours/labor_cost_cents until an
+// employee clocks out — a shift still open at sync time is stored as
+// literal 0/0/$0, which understates real totals any time someone is
+// actively on shift. Rather than show a silently-wrong zero for a
+// person who is, right now, really being paid, estimate their
+// hours/cost so far from the clock-in time and their real resolved
+// wage (the same wage_cents already verified against Toast's own
+// per-entry hourlyWage) — no overtime multiplier, since Toast hasn't
+// determined OT status for an open shift yet.
+function effectiveHoursAndCost(
+  row: OpenShiftRow,
+  nowMs: number,
+): { hours: number; costCents: number; onShift: boolean } {
+  if (row.out_at) {
+    return {
+      hours: Number(row.regular_hours) + Number(row.overtime_hours),
+      costCents: Number(row.labor_cost_cents),
+      onShift: false,
+    };
+  }
+  const elapsedHours = Math.max(0, (nowMs - new Date(row.in_at).getTime()) / 3_600_000);
+  return {
+    hours: elapsedHours,
+    costCents: Math.round(elapsedHours * Number(row.wage_cents)),
+    onShift: true,
+  };
+}
+
 export type LaborCostSummary = {
   laborCostCents: number;
   regularHours: number;
@@ -20,6 +57,9 @@ export type LaborCostSummary = {
   // null (not 0) when there's no real revenue in range yet — a
   // fabricated 0% would read as "labor is free," not "no data."
   laborCostPct: number | null;
+  // Employees currently clocked in, whose hours/cost above are a live
+  // estimate (elapsed time × wage), not Toast's final computed value.
+  liveShiftCount: number;
 };
 
 export function useLaborCostSummary(range: DateRange) {
@@ -35,7 +75,7 @@ export function useLaborCostSummary(range: DateRange) {
         fetchAllRows((from, to) =>
           supabase
             .from("labor_shifts")
-            .select("regular_hours, overtime_hours, labor_cost_cents")
+            .select("regular_hours, overtime_hours, labor_cost_cents, in_at, out_at, wage_cents")
             .in("location_id", locationIds!)
             .gte("business_date", fromIso)
             .lte("business_date", toIso)
@@ -54,13 +94,21 @@ export function useLaborCostSummary(range: DateRange) {
         ),
       ]);
 
+      const nowMs = Date.now();
       let laborCostCents = 0;
       let regularHours = 0;
       let overtimeHours = 0;
+      let liveShiftCount = 0;
       for (const r of laborRows) {
-        laborCostCents += Number(r.labor_cost_cents);
-        regularHours += Number(r.regular_hours);
-        overtimeHours += Number(r.overtime_hours);
+        const eff = effectiveHoursAndCost(r, nowMs);
+        laborCostCents += eff.costCents;
+        if (eff.onShift) {
+          regularHours += eff.hours;
+          liveShiftCount += 1;
+        } else {
+          regularHours += Number(r.regular_hours);
+          overtimeHours += Number(r.overtime_hours);
+        }
       }
       let revenueCents = 0;
       for (const r of salesRows) revenueCents += Number(r.net_sales_cents);
@@ -71,6 +119,7 @@ export function useLaborCostSummary(range: DateRange) {
         overtimeHours,
         revenueCents,
         laborCostPct: revenueCents > 0 ? (laborCostCents / revenueCents) * 100 : null,
+        liveShiftCount,
       };
     },
   });
@@ -90,19 +139,21 @@ export function useLaborCostByRole(range: DateRange) {
       const rows = await fetchAllRows((from, to) =>
         supabase
           .from("labor_shifts")
-          .select("job_title, regular_hours, overtime_hours, labor_cost_cents")
+          .select("job_title, regular_hours, overtime_hours, labor_cost_cents, in_at, out_at, wage_cents")
           .in("location_id", locationIds!)
           .gte("business_date", fromIso)
           .lte("business_date", toIso)
           .range(from, to),
       );
 
+      const nowMs = Date.now();
       const byRole = new Map<string, { costCents: number; hours: number }>();
       for (const r of rows) {
         const role = r.job_title ?? "Unassigned role";
+        const eff = effectiveHoursAndCost(r, nowMs);
         const cur = byRole.get(role) ?? { costCents: 0, hours: 0 };
-        cur.costCents += Number(r.labor_cost_cents);
-        cur.hours += Number(r.regular_hours) + Number(r.overtime_hours);
+        cur.costCents += eff.costCents;
+        cur.hours += eff.hours;
         byRole.set(role, cur);
       }
       return Array.from(byRole.entries())
@@ -132,7 +183,7 @@ export function useLaborCostTrend(range: DateRange) {
         fetchAllRows((from, to) =>
           supabase
             .from("labor_shifts")
-            .select("business_date, labor_cost_cents")
+            .select("business_date, labor_cost_cents, in_at, out_at, wage_cents, regular_hours, overtime_hours")
             .in("location_id", locationIds!)
             .gte("business_date", fromIso)
             .lte("business_date", toIso)
@@ -169,10 +220,12 @@ export function useLaborCostTrend(range: DateRange) {
         return weekStart(d);
       };
 
+      const nowMs = Date.now();
       const laborByBucket = new Map<string, number>();
       for (const r of laborRows) {
         const key = bucketKeyFor(r.business_date);
-        laborByBucket.set(key, (laborByBucket.get(key) ?? 0) + Number(r.labor_cost_cents));
+        const eff = effectiveHoursAndCost(r, nowMs);
+        laborByBucket.set(key, (laborByBucket.get(key) ?? 0) + eff.costCents);
       }
       const revenueByBucket = new Map<string, number>();
       for (const r of salesRows) {
@@ -208,6 +261,10 @@ export type EmployeeLaborSummary = {
   regularHours: number;
   overtimeHours: number;
   costCents: number;
+  // True if any of this employee's shifts in range is still clocked
+  // in — their hours/cost are a live estimate, not Toast's final
+  // computed value yet.
+  onShift: boolean;
 };
 
 export function useLaborShiftsByEmployee(range: DateRange) {
@@ -222,16 +279,19 @@ export function useLaborShiftsByEmployee(range: DateRange) {
       const rows = await fetchAllRows((from, to) =>
         supabase
           .from("labor_shifts")
-          .select("employee_name, job_title, regular_hours, overtime_hours, labor_cost_cents")
+          .select(
+            "employee_name, job_title, regular_hours, overtime_hours, labor_cost_cents, in_at, out_at, wage_cents",
+          )
           .in("location_id", locationIds!)
           .gte("business_date", fromIso)
           .lte("business_date", toIso)
           .range(from, to),
       );
 
+      const nowMs = Date.now();
       const byEmployee = new Map<
         string,
-        { roles: Set<string>; regularHours: number; overtimeHours: number; costCents: number }
+        { roles: Set<string>; regularHours: number; overtimeHours: number; costCents: number; onShift: boolean }
       >();
       for (const r of rows) {
         const cur = byEmployee.get(r.employee_name) ?? {
@@ -239,11 +299,18 @@ export function useLaborShiftsByEmployee(range: DateRange) {
           regularHours: 0,
           overtimeHours: 0,
           costCents: 0,
+          onShift: false,
         };
         if (r.job_title) cur.roles.add(r.job_title);
-        cur.regularHours += Number(r.regular_hours);
-        cur.overtimeHours += Number(r.overtime_hours);
-        cur.costCents += Number(r.labor_cost_cents);
+        const eff = effectiveHoursAndCost(r, nowMs);
+        cur.costCents += eff.costCents;
+        if (eff.onShift) {
+          cur.regularHours += eff.hours;
+          cur.onShift = true;
+        } else {
+          cur.regularHours += Number(r.regular_hours);
+          cur.overtimeHours += Number(r.overtime_hours);
+        }
         byEmployee.set(r.employee_name, cur);
       }
 
@@ -254,6 +321,7 @@ export function useLaborShiftsByEmployee(range: DateRange) {
           regularHours: v.regularHours,
           overtimeHours: v.overtimeHours,
           costCents: v.costCents,
+          onShift: v.onShift,
         }))
         .sort((a, b) => b.costCents - a.costCents);
     },
