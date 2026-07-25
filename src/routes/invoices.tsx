@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   AlertTriangle,
   ArrowDownRight,
@@ -76,6 +76,13 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   type DateRange,
   useApproveInvoice,
@@ -1169,6 +1176,110 @@ function RealInvoiceUploadsCard({ onOpenInvoice }: { onOpenInvoice: (id: string)
   );
 }
 
+// A real in-browser camera, not a file-input `capture` attribute —
+// `capture="environment"` only hints mobile OSes to skip straight to
+// the native camera; desktop browsers (a MacBook's built-in webcam
+// included) silently ignore it and just open the normal file picker.
+// getUserMedia works identically everywhere there's a camera, laptop
+// webcams included, so this is the one implementation used on every
+// device rather than branching mobile-vs-desktop behavior.
+function CameraCaptureDialog({
+  open,
+  onClose,
+  onCapture,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onCapture: (file: File) => void;
+}) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    setError(null);
+    setReady(false);
+    let cancelled = false;
+
+    navigator.mediaDevices
+      ?.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false })
+      .then((stream) => {
+        if (cancelled) {
+          stream.getTracks().forEach((t) => t.stop());
+          return;
+        }
+        streamRef.current = stream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          videoRef.current.play().catch(() => {});
+        }
+        setReady(true);
+      })
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        const name = e instanceof DOMException ? e.name : "";
+        setError(
+          name === "NotAllowedError"
+            ? "Camera access was denied — allow camera access for this site in your browser settings, or use \"Choose a file\" instead."
+            : "Couldn't access a camera on this device — use \"Choose a file\" instead.",
+        );
+      });
+
+    return () => {
+      cancelled = true;
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    };
+  }, [open]);
+
+  function handleCapture() {
+    const video = videoRef.current;
+    if (!video || !video.videoWidth) return;
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.drawImage(video, 0, 0);
+    canvas.toBlob(
+      (blob) => {
+        if (!blob) return;
+        onCapture(new File([blob], `invoice-photo-${Date.now()}.jpg`, { type: "image/jpeg" }));
+      },
+      "image/jpeg",
+      0.92,
+    );
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Take a picture</DialogTitle>
+        </DialogHeader>
+        {error ? (
+          <div className="py-10 text-center text-sm text-rose-600">{error}</div>
+        ) : (
+          <div className="overflow-hidden rounded-xl bg-black">
+            {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+            <video ref={videoRef} autoPlay playsInline muted className="w-full" />
+          </div>
+        )}
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button onClick={handleCapture} disabled={!ready || !!error} className="gap-1.5">
+            <Camera className="h-3.5 w-3.5" /> Capture
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // `invoiceId === undefined` → sheet closed. `null` → upload a new
 // invoice. A real id → review that invoice's extraction.
 function InvoiceOcrSheet({
@@ -1183,6 +1294,7 @@ function InvoiceOcrSheet({
   const [uploadedId, setUploadedId] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
+  const [cameraOpen, setCameraOpen] = useState(false);
 
   const { data: vendors = [] } = useRealVendors();
   const { data: ingredients = [] } = useIngredients();
@@ -1228,6 +1340,7 @@ function InvoiceOcrSheet({
       setUploadedId(null);
       setStarting(false);
       setStartError(null);
+      setCameraOpen(false);
     }
   }, [open, invoiceId]);
 
@@ -1275,10 +1388,10 @@ function InvoiceOcrSheet({
     startUpload(file);
   }
 
-  function handleCameraCapture(selected: File | undefined) {
-    if (!selected) return;
-    setFile(selected);
-    startUpload(selected);
+  function handleCameraCapture(captured: File) {
+    setCameraOpen(false);
+    setFile(captured);
+    startUpload(captured);
   }
 
   return (
@@ -1324,22 +1437,14 @@ function InvoiceOcrSheet({
                 <p className="mt-0.5 text-xs text-muted-foreground">
                   Opens your camera — uploads and starts extracting the moment you take the shot.
                 </p>
-                <label className="mt-3 inline-block">
-                  <input
-                    type="file"
-                    accept="image/jpeg,image/jpg,image/png"
-                    capture="environment"
-                    disabled={starting}
-                    onChange={(e) => {
-                      handleCameraCapture(e.target.files?.[0]);
-                      e.target.value = "";
-                    }}
-                    className="hidden"
-                  />
-                  <span className="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90">
-                    <Camera className="h-3.5 w-3.5" /> Take a picture
-                  </span>
-                </label>
+                <Button
+                  size="sm"
+                  disabled={starting}
+                  onClick={() => setCameraOpen(true)}
+                  className="mt-3 gap-1.5"
+                >
+                  <Camera className="h-3.5 w-3.5" /> Take a picture
+                </Button>
               </div>
 
               <div className="rounded-xl border border-dashed p-4 text-center">
@@ -1565,6 +1670,11 @@ function InvoiceOcrSheet({
           </>
         )}
       </SheetContent>
+      <CameraCaptureDialog
+        open={cameraOpen}
+        onClose={() => setCameraOpen(false)}
+        onCapture={handleCameraCapture}
+      />
     </Sheet>
   );
 }
