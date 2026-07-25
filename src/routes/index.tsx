@@ -382,7 +382,7 @@ function Overview() {
                 <Link
                   key={s.tag}
                   to={s.to}
-                  className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-4 px-6 py-4 transition-colors hover:bg-muted/40"
+                  className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 px-4 py-4 transition-colors hover:bg-muted/40 sm:gap-4 sm:px-6"
                 >
                   <div
                     className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl border ${
@@ -401,9 +401,14 @@ function Overview() {
                   <Button
                     size="sm"
                     variant="ghost"
-                    className="shrink-0 gap-1 rounded-full text-primary hover:bg-primary/10 hover:text-primary"
+                    className="shrink-0 gap-1 rounded-full px-2 text-primary hover:bg-primary/10 hover:text-primary sm:px-3"
                   >
-                    {s.cta} <ArrowRight className="h-3.5 w-3.5" />
+                    {/* Full label on wider screens; icon-only on a phone,
+                        where the button's text was eating enough width to
+                        force the title next to it into a mid-word
+                        truncation (e.g. "229 items b..."). */}
+                    <span className="hidden sm:inline">{s.cta}</span>
+                    <ArrowRight className="h-3.5 w-3.5" />
                   </Button>
                 </Link>
               ))}
