@@ -172,6 +172,7 @@ function ProductMixPage() {
     const totals = itemTrend.items.map((name) => ({
       name,
       units: itemTrend.series.reduce((sum, point) => sum + (Number(point[name]) || 0), 0),
+      revenue: (itemTrend.revenueCents[name] ?? 0) / 100,
     }));
     const totalUnits = totals.reduce((a, t) => a + t.units, 0);
     if (totalUnits === 0) return [];
@@ -180,6 +181,7 @@ function ProductMixPage() {
       .map((t, i) => ({
         name: t.name,
         value: t.units,
+        revenue: t.revenue,
         pct: Math.round((t.units / totalUnits) * 100),
         color: TREND_COLORS[i % TREND_COLORS.length],
       }));
@@ -836,7 +838,9 @@ function ProductMixPage() {
                             ))}
                           </Pie>
                           <Tooltip
-                            formatter={(v: number) => `${v.toLocaleString()} sold`}
+                            formatter={(_v: number, _n: string, item: { payload?: { value: number; revenue: number } }) =>
+                              [`${usd(item.payload?.revenue ?? 0)} · ${(item.payload?.value ?? 0).toLocaleString()} sold`, ""]
+                            }
                             contentStyle={{
                               background: "hsl(var(--background))",
                               border: "1px solid hsl(var(--border))",
@@ -857,9 +861,11 @@ function ProductMixPage() {
                             />
                             <span className="truncate">{s.name}</span>
                           </span>
-                          <span className="ml-3 shrink-0 font-medium">
-                            {s.value.toLocaleString()}{" "}
-                            <span className="text-muted-foreground">({s.pct}%)</span>
+                          <span className="ml-3 shrink-0 text-right">
+                            <div className="font-medium">{usd(s.revenue)}</div>
+                            <div className="text-xs text-muted-foreground">
+                              {s.value.toLocaleString()} sold · {s.pct}%
+                            </div>
                           </span>
                         </div>
                       ))}

@@ -624,6 +624,10 @@ export function useOrderDetails(range: DateRange) {
 export type ItemTrendSeries = {
   items: string[];
   series: Record<string, string | number>[];
+  // Real dollars per top item, summed across the whole selected range
+  // (not broken out by bucket like `series` — the donut/share view
+  // needs one total per item, not a time series).
+  revenueCents: Record<string, number>;
 };
 
 // Real velocity per top item across the selected range — daily
@@ -641,7 +645,7 @@ export function useItemTrend(range: DateRange, topN = 5) {
       const rows = await fetchAllRows((from, to) =>
         supabase
           .from("pmix_sales")
-          .select("business_date, name, quantity_sold")
+          .select("business_date, name, quantity_sold, net_sales_cents")
           .in("location_id", locationIds!)
           .gte("business_date", fromIso)
           .lte("business_date", toIso)
@@ -656,6 +660,15 @@ export function useItemTrend(range: DateRange, topN = 5) {
         .slice(0, topN)
         .map(([name]) => name);
       const topSet = new Set(top);
+
+      // Real net sales dollars (Toast's actual recorded revenue,
+      // reflecting discounts/comps — never price × quantity), summed
+      // once per top item across the whole range.
+      const revenueCents: Record<string, number> = {};
+      for (const r of rows) {
+        if (!topSet.has(r.name)) continue;
+        revenueCents[r.name] = (revenueCents[r.name] ?? 0) + Number(r.net_sales_cents);
+      }
 
       const days = Math.round((range.to.getTime() - range.from.getTime()) / 86_400_000) + 1;
       const useWeekly = days > 21;
@@ -698,7 +711,7 @@ export function useItemTrend(range: DateRange, topN = 5) {
           return point;
         });
 
-      return { items: top, series };
+      return { items: top, series, revenueCents };
     },
   });
 }
