@@ -836,41 +836,45 @@ function InventoryPage() {
 
         {/* Items vs Vendors */}
         <Tabs value={view} onValueChange={(v) => setView(v as "items" | "vendors" | "orders")}>
-          <TabsList className="bg-[hsl(var(--cream))] border border-stone-200">
-            <TabsTrigger value="items">
-              <Package className="h-3.5 w-3.5" /> Items
-              <Badge variant="outline" className="ml-2 font-normal">
-                {items.length}
-              </Badge>
-            </TabsTrigger>
-            <TabsTrigger value="vendors">
-              <Building2 className="h-3.5 w-3.5" /> Vendors
-              <Badge variant="outline" className="ml-2 font-normal">
-                {vendors.length}
-              </Badge>
-            </TabsTrigger>
-            <TabsTrigger value="orders">
-              <ClipboardList className="h-3.5 w-3.5" /> Purchase orders
-              <Badge variant="outline" className="ml-2 font-normal">
-                {purchaseOrders.length}
-              </Badge>
-            </TabsTrigger>
-          </TabsList>
+          <div className="max-w-full overflow-x-auto">
+            <TabsList className="bg-[hsl(var(--cream))] border border-stone-200">
+              <TabsTrigger value="items">
+                <Package className="h-3.5 w-3.5" /> Items
+                <Badge variant="outline" className="ml-2 font-normal">
+                  {items.length}
+                </Badge>
+              </TabsTrigger>
+              <TabsTrigger value="vendors">
+                <Building2 className="h-3.5 w-3.5" /> Vendors
+                <Badge variant="outline" className="ml-2 font-normal">
+                  {vendors.length}
+                </Badge>
+              </TabsTrigger>
+              <TabsTrigger value="orders">
+                <ClipboardList className="h-3.5 w-3.5" /> Purchase orders
+                <Badge variant="outline" className="ml-2 font-normal">
+                  {purchaseOrders.length}
+                </Badge>
+              </TabsTrigger>
+            </TabsList>
+          </div>
 
           {/* ITEMS TAB */}
           <TabsContent value="items" className="space-y-5 mt-5">
             {/* Filters */}
             <div className="flex items-center gap-3 flex-wrap">
-              <Tabs value={tab} onValueChange={(v) => setTab(v as Category | "All")}>
-                <TabsList className="bg-[hsl(var(--cream))] border border-stone-200">
-                  <TabsTrigger value="All">All</TabsTrigger>
-                  {CATEGORIES.map((c) => (
-                    <TabsTrigger key={c} value={c}>
-                      {c}
-                    </TabsTrigger>
-                  ))}
-                </TabsList>
-              </Tabs>
+              <div className="max-w-full overflow-x-auto">
+                <Tabs value={tab} onValueChange={(v) => setTab(v as Category | "All")}>
+                  <TabsList className="bg-[hsl(var(--cream))] border border-stone-200">
+                    <TabsTrigger value="All">All</TabsTrigger>
+                    {CATEGORIES.map((c) => (
+                      <TabsTrigger key={c} value={c}>
+                        {c}
+                      </TabsTrigger>
+                    ))}
+                  </TabsList>
+                </Tabs>
+              </div>
               <div className="relative flex-1 min-w-[220px] max-w-md">
                 <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-stone-400" />
                 <Input
@@ -895,7 +899,7 @@ function InventoryPage() {
                   ))}
                 </select>
               </div>
-              <div className="flex items-center gap-2 ml-auto">
+              <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
                 <Button
                   variant="outline"
                   onClick={() => recomputeParLevels.mutate()}
@@ -964,6 +968,7 @@ function InventoryPage() {
 
             {/* Items table */}
             <Card className="border-stone-200 overflow-hidden">
+              <div className="overflow-x-auto">
               <Table className="[&_th]:px-4 [&_th]:py-3 [&_td]:px-4 [&_td]:py-4">
                 <TableHeader>
                   <TableRow className="bg-stone-50/60">
@@ -1097,6 +1102,7 @@ function InventoryPage() {
                   )}
                 </TableBody>
               </Table>
+              </div>
               <div className="flex flex-wrap items-center justify-between gap-2 border-t bg-stone-50/60 px-4 py-3 text-sm">
                 <span className="text-stone-500">
                   {filtered.length === 0
@@ -1148,6 +1154,7 @@ function InventoryPage() {
             </div>
 
             <Card className="border-stone-200 overflow-hidden">
+              <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow className="bg-stone-50/60">
@@ -1242,6 +1249,7 @@ function InventoryPage() {
                   )}
                 </TableBody>
               </Table>
+              </div>
               <div className="flex flex-wrap items-center justify-between gap-2 border-t bg-stone-50/60 px-4 py-3 text-sm">
                 <span className="text-stone-500">
                   {vendors.length === 0
@@ -1283,6 +1291,7 @@ function InventoryPage() {
               a failed or not-yet-sent email. */}
           <TabsContent value="orders" className="space-y-5 mt-5">
             <Card className="border-stone-200 overflow-hidden">
+              <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow className="bg-stone-50/60">
@@ -1364,6 +1373,7 @@ function InventoryPage() {
                   )}
                 </TableBody>
               </Table>
+              </div>
               <div className="flex flex-wrap items-center justify-between gap-2 border-t bg-stone-50/60 px-4 py-3 text-sm">
                 <span className="text-stone-500">
                   {purchaseOrders.length === 0
@@ -1798,6 +1808,7 @@ function InventoryPage() {
                 </div>
               </Card>
 
+              <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -1910,6 +1921,7 @@ function InventoryPage() {
                   ))}
                 </TableBody>
               </Table>
+              </div>
             </div>
           ) : (
             <div className="py-6">
