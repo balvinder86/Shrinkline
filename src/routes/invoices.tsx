@@ -533,23 +533,25 @@ function InvoicesPage() {
         {/* Tabs */}
         <Tabs defaultValue="invoices" className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <TabsList className="bg-card">
-              <TabsTrigger value="invoices" className="gap-1.5">
-                <Inbox className="h-3.5 w-3.5" /> All invoices
-              </TabsTrigger>
-              <TabsTrigger value="vendors" className="gap-1.5">
-                <Truck className="h-3.5 w-3.5" /> Vendors
-              </TabsTrigger>
-              <TabsTrigger value="items" className="gap-1.5">
-                <Receipt className="h-3.5 w-3.5" /> Line items
-              </TabsTrigger>
-              <TabsTrigger value="savings" className="gap-1.5">
-                <PiggyBank className="h-3.5 w-3.5" /> Savings
-              </TabsTrigger>
-              <TabsTrigger value="automation" className="gap-1.5">
-                <Bot className="h-3.5 w-3.5" /> Automation
-              </TabsTrigger>
-            </TabsList>
+            <div className="max-w-full overflow-x-auto">
+              <TabsList className="bg-card">
+                <TabsTrigger value="invoices" className="gap-1.5">
+                  <Inbox className="h-3.5 w-3.5" /> All invoices
+                </TabsTrigger>
+                <TabsTrigger value="vendors" className="gap-1.5">
+                  <Truck className="h-3.5 w-3.5" /> Vendors
+                </TabsTrigger>
+                <TabsTrigger value="items" className="gap-1.5">
+                  <Receipt className="h-3.5 w-3.5" /> Line items
+                </TabsTrigger>
+                <TabsTrigger value="savings" className="gap-1.5">
+                  <PiggyBank className="h-3.5 w-3.5" /> Savings
+                </TabsTrigger>
+                <TabsTrigger value="automation" className="gap-1.5">
+                  <Bot className="h-3.5 w-3.5" /> Automation
+                </TabsTrigger>
+              </TabsList>
+            </div>
             <div className="flex items-center gap-2">
               <Button
                 variant="outline"
@@ -630,6 +632,7 @@ function InvoicesPage() {
             )}
 
             <Card className="overflow-hidden">
+              <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow className="bg-muted/40">
@@ -728,6 +731,7 @@ function InvoicesPage() {
                   )}
                 </TableBody>
               </Table>
+              </div>
               <div className="flex flex-wrap items-center justify-between gap-2 border-t bg-muted/30 px-4 py-3 text-sm">
                 <span className="text-muted-foreground">
                   {filteredInvoices.length === 0
@@ -853,7 +857,8 @@ function InvoicesPage() {
                     All approved invoices — matched line items only
                   </p>
                 </div>
-                <Table className="mt-3">
+                <div className="mt-3 overflow-x-auto">
+                <Table>
                   <TableHeader>
                     <TableRow>
                       <TableHead>Item</TableHead>
@@ -908,6 +913,7 @@ function InvoicesPage() {
                     )}
                   </TableBody>
                 </Table>
+                </div>
               </Card>
 
               <Card className="p-5">
@@ -1133,6 +1139,7 @@ function RealInvoiceUploadsCard({ onOpenInvoice }: { onOpenInvoice: (id: string)
           <div className="text-sm font-medium">Invoices uploaded and extracted for review</div>
         </div>
       </div>
+      <div className="overflow-x-auto">
       <Table>
         <TableHeader>
           <TableRow className="bg-muted/40">
@@ -1172,6 +1179,7 @@ function RealInvoiceUploadsCard({ onOpenInvoice }: { onOpenInvoice: (id: string)
           ))}
         </TableBody>
       </Table>
+      </div>
     </Card>
   );
 }
@@ -1663,6 +1671,7 @@ function InvoiceOcrSheet({
               <div className="mb-2 text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
                 Line items — match to an ingredient
               </div>
+              <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -1707,6 +1716,7 @@ function InvoiceOcrSheet({
                   ))}
                 </TableBody>
               </Table>
+              </div>
             </div>
 
             <Separator className="my-5" />
