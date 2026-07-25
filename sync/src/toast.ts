@@ -38,6 +38,38 @@ export type ToastRevenueCenter = {
   name: string;
 };
 
+// Labor API shapes — confirmed against a real, live response from
+// this restaurant's actual Toast account before writing any of this
+// (GET /labor/v1/employees, /labor/v1/jobs, /labor/v1/timeEntries all
+// returned real 200s), not guessed from docs alone.
+export type ToastJobReference = { guid: string };
+
+export type ToastEmployee = {
+  guid: string;
+  firstName: string;
+  lastName: string;
+  deleted?: boolean;
+  wageOverrides?: { wage: number; jobReference: ToastJobReference }[];
+};
+
+export type ToastJob = {
+  guid: string;
+  title: string;
+  defaultWage: number;
+  deleted?: boolean;
+};
+
+export type ToastTimeEntry = {
+  guid: string;
+  deleted?: boolean;
+  employeeReference?: ToastJobReference;
+  jobReference?: ToastJobReference;
+  inDate: string;
+  outDate?: string | null;
+  regularHours?: number;
+  overtimeHours?: number;
+};
+
 async function toastFetch(
   hostname: string,
   path: string,
@@ -144,4 +176,43 @@ export async function fetchMenus(
     }
   }
   return out;
+}
+
+// Roster + wage config — fetched once per sync run (not per date) and
+// used purely to resolve each time entry's wage_cents/employee name
+// at sync time, never persisted as their own standing entities.
+export async function fetchEmployees(
+  hostname: string,
+  token: string,
+  restaurantExternalId: string,
+): Promise<ToastEmployee[]> {
+  const employees = await toastFetch(hostname, `/labor/v1/employees`, token, restaurantExternalId);
+  return Array.isArray(employees) ? employees : [];
+}
+
+export async function fetchJobs(
+  hostname: string,
+  token: string,
+  restaurantExternalId: string,
+): Promise<ToastJob[]> {
+  const jobs = await toastFetch(hostname, `/labor/v1/jobs`, token, restaurantExternalId);
+  return Array.isArray(jobs) ? jobs : [];
+}
+
+// Real clocked shifts for one business date — actual hours worked,
+// not a planned/scheduled shift (a different Toast concept this app
+// doesn't ingest).
+export async function fetchTimeEntriesForDate(
+  hostname: string,
+  token: string,
+  restaurantExternalId: string,
+  businessDate: string, // yyyymmdd
+): Promise<ToastTimeEntry[]> {
+  const entries = await toastFetch(
+    hostname,
+    `/labor/v1/timeEntries?businessDate=${businessDate}`,
+    token,
+    restaurantExternalId,
+  );
+  return Array.isArray(entries) ? entries : [];
 }

@@ -51,6 +51,7 @@ export const ROUTE_PERMISSION: Record<string, PermissionKey> = {
   "/marketing": "marketing",
   "/loyalty": "loyalty",
   "/scheduling": "scheduling",
+  "/labor": "scheduling",
 };
 
 // Owners always have full access, independent of what's stored — a

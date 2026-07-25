@@ -19,6 +19,7 @@ import { Route as ProductMixRouteImport } from './routes/product-mix'
 import { Route as MarketingRouteImport } from './routes/marketing'
 import { Route as LoyaltyRouteImport } from './routes/loyalty'
 import { Route as LoginRouteImport } from './routes/login'
+import { Route as LaborRouteImport } from './routes/labor'
 import { Route as InvoicesRouteImport } from './routes/invoices'
 import { Route as InventoryRouteImport } from './routes/inventory'
 import { Route as AdminRouteImport } from './routes/admin'
@@ -74,6 +75,11 @@ const LoginRoute = LoginRouteImport.update({
   path: '/login',
   getParentRoute: () => rootRouteImport,
 } as any)
+const LaborRoute = LaborRouteImport.update({
+  id: '/labor',
+  path: '/labor',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const InvoicesRoute = InvoicesRouteImport.update({
   id: '/invoices',
   path: '/invoices',
@@ -100,6 +106,7 @@ export interface FileRoutesByFullPath {
   '/admin': typeof AdminRoute
   '/inventory': typeof InventoryRoute
   '/invoices': typeof InvoicesRoute
+  '/labor': typeof LaborRoute
   '/login': typeof LoginRoute
   '/loyalty': typeof LoyaltyRoute
   '/marketing': typeof MarketingRoute
@@ -116,6 +123,7 @@ export interface FileRoutesByTo {
   '/admin': typeof AdminRoute
   '/inventory': typeof InventoryRoute
   '/invoices': typeof InvoicesRoute
+  '/labor': typeof LaborRoute
   '/login': typeof LoginRoute
   '/loyalty': typeof LoyaltyRoute
   '/marketing': typeof MarketingRoute
@@ -133,6 +141,7 @@ export interface FileRoutesById {
   '/admin': typeof AdminRoute
   '/inventory': typeof InventoryRoute
   '/invoices': typeof InvoicesRoute
+  '/labor': typeof LaborRoute
   '/login': typeof LoginRoute
   '/loyalty': typeof LoyaltyRoute
   '/marketing': typeof MarketingRoute
@@ -151,6 +160,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/inventory'
     | '/invoices'
+    | '/labor'
     | '/login'
     | '/loyalty'
     | '/marketing'
@@ -167,6 +177,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/inventory'
     | '/invoices'
+    | '/labor'
     | '/login'
     | '/loyalty'
     | '/marketing'
@@ -183,6 +194,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/inventory'
     | '/invoices'
+    | '/labor'
     | '/login'
     | '/loyalty'
     | '/marketing'
@@ -200,6 +212,7 @@ export interface RootRouteChildren {
   AdminRoute: typeof AdminRoute
   InventoryRoute: typeof InventoryRoute
   InvoicesRoute: typeof InvoicesRoute
+  LaborRoute: typeof LaborRoute
   LoginRoute: typeof LoginRoute
   LoyaltyRoute: typeof LoyaltyRoute
   MarketingRoute: typeof MarketingRoute
@@ -284,6 +297,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LoginRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/labor': {
+      id: '/labor'
+      path: '/labor'
+      fullPath: '/labor'
+      preLoaderRoute: typeof LaborRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/invoices': {
       id: '/invoices'
       path: '/invoices'
@@ -320,6 +340,7 @@ const rootRouteChildren: RootRouteChildren = {
   AdminRoute: AdminRoute,
   InventoryRoute: InventoryRoute,
   InvoicesRoute: InvoicesRoute,
+  LaborRoute: LaborRoute,
   LoginRoute: LoginRoute,
   LoyaltyRoute: LoyaltyRoute,
   MarketingRoute: MarketingRoute,

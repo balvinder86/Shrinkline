@@ -8,6 +8,7 @@ import {
   Megaphone,
   Gift,
   CalendarClock,
+  Wallet,
   Shield,
   Settings,
   type LucideIcon,
@@ -44,6 +45,9 @@ export const NAV_GROWTH: NavItem[] = [
 
 export const NAV_OPERATIONS: NavItem[] = [
   { titleKey: "scheduling", url: "/scheduling", icon: CalendarClock, permission: "scheduling" },
+  // Reuses the "scheduling" permission — same workforce-operations
+  // bucket, no new permission plumbing needed for this one page.
+  { titleKey: "laborCost", url: "/labor", icon: Wallet, permission: "scheduling" },
 ];
 
 // Not permission-gated — Admin is owner-only (enforced by manage-team

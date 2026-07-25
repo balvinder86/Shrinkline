@@ -26,6 +26,7 @@ export type TranslationDict = {
     marketing: string;
     loyalty: string;
     scheduling: string;
+    laborCost: string;
     admin: string;
     settings: string;
   };
@@ -59,6 +60,7 @@ export const translations: Record<Language, TranslationDict> = {
       marketing: "Marketing",
       loyalty: "Loyalty",
       scheduling: "Scheduling",
+      laborCost: "Labor Cost",
       admin: "Admin",
       settings: "Settings",
     },
@@ -98,6 +100,7 @@ export const translations: Record<Language, TranslationDict> = {
       marketing: "Marketing",
       loyalty: "Lealtad",
       scheduling: "Horarios",
+      laborCost: "Costo laboral",
       admin: "Administración",
       settings: "Configuración",
     },

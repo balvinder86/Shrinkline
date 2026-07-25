@@ -14,7 +14,7 @@ import { type DateRange, addDays, isoDate } from "@/lib/date-range";
 // trusting a single request to return everything.
 const SUPABASE_PAGE_SIZE = 1000;
 
-async function fetchAllRows<T>(
+export async function fetchAllRows<T>(
   makeQuery: (
     from: number,
     to: number,

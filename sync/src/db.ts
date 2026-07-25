@@ -137,6 +137,50 @@ export async function upsertRevenueCenters(
   if (error) throw new Error(`upsert pos_revenue_centers failed: ${error.message}`);
 }
 
+export type LaborShiftRow = {
+  toastTimeEntryRef: string;
+  employeeRef: string;
+  employeeName: string;
+  jobRef: string | null;
+  jobTitle: string | null;
+  inAt: string;
+  outAt: string | null;
+  regularHours: number;
+  overtimeHours: number;
+  wageCents: number;
+  laborCostCents: number;
+};
+
+export async function upsertLaborShifts(
+  cred: PosCredential,
+  businessDate: string,
+  rows: LaborShiftRow[],
+) {
+  const isoDate = `${businessDate.slice(0, 4)}-${businessDate.slice(4, 6)}-${businessDate.slice(6, 8)}`;
+  if (rows.length === 0) return;
+  const { error } = await supabase.from("labor_shifts").upsert(
+    rows.map((r) => ({
+      restaurant_id: cred.restaurant_id,
+      location_id: cred.location_id,
+      business_date: isoDate,
+      toast_time_entry_ref: r.toastTimeEntryRef,
+      employee_ref: r.employeeRef,
+      employee_name: r.employeeName,
+      job_ref: r.jobRef,
+      job_title: r.jobTitle,
+      in_at: r.inAt,
+      out_at: r.outAt,
+      regular_hours: r.regularHours,
+      overtime_hours: r.overtimeHours,
+      wage_cents: r.wageCents,
+      labor_cost_cents: r.laborCostCents,
+      updated_at: new Date().toISOString(),
+    })),
+    { onConflict: "location_id,toast_time_entry_ref" },
+  );
+  if (error) throw new Error(`upsert labor_shifts failed: ${error.message}`);
+}
+
 export async function updateLastSyncedAt(cred: PosCredential, at: Date) {
   const { error } = await supabase
     .from("pos_credentials")

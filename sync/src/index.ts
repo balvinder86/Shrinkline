@@ -3,7 +3,12 @@ import {
   fetchOrdersForDate,
   fetchMenus,
   fetchRevenueCenters,
+  fetchEmployees,
+  fetchJobs,
+  fetchTimeEntriesForDate,
   type ToastOrder,
+  type ToastEmployee,
+  type ToastJob,
 } from "./toast.js";
 import {
   getToastCredentials,
@@ -12,9 +17,35 @@ import {
   replacePmixForDate,
   upsertMenuItems,
   upsertRevenueCenters,
+  upsertLaborShifts,
   updateLastSyncedAt,
   type PosCredential,
+  type LaborShiftRow,
 } from "./db.js";
+
+// Time-and-a-half — US federal OT standard, matches WA state law (no
+// CA-style daily-OT rules apply here). Not configurable in v1.
+const OVERTIME_MULTIPLIER = 1.5;
+
+// Employee wage override for the specific job worked, falling back to
+// that job's default wage — mirrors how Toast itself resolves pay,
+// and matches ingredient_cost_history's point-in-time-cost philosophy:
+// the stored rate reflects what this person was actually paid for
+// this shift, not whatever today's rate happens to be.
+function resolveWageCents(
+  employees: Map<string, ToastEmployee>,
+  jobs: Map<string, ToastJob>,
+  employeeRef: string | undefined,
+  jobRef: string | undefined,
+): number {
+  const employee = employeeRef ? employees.get(employeeRef) : undefined;
+  const override = jobRef
+    ? employee?.wageOverrides?.find((w) => w.jobReference?.guid === jobRef)
+    : undefined;
+  if (override) return Math.round(override.wage * 100);
+  const job = jobRef ? jobs.get(jobRef) : undefined;
+  return Math.round((job?.defaultWage ?? 0) * 100);
+}
 
 const BACKFILL_DAYS = 30;
 
@@ -136,6 +167,67 @@ async function syncCredential(cred: PosCredential) {
     );
   } catch (e) {
     console.error(`[toast-sync] ${cred.location_id}: revenue center sync failed (non-fatal): ${e}`);
+  }
+
+  try {
+    // Roster + wage config fetched once per run, not once per date —
+    // used only to resolve each shift's employee name/wage_cents.
+    const [rawEmployees, rawJobs] = await Promise.all([
+      fetchEmployees(cred.api_hostname, token, cred.pos_location_ref),
+      fetchJobs(cred.api_hostname, token, cred.pos_location_ref),
+    ]);
+    const employees = new Map(rawEmployees.map((e) => [e.guid, e]));
+    const jobs = new Map(rawJobs.map((j) => [j.guid, j]));
+
+    let totalShifts = 0;
+    for (const businessDate of dates) {
+      const entries = await fetchTimeEntriesForDate(
+        cred.api_hostname,
+        token,
+        cred.pos_location_ref,
+        businessDate,
+      );
+      const rows: LaborShiftRow[] = entries
+        .filter((entry) => !entry.deleted)
+        .map((entry) => {
+          const employee = entry.employeeReference
+            ? employees.get(entry.employeeReference.guid)
+            : undefined;
+          const job = entry.jobReference ? jobs.get(entry.jobReference.guid) : undefined;
+          const wageCents = resolveWageCents(
+            employees,
+            jobs,
+            entry.employeeReference?.guid,
+            entry.jobReference?.guid,
+          );
+          const regularHours = entry.regularHours ?? 0;
+          const overtimeHours = entry.overtimeHours ?? 0;
+          const laborCostCents = Math.round(
+            regularHours * wageCents + overtimeHours * wageCents * OVERTIME_MULTIPLIER,
+          );
+          return {
+            toastTimeEntryRef: entry.guid,
+            employeeRef: entry.employeeReference?.guid ?? "unknown",
+            employeeName: employee
+              ? `${employee.firstName} ${employee.lastName}`.trim()
+              : "Unknown employee",
+            jobRef: entry.jobReference?.guid ?? null,
+            jobTitle: job?.title ?? null,
+            inAt: entry.inDate,
+            outAt: entry.outDate ?? null,
+            regularHours,
+            overtimeHours,
+            wageCents,
+            laborCostCents,
+          };
+        });
+      await upsertLaborShifts(cred, businessDate, rows);
+      totalShifts += rows.length;
+      await new Promise((r) => setTimeout(r, 150));
+    }
+    console.log(`[toast-sync] ${cred.location_id}: ${totalShifts} labor shifts synced`);
+  } catch (e) {
+    console.error(`[toast-sync] ${cred.location_id}: labor sync failed (non-fatal): ${e}`);
   }
 
   await updateLastSyncedAt(cred, now);
