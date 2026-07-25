@@ -256,7 +256,7 @@ function ProductMixPage() {
     const { timezone, orders } = orderDetails;
     const buckets = [
       { name: "Lunch", hours: "11a–3p", test: (h: number) => h >= 11 && h < 15 },
-      { name: "Happy Hour", hours: "3p–6p", test: (h: number) => h >= 15 && h < 18 },
+      { name: "Mid Day", hours: "3p–6p", test: (h: number) => h >= 15 && h < 18 },
       { name: "Dinner", hours: "6p–10p", test: (h: number) => h >= 18 && h < 22 },
       { name: "Late night", hours: "10p–close", test: (h: number) => h >= 22 || h < 11 },
     ];
