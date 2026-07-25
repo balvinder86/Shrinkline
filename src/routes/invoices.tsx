@@ -5,6 +5,7 @@ import {
   ArrowDownRight,
   ArrowUpRight,
   Bot,
+  Camera,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
@@ -1244,9 +1245,14 @@ function InvoiceOcrSheet({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeId, invoice?.ocrStatus, checkOcr.isPending]);
 
-  async function handleStart() {
-    if (!file) return;
-    const gateError = attachmentGateError(file);
+  // Shared by both entry points below — the deliberate "choose a
+  // file" flow (pick, review, then click Upload) and the camera flow
+  // (snap a photo, upload immediately, no extra confirm tap). Takes
+  // the File directly rather than reading from `file` state so the
+  // camera path can fire in the same handler that just set it,
+  // without racing React's async state update.
+  async function startUpload(fileToUpload: File) {
+    const gateError = attachmentGateError(fileToUpload);
     if (gateError) {
       setStartError(gateError);
       return;
@@ -1254,7 +1260,7 @@ function InvoiceOcrSheet({
     setStarting(true);
     setStartError(null);
     try {
-      const id = await uploadInvoice.mutateAsync({ vendorId: vendorId || null, file });
+      const id = await uploadInvoice.mutateAsync({ vendorId: vendorId || null, file: fileToUpload });
       await enqueueOcr.mutateAsync(id);
       setUploadedId(id);
     } catch (e) {
@@ -1262,6 +1268,17 @@ function InvoiceOcrSheet({
     } finally {
       setStarting(false);
     }
+  }
+
+  function handleStart() {
+    if (!file) return;
+    startUpload(file);
+  }
+
+  function handleCameraCapture(selected: File | undefined) {
+    if (!selected) return;
+    setFile(selected);
+    startUpload(selected);
   }
 
   return (
@@ -1300,30 +1317,74 @@ function InvoiceOcrSheet({
                 </p>
               )}
             </div>
-            <div>
-              <Label>Invoice file</Label>
-              <input
-                type="file"
-                accept="application/pdf,image/jpeg,image/jpg,image/png"
-                onChange={(e) => {
-                  setFile(e.target.files?.[0] ?? null);
-                  setStartError(null);
-                }}
-                className="mt-1.5 block w-full text-sm file:mr-3 file:rounded-md file:border-0 file:bg-primary/10 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-primary"
-              />
-              <p className="mt-1.5 text-xs text-muted-foreground">
-                PDF, JPG, or PNG — on your phone this offers the camera directly. Max 25MB.
-              </p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="rounded-xl border border-dashed p-4 text-center">
+                <Camera className="mx-auto h-5 w-5 text-muted-foreground" />
+                <div className="mt-1.5 text-sm font-medium">Take a picture</div>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  Opens your camera — uploads and starts extracting the moment you take the shot.
+                </p>
+                <label className="mt-3 inline-block">
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/jpg,image/png"
+                    capture="environment"
+                    disabled={starting}
+                    onChange={(e) => {
+                      handleCameraCapture(e.target.files?.[0]);
+                      e.target.value = "";
+                    }}
+                    className="hidden"
+                  />
+                  <span className="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90">
+                    <Camera className="h-3.5 w-3.5" /> Take a picture
+                  </span>
+                </label>
+              </div>
+
+              <div className="rounded-xl border border-dashed p-4 text-center">
+                <Upload className="mx-auto h-5 w-5 text-muted-foreground" />
+                <div className="mt-1.5 text-sm font-medium">Choose a file</div>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  PDF, JPG, or PNG from your device — review before uploading.
+                </p>
+                <label className="mt-3 inline-block">
+                  <input
+                    type="file"
+                    accept="application/pdf,image/jpeg,image/jpg,image/png"
+                    disabled={starting}
+                    onChange={(e) => {
+                      setFile(e.target.files?.[0] ?? null);
+                      setStartError(null);
+                    }}
+                    className="hidden"
+                  />
+                  <span className="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-md border border-input bg-background px-3 text-sm font-medium hover:bg-accent">
+                    <Upload className="h-3.5 w-3.5" /> Choose a file
+                  </span>
+                </label>
+                {file && (
+                  <p className="mt-2 truncate text-xs text-muted-foreground" title={file.name}>
+                    {file.name}
+                  </p>
+                )}
+              </div>
             </div>
+
+            <p className="text-xs text-muted-foreground">Max 25MB per file.</p>
+
             {startError && <p className="text-sm text-rose-600">{startError}</p>}
-            <Button onClick={handleStart} disabled={!file || starting} className="gap-1.5">
-              {starting ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Upload className="h-3.5 w-3.5" />
-              )}
-              {starting ? "Uploading…" : "Upload & extract"}
-            </Button>
+
+            {file && (
+              <Button onClick={handleStart} disabled={starting} className="gap-1.5">
+                {starting ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Upload className="h-3.5 w-3.5" />
+                )}
+                {starting ? "Uploading…" : "Upload & extract"}
+              </Button>
+            )}
           </div>
         )}
 
