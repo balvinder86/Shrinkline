@@ -100,6 +100,7 @@ import {
   useVendorSpendSummary,
   type RealInvoice,
 } from "@/lib/boh/queries";
+import { attachmentGateError } from "@/lib/boh/attachmentGate";
 
 export const Route = createFileRoute("/invoices")({
   head: () => ({
@@ -1244,11 +1245,16 @@ function InvoiceOcrSheet({
   }, [activeId, invoice?.ocrStatus, checkOcr.isPending]);
 
   async function handleStart() {
-    if (!vendorId || !file) return;
+    if (!file) return;
+    const gateError = attachmentGateError(file);
+    if (gateError) {
+      setStartError(gateError);
+      return;
+    }
     setStarting(true);
     setStartError(null);
     try {
-      const id = await uploadInvoice.mutateAsync({ vendorId, file });
+      const id = await uploadInvoice.mutateAsync({ vendorId: vendorId || null, file });
       await enqueueOcr.mutateAsync(id);
       setUploadedId(id);
     } catch (e) {
@@ -1268,7 +1274,7 @@ function InvoiceOcrSheet({
           <SheetDescription>
             {activeId
               ? "Extracted with Mindee OCR — confirm the ingredient match on each line before approving."
-              : "Upload a vendor invoice PDF. It's sent to Mindee for extraction, then you review the line items before approving."}
+              : "Upload a photo or PDF of a vendor invoice — from your phone or computer. Pick the vendor if you know it, or leave it blank and we'll try to match it from the invoice itself."}
           </SheetDescription>
         </SheetHeader>
 
@@ -1281,7 +1287,7 @@ function InvoiceOcrSheet({
                 onChange={(e) => setVendorId(e.target.value)}
                 className="mt-1.5 h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
               >
-                <option value="">Select a vendor…</option>
+                <option value="">Select a vendor (optional — we'll try to detect it)…</option>
                 {vendors.map((v) => (
                   <option key={v.id} value={v.id}>
                     {v.name}
@@ -1295,20 +1301,22 @@ function InvoiceOcrSheet({
               )}
             </div>
             <div>
-              <Label>Invoice PDF</Label>
+              <Label>Invoice file</Label>
               <input
                 type="file"
-                accept="application/pdf"
-                onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                accept="application/pdf,image/jpeg,image/jpg,image/png"
+                onChange={(e) => {
+                  setFile(e.target.files?.[0] ?? null);
+                  setStartError(null);
+                }}
                 className="mt-1.5 block w-full text-sm file:mr-3 file:rounded-md file:border-0 file:bg-primary/10 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-primary"
               />
+              <p className="mt-1.5 text-xs text-muted-foreground">
+                PDF, JPG, or PNG — on your phone this offers the camera directly. Max 25MB.
+              </p>
             </div>
             {startError && <p className="text-sm text-rose-600">{startError}</p>}
-            <Button
-              onClick={handleStart}
-              disabled={!vendorId || !file || starting}
-              className="gap-1.5"
-            >
+            <Button onClick={handleStart} disabled={!file || starting} className="gap-1.5">
               {starting ? (
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
               ) : (
@@ -1345,7 +1353,7 @@ function InvoiceOcrSheet({
         {activeId && invoice?.ocrStatus === "ready" && !invoice.vendorId && (
           <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50/60 p-4">
             <div className="text-[11px] uppercase tracking-[0.18em] text-amber-800">
-              This invoice arrived by email — pick the vendor
+              No vendor matched yet — pick one
             </div>
             {(invoice.sourceEmailFrom || invoice.sourceEmailSubject) && (
               <div className="mt-1.5 text-xs text-amber-900">

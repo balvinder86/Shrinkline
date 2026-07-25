@@ -1700,7 +1700,13 @@ export function useUploadInvoice() {
   const locationId = useCurrentLocationId();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ vendorId, file }: { vendorId: string; file: File }): Promise<string> => {
+    mutationFn: async ({
+      vendorId,
+      file,
+    }: {
+      vendorId: string | null;
+      file: File;
+    }): Promise<string> => {
       if (!restaurantId || !locationId) throw new Error("no current restaurant/location");
       const path = `${restaurantId}/${crypto.randomUUID()}-${file.name}`;
       const { error: uploadErr } = await supabase.storage
