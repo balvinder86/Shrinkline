@@ -139,57 +139,82 @@ async function syncCredential(cred: EmailCredential) {
           continue;
         }
 
-        const bytes = await getAttachmentBytes(accessToken, messageId, attachment.attachmentId);
-        const mimeType = normalizedMimeType(attachment);
-        const sourceFileUrl = await uploadInvoiceFile(
-          cred.restaurant_id,
-          attachment.filename,
-          bytes,
-          mimeType,
-        );
-        const invoiceId = await createPendingInvoice({
-          restaurantId: cred.restaurant_id,
-          locationId,
-          sourceFileUrl,
-          fromEmail: parsed.fromEmail,
-          subject: parsed.subject,
-          vendorId: senderTrusted ? matchedVendorId : null,
-          flags,
-          senderAuthStatus: parsed.senderAuthStatus,
-        });
-        await logIngestionEvent({
-          restaurantId: cred.restaurant_id,
-          messageId,
-          filename: attachment.filename,
-          mimeType: attachment.mimeType,
-          sizeBytes: attachment.sizeBytes,
-          outcome: "processed",
-          reason: flags.length > 0 ? flags.join(",") : "ok",
-          invoiceId,
-        });
-        // The invoice row already exists at this point — if enqueueOcr
-        // fails (e.g. Mindee's own subscription lapsed, nothing to do
-        // with this specific email), don't let that fall through to
-        // the outer catch below and skip markMessageProcessed, or this
-        // same message gets "retried" every run forever, each retry
-        // creating a brand-new duplicate invoice for a row that
-        // already exists. ocr/'s background sweep retries any invoice
-        // that was never successfully enqueued, so it's safe to just
-        // log and move on — the row still gets its OCR eventually.
+        // Each attachment gets its own try/catch — a transient failure
+        // on one attachment (e.g. a storage upload network blip) must
+        // not abort the whole message. Letting it fall through to the
+        // outer catch skipped markMessageProcessed, so a retry
+        // re-walked every attachment on the message from scratch,
+        // re-creating a fresh duplicate invoice for every attachment
+        // that had already succeeded — confirmed live (two real
+        // duplicate rows for the same image before this fix). A
+        // permanently-failing attachment is still never silently
+        // dropped — logged as a skipped event with the real error, and
+        // the message is still marked processed so it doesn't retry
+        // forever creating more successful-attachment duplicates.
         try {
-          await enqueueOcr(invoiceId);
-        } catch (enqueueError) {
-          console.error(
-            `[email-ingest] ${cred.connected_email}: enqueue OCR failed for invoice ${invoiceId} (will retry via ocr/'s background sweep) — ${enqueueError}`,
+          const bytes = await getAttachmentBytes(accessToken, messageId, attachment.attachmentId);
+          const mimeType = normalizedMimeType(attachment);
+          const sourceFileUrl = await uploadInvoiceFile(
+            cred.restaurant_id,
+            attachment.filename,
+            bytes,
+            mimeType,
           );
+          const invoiceId = await createPendingInvoice({
+            restaurantId: cred.restaurant_id,
+            locationId,
+            sourceFileUrl,
+            fromEmail: parsed.fromEmail,
+            subject: parsed.subject,
+            vendorId: senderTrusted ? matchedVendorId : null,
+            flags,
+            senderAuthStatus: parsed.senderAuthStatus,
+          });
+          await logIngestionEvent({
+            restaurantId: cred.restaurant_id,
+            messageId,
+            filename: attachment.filename,
+            mimeType: attachment.mimeType,
+            sizeBytes: attachment.sizeBytes,
+            outcome: "processed",
+            reason: flags.length > 0 ? flags.join(",") : "ok",
+            invoiceId,
+          });
+          // The invoice row already exists at this point — if
+          // enqueueOcr fails (e.g. Mindee's own subscription lapsed,
+          // nothing to do with this specific email), don't let that
+          // throw and get caught as an attachment failure below — the
+          // row still gets its OCR eventually via ocr/'s background
+          // sweep, which retries any invoice that was never enqueued.
+          try {
+            await enqueueOcr(invoiceId);
+          } catch (enqueueError) {
+            console.error(
+              `[email-ingest] ${cred.connected_email}: enqueue OCR failed for invoice ${invoiceId} (will retry via ocr/'s background sweep) — ${enqueueError}`,
+            );
+          }
+          lastInvoiceId = invoiceId;
+          if (flags.length > 0) flagged++;
+          else created++;
+          console.log(
+            `[email-ingest] ${cred.connected_email}: created invoice ${invoiceId} from "${parsed.subject}" (${attachment.filename})` +
+              (flags.length > 0 ? ` — flagged: ${flags.join(",")}` : ` — matched vendor ${matchedVendorId}`),
+          );
+        } catch (attachmentError) {
+          console.error(
+            `[email-ingest] ${cred.connected_email}: attachment "${attachment.filename}" on message ${messageId} FAILED (skipping, message still marked processed) — ${attachmentError}`,
+          );
+          await logIngestionEvent({
+            restaurantId: cred.restaurant_id,
+            messageId,
+            filename: attachment.filename,
+            mimeType: attachment.mimeType,
+            sizeBytes: attachment.sizeBytes,
+            outcome: "skipped",
+            reason: "processing_error",
+            invoiceId: null,
+          });
         }
-        lastInvoiceId = invoiceId;
-        if (flags.length > 0) flagged++;
-        else created++;
-        console.log(
-          `[email-ingest] ${cred.connected_email}: created invoice ${invoiceId} from "${parsed.subject}" (${attachment.filename})` +
-            (flags.length > 0 ? ` — flagged: ${flags.join(",")}` : ` — matched vendor ${matchedVendorId}`),
-        );
       }
 
       await markMessageProcessed(cred.restaurant_id, "gmail", messageId, lastInvoiceId);

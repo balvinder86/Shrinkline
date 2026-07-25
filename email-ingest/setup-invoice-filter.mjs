@@ -71,15 +71,20 @@ async function listExistingFilters(accessToken) {
   return body.filter ?? [];
 }
 
+// PDF/JPG/JPEG/PNG — matches the attachment-gate allow-list in
+// email-ingest/src/gmail.ts (isAllowedAttachmentType) — a vendor
+// sending a photo of an invoice instead of a PDF needs the same
+// auto-labeling a PDF invoice already gets. Not any-attachment, so
+// this doesn't label every logo/signature-image email as an invoice.
+const FILTER_QUERY =
+  "has:attachment (filename:pdf OR filename:jpg OR filename:jpeg OR filename:png)";
+
 async function createFilter(accessToken, labelId) {
   const res = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/settings/filters", {
     method: "POST",
     headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
     body: JSON.stringify({
-      // Matches the same shape as the cron's own search query — a PDF
-      // attachment specifically, not any attachment — so this doesn't
-      // label every image/logo-attachment email as an invoice too.
-      criteria: { query: "has:attachment filename:pdf" },
+      criteria: { query: FILTER_QUERY },
       action: { addLabelIds: [labelId] },
     }),
   });
@@ -93,9 +98,7 @@ const labelId = await findOrCreateLabel(accessToken, LABEL_NAME);
 
 const existingFilters = await listExistingFilters(accessToken);
 const alreadyExists = existingFilters.some(
-  (f) =>
-    (f.criteria?.query ?? "").includes("filename:pdf") &&
-    (f.action?.addLabelIds ?? []).includes(labelId),
+  (f) => (f.criteria?.query ?? "") === FILTER_QUERY && (f.action?.addLabelIds ?? []).includes(labelId),
 );
 if (alreadyExists) {
   console.log("A matching filter (hasAttachment -> this label) already exists — nothing to do.");

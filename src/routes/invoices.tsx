@@ -1066,6 +1066,7 @@ const SKIP_REASON_LABELS: Record<string, string> = {
   too_large: "File too large (>25MB)",
   too_small: "File too small — likely a logo/signature",
   no_attachment: "No attachment on this email",
+  processing_error: "Upload/processing error — see logs",
 };
 
 // Sibling to ocrStatusBadge, not folded into it — that function is
