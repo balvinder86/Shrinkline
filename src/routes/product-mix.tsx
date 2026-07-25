@@ -41,6 +41,8 @@ import {
   Legend,
   Line,
   LineChart,
+  Pie,
+  PieChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -160,6 +162,28 @@ function ProductMixPage() {
   const { data: orderDetails, isLoading: isOrderDetailsLoading } = useOrderDetails(dateRange);
   const { data: itemTrend, isLoading: isTrendLoading } = useItemTrend(dateRange, 5);
   const updateCost = useUpdateItemCost();
+
+  // Same top-N items and per-item colors as the velocity line chart
+  // above it — just summed across the whole period instead of broken
+  // out by bucket, so "who's biggest" reads at a glance next to "who's
+  // moving how".
+  const itemTrendShare = useMemo(() => {
+    if (!itemTrend) return [];
+    const totals = itemTrend.items.map((name) => ({
+      name,
+      units: itemTrend.series.reduce((sum, point) => sum + (Number(point[name]) || 0), 0),
+    }));
+    const totalUnits = totals.reduce((a, t) => a + t.units, 0);
+    if (totalUnits === 0) return [];
+    return totals
+      .filter((t) => t.units > 0)
+      .map((t, i) => ({
+        name: t.name,
+        value: t.units,
+        pct: Math.round((t.units / totalUnits) * 100),
+        color: TREND_COLORS[i % TREND_COLORS.length],
+      }));
+  }, [itemTrend]);
 
   const categories = useMemo(
     () => Array.from(new Set(items.map((i) => i.category))).sort(),
@@ -723,59 +747,127 @@ function ProductMixPage() {
 
           {/* TRENDS */}
           <TabsContent value="trends">
-            <Card className="p-6">
-              <div className="flex items-end justify-between mb-4">
-                <div>
-                  <p className="text-xs uppercase tracking-widest text-muted-foreground mb-1">
-                    {rangeLabel}
-                  </p>
-                  <h3 className="font-serif text-2xl">
-                    Top {itemTrend?.items.length ?? 5} items velocity
-                  </h3>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Real units sold, {rangeDayCount > 21 ? "weekly" : "daily"}
-                  </p>
+            <div className="grid gap-4 lg:grid-cols-3">
+              <Card className="p-6 lg:col-span-2">
+                <div className="flex items-end justify-between mb-4">
+                  <div>
+                    <p className="text-xs uppercase tracking-widest text-muted-foreground mb-1">
+                      {rangeLabel}
+                    </p>
+                    <h3 className="font-serif text-2xl">
+                      Top {itemTrend?.items.length ?? 5} items velocity
+                    </h3>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Real units sold, {rangeDayCount > 21 ? "weekly" : "daily"}
+                    </p>
+                  </div>
                 </div>
-              </div>
-              {isTrendLoading ? (
-                <div className="h-80 flex items-center justify-center text-sm text-muted-foreground">
-                  Loading real sales history…
-                </div>
-              ) : !itemTrend || itemTrend.items.length === 0 ? (
-                <div className="h-80 flex items-center justify-center text-sm text-muted-foreground">
-                  No real sales in {rangeLabel} yet.
-                </div>
-              ) : (
-                <div className="h-80">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={itemTrend.series}>
-                      <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="2 4" />
-                      <XAxis dataKey="bucket" tick={{ fontSize: 11 }} />
-                      <YAxis tick={{ fontSize: 11 }} />
-                      <Tooltip
-                        contentStyle={{
-                          background: "hsl(var(--background))",
-                          border: "1px solid hsl(var(--border))",
-                          borderRadius: 8,
-                          fontSize: 12,
-                        }}
-                      />
-                      <Legend wrapperStyle={{ fontSize: 11 }} />
-                      {itemTrend.items.map((name, i) => (
-                        <Line
-                          key={name}
-                          type="monotone"
-                          dataKey={name}
-                          stroke={TREND_COLORS[i % TREND_COLORS.length]}
-                          strokeWidth={2}
-                          dot={false}
+                {isTrendLoading ? (
+                  <div className="h-80 flex items-center justify-center text-sm text-muted-foreground">
+                    Loading real sales history…
+                  </div>
+                ) : !itemTrend || itemTrend.items.length === 0 ? (
+                  <div className="h-80 flex items-center justify-center text-sm text-muted-foreground">
+                    No real sales in {rangeLabel} yet.
+                  </div>
+                ) : (
+                  <div className="h-80">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={itemTrend.series}>
+                        <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="2 4" />
+                        <XAxis dataKey="bucket" tick={{ fontSize: 11 }} />
+                        <YAxis tick={{ fontSize: 11 }} />
+                        <Tooltip
+                          contentStyle={{
+                            background: "hsl(var(--background))",
+                            border: "1px solid hsl(var(--border))",
+                            borderRadius: 8,
+                            fontSize: 12,
+                          }}
                         />
+                        <Legend wrapperStyle={{ fontSize: 11 }} />
+                        {itemTrend.items.map((name, i) => (
+                          <Line
+                            key={name}
+                            type="monotone"
+                            dataKey={name}
+                            stroke={TREND_COLORS[i % TREND_COLORS.length]}
+                            strokeWidth={2}
+                            dot={false}
+                          />
+                        ))}
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
+              </Card>
+
+              <Card className="p-6">
+                <p className="text-xs uppercase tracking-widest text-muted-foreground mb-1">
+                  {rangeLabel}
+                </p>
+                <h3 className="font-serif text-2xl">Top items share</h3>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Real units sold, split across the same top items
+                </p>
+                {isTrendLoading ? (
+                  <div className="h-64 flex items-center justify-center text-sm text-muted-foreground">
+                    Loading…
+                  </div>
+                ) : itemTrendShare.length === 0 ? (
+                  <div className="h-64 flex items-center justify-center text-center text-sm text-muted-foreground">
+                    No real sales in {rangeLabel} yet.
+                  </div>
+                ) : (
+                  <>
+                    <div className="mt-2 h-52">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                          <Pie
+                            data={itemTrendShare}
+                            dataKey="value"
+                            innerRadius={56}
+                            outerRadius={84}
+                            paddingAngle={2}
+                            isAnimationActive={false}
+                          >
+                            {itemTrendShare.map((s) => (
+                              <Cell key={s.name} fill={s.color} />
+                            ))}
+                          </Pie>
+                          <Tooltip
+                            formatter={(v: number) => `${v.toLocaleString()} sold`}
+                            contentStyle={{
+                              background: "hsl(var(--background))",
+                              border: "1px solid hsl(var(--border))",
+                              borderRadius: 8,
+                              fontSize: 12,
+                            }}
+                          />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </div>
+                    <div className="mt-3 space-y-2">
+                      {itemTrendShare.map((s) => (
+                        <div key={s.name} className="flex items-center justify-between text-sm">
+                          <span className="inline-flex min-w-0 items-center gap-2">
+                            <span
+                              className="h-2.5 w-2.5 shrink-0 rounded-full"
+                              style={{ background: s.color }}
+                            />
+                            <span className="truncate">{s.name}</span>
+                          </span>
+                          <span className="ml-3 shrink-0 font-medium">
+                            {s.value.toLocaleString()}{" "}
+                            <span className="text-muted-foreground">({s.pct}%)</span>
+                          </span>
+                        </div>
                       ))}
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
-              )}
-            </Card>
+                    </div>
+                  </>
+                )}
+              </Card>
+            </div>
           </TabsContent>
 
           {/* AI ENGINEER */}
