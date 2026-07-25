@@ -87,6 +87,13 @@ export function DateRangePicker({
               defaultMonth={range.to}
               selected={draft}
               onSelect={setDraft}
+              // Without this, clicking a day while a complete range is
+              // already selected just nudges the nearest existing
+              // boundary (usually "to") instead of starting fresh —
+              // so a new custom-range pick can silently keep the old
+              // "from" date. See feedback_thrasherspub_ui_preferences
+              // / project_thrasherspub_saas memory, 2026-07-25.
+              resetOnSelect
               disabled={{ after: startOfDay(new Date()) }}
             />
             <div className="flex items-center justify-end gap-2 border-t border-border p-3">
