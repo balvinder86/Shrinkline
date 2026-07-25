@@ -1196,15 +1196,37 @@ function CameraCaptureDialog({
   const streamRef = useRef<MediaStream | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
+  // Captured photo sits here for review (Retake/Use) before ever
+  // reaching onCapture — the camera stream stays alive underneath so
+  // Retake is instant, no re-requesting permission/access. A blurry,
+  // tilted, or badly-framed shot is much cheaper to catch here than
+  // after a full upload+OCR round trip only to discover Mindee
+  // couldn't read it (confirmed live: an angled, cropped webcam photo
+  // of a real invoice extracted nothing at all).
+  const [capturedFile, setCapturedFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) return;
     setError(null);
     setReady(false);
+    setCapturedFile(null);
+    setPreviewUrl(null);
     let cancelled = false;
 
     navigator.mediaDevices
-      ?.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false })
+      ?.getUserMedia({
+        video: {
+          facingMode: { ideal: "environment" },
+          // Default getUserMedia resolution is often quite low
+          // (sometimes 640x480) — a laptop webcam is capable of much
+          // more, and low resolution is exactly what makes a photo
+          // unreadable by OCR even when framing/angle are fine.
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
+        },
+        audio: false,
+      })
       .then((stream) => {
         if (cancelled) {
           stream.getTracks().forEach((t) => t.stop());
@@ -1234,6 +1256,14 @@ function CameraCaptureDialog({
     };
   }, [open]);
 
+  // Revoke the preview object URL whenever it's replaced/cleared, not
+  // just on unmount — Retake creates a fresh one each time.
+  useEffect(() => {
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [previewUrl]);
+
   function handleCapture() {
     const video = videoRef.current;
     if (!video || !video.videoWidth) return;
@@ -1246,34 +1276,71 @@ function CameraCaptureDialog({
     canvas.toBlob(
       (blob) => {
         if (!blob) return;
-        onCapture(new File([blob], `invoice-photo-${Date.now()}.jpg`, { type: "image/jpeg" }));
+        const captured = new File([blob], `invoice-photo-${Date.now()}.jpg`, {
+          type: "image/jpeg",
+        });
+        setCapturedFile(captured);
+        setPreviewUrl(URL.createObjectURL(captured));
       },
       "image/jpeg",
-      0.92,
+      0.95,
     );
+  }
+
+  function handleRetake() {
+    setCapturedFile(null);
+    setPreviewUrl(null);
+  }
+
+  function handleUsePhoto() {
+    if (!capturedFile) return;
+    onCapture(capturedFile);
   }
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Take a picture</DialogTitle>
+          <DialogTitle>{previewUrl ? "Use this photo?" : "Take a picture"}</DialogTitle>
         </DialogHeader>
         {error ? (
           <div className="py-10 text-center text-sm text-rose-600">{error}</div>
         ) : (
           <div className="overflow-hidden rounded-xl bg-black">
-            {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-            <video ref={videoRef} autoPlay playsInline muted className="w-full" />
+            {previewUrl ? (
+              <img src={previewUrl} alt="Captured invoice" className="w-full" />
+            ) : (
+              // eslint-disable-next-line jsx-a11y/media-has-caption
+              <video ref={videoRef} autoPlay playsInline muted className="w-full" />
+            )}
           </div>
         )}
+        {!error && !previewUrl && (
+          <p className="text-xs text-muted-foreground">
+            Hold the invoice flat and fill as much of the frame as you can — an angled or
+            cropped shot is much less likely to extract cleanly.
+          </p>
+        )}
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button onClick={handleCapture} disabled={!ready || !!error} className="gap-1.5">
-            <Camera className="h-3.5 w-3.5" /> Capture
-          </Button>
+          {previewUrl ? (
+            <>
+              <Button variant="outline" onClick={handleRetake} className="gap-1.5">
+                <Camera className="h-3.5 w-3.5" /> Retake
+              </Button>
+              <Button onClick={handleUsePhoto} className="gap-1.5">
+                <Upload className="h-3.5 w-3.5" /> Use this photo
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button variant="outline" onClick={onClose}>
+                Cancel
+              </Button>
+              <Button onClick={handleCapture} disabled={!ready || !!error} className="gap-1.5">
+                <Camera className="h-3.5 w-3.5" /> Capture
+              </Button>
+            </>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>
