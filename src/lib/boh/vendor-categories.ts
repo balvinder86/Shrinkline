@@ -9,6 +9,7 @@ export const VENDOR_CATEGORIES = [
   { value: "maintenance", label: "Maintenance & Repairs" },
   { value: "rent", label: "Rent" },
   { value: "insurance", label: "Insurance" },
+  { value: "events", label: "Events" },
   { value: "other", label: "Other" },
 ] as const;
 
@@ -27,5 +28,6 @@ export const VENDOR_CATEGORY_COLOR: Record<VendorCategory, string> = {
   maintenance: "hsl(38 60% 55%)",
   rent: "hsl(280 40% 55%)",
   insurance: "hsl(120 25% 45%)",
+  events: "hsl(340 55% 55%)",
   other: "hsl(220 15% 55%)",
 };
