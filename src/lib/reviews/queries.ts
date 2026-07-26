@@ -46,6 +46,7 @@ export function useReviews() {
         .select(
           "id, reviewer_name, star_rating, review_text, review_found_at, review_written_at, ai_draft_reply, edited_reply, status, posted_at, post_error",
         )
+        .eq("restaurant_id", restaurantId!)
         .order("review_written_at", { ascending: false, nullsFirst: false })
         .order("review_found_at", { ascending: false });
       if (error) throw error;
@@ -110,6 +111,7 @@ export function useReviewAgentConnection() {
         .select(
           "business_profile_id, search_query, cookies_captured_at, cookies_valid_at, last_synced_at, last_scan_google_review_count, last_scan_panel_healthy",
         )
+        .eq("restaurant_id", restaurantId!)
         .eq("provider", "google")
         .maybeSingle();
       if (credErr) throw credErr;
@@ -118,6 +120,7 @@ export function useReviewAgentConnection() {
       const { data: settings, error: settingsErr } = await supabase
         .from("review_agent_settings")
         .select("business_name, business_description, reply_contact_email, auto_send_5_star")
+        .eq("restaurant_id", restaurantId!)
         .maybeSingle();
       if (settingsErr) throw settingsErr;
 

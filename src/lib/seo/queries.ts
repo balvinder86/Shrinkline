@@ -26,6 +26,7 @@ export function useSearchConsoleConnection() {
       const { data, error } = await supabase
         .from("search_console_credentials")
         .select("site_url, connected_email, connected_at, last_synced_at")
+        .eq("restaurant_id", restaurantId!)
         .maybeSingle();
       if (error) throw error;
       if (!data) return null;
@@ -436,6 +437,7 @@ export function useCitationProfile() {
       const { data, error } = await supabase
         .from("review_agent_settings")
         .select("business_name, address, phone, website")
+        .eq("restaurant_id", restaurantId!)
         .maybeSingle();
       if (error) throw error;
       if (!data) return null;
@@ -454,9 +456,11 @@ export function useUpdateCitationProfile() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (input: { address: string; phone: string; website: string }) => {
+      if (!restaurantId) throw new Error("no current restaurant");
       const { error } = await supabase
         .from("review_agent_settings")
-        .update({ address: input.address, phone: input.phone, website: input.website });
+        .update({ address: input.address, phone: input.phone, website: input.website })
+        .eq("restaurant_id", restaurantId);
       if (error) throw error;
     },
     onSuccess: () => {
@@ -495,7 +499,8 @@ export function useCitationChecks() {
     queryFn: async (): Promise<CitationCheck[]> => {
       const { data, error } = await supabase
         .from("citation_checks")
-        .select("directory, status, note, checked_at");
+        .select("directory, status, note, checked_at")
+        .eq("restaurant_id", restaurantId!);
       if (error) throw error;
       return (data ?? []).map((r) => ({
         directory: r.directory as CitationDirectory,
@@ -549,6 +554,7 @@ export function useTrackedQueries() {
       const { data, error } = await supabase
         .from("competitor_tracked_queries")
         .select("id, query, created_at")
+        .eq("restaurant_id", restaurantId!)
         .order("created_at", { ascending: true });
       if (error) throw error;
       return (data ?? []).map((r) => ({ id: r.id, query: r.query, createdAt: r.created_at }));
@@ -632,6 +638,7 @@ export function useCompetitorScans() {
         .select(
           "id, tracked_query_id, query, scanned_at, local_pack, own_in_pack, own_position, organic_results",
         )
+        .eq("restaurant_id", restaurantId!)
         .order("scanned_at", { ascending: false })
         .limit(200);
       if (error) throw error;
@@ -711,6 +718,7 @@ export function useCompetitorReviewComparisons() {
         .select(
           "competitor_name, competitor_rating, competitor_review_count, our_strengths, competitor_strengths, opportunities, sample_size, scanned_at",
         )
+        .eq("restaurant_id", restaurantId!)
         .order("scanned_at", { ascending: false });
       if (error) throw error;
       return (data ?? []).map((r) => ({

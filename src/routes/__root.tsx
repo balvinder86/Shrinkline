@@ -21,6 +21,7 @@ import { reportLovableError } from "../lib/lovable-error-reporting";
 import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/AppSidebar";
 import { AuthProvider, useAuth } from "@/lib/supabase/auth-context";
+import { RestaurantProvider } from "@/lib/restaurant-context";
 import { DateRangeProvider } from "@/lib/date-range-context";
 import { LanguageProvider } from "@/lib/i18n/language-context";
 import { hasAccess, useCurrentMembership, ROUTE_PERMISSION } from "@/lib/permissions";
@@ -153,11 +154,13 @@ function RootComponent() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
-        <LanguageProvider>
-          <DateRangeProvider>
-            <AuthGate />
-          </DateRangeProvider>
-        </LanguageProvider>
+        <RestaurantProvider>
+          <LanguageProvider>
+            <DateRangeProvider>
+              <AuthGate />
+            </DateRangeProvider>
+          </LanguageProvider>
+        </RestaurantProvider>
       </AuthProvider>
     </QueryClientProvider>
   );

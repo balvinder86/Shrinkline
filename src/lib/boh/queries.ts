@@ -67,7 +67,11 @@ export function useVendors() {
     queryKey: ["vendors", restaurantId],
     enabled: !!restaurantId,
     queryFn: async (): Promise<Vendor[]> => {
-      const { data, error } = await supabase.from("vendors").select("*").order("name");
+      const { data, error } = await supabase
+        .from("vendors")
+        .select("*")
+        .eq("restaurant_id", restaurantId!)
+        .order("name");
       if (error) throw error;
       return (data ?? []).map(fromRow);
     },
@@ -153,7 +157,11 @@ export function useIngredients() {
     queryKey: ["ingredients", restaurantId],
     enabled: !!restaurantId,
     queryFn: async (): Promise<Ingredient[]> => {
-      const { data, error } = await supabase.from("ingredients").select("*").order("name");
+      const { data, error } = await supabase
+        .from("ingredients")
+        .select("*")
+        .eq("restaurant_id", restaurantId!)
+        .order("name");
       if (error) throw error;
       return (data ?? []).map((row) => ({
         id: row.id,
@@ -252,10 +260,10 @@ export function useInventoryItems() {
     enabled: !!restaurantId && !!locationId,
     queryFn: async (): Promise<InventoryItem[]> => {
       const [ingredientsRes, stockRes, parRes, vendorsRes] = await Promise.all([
-        supabase.from("ingredients").select("*").order("name"),
+        supabase.from("ingredients").select("*").eq("restaurant_id", restaurantId!).order("name"),
         supabase.from("ingredient_stock").select("*").eq("location_id", locationId!),
         supabase.from("par_levels").select("*").eq("location_id", locationId!),
-        supabase.from("vendors").select("id, name"),
+        supabase.from("vendors").select("id, name").eq("restaurant_id", restaurantId!),
       ]);
       if (ingredientsRes.error) throw ingredientsRes.error;
       if (stockRes.error) throw stockRes.error;
@@ -836,6 +844,7 @@ export function usePurchaseOrders() {
         .select(
           "id, status, total_cents, created_at, emailed_at, email_error, vendors(name, contact_email), purchase_order_lines(id)",
         )
+        .eq("restaurant_id", restaurantId!)
         .order("created_at", { ascending: false });
       if (error) throw error;
       type Row = {
@@ -1046,6 +1055,7 @@ export function useRealInvoices() {
         .select(
           "id, vendor_id, invoice_number, invoice_date, total_cents, discount_cents, status, ocr_status, source_file_url, created_at, source_email_from, source_email_subject, flags, document_type, vendors(name)",
         )
+        .eq("restaurant_id", restaurantId!)
         .order("created_at", { ascending: false });
       if (error) throw error;
       type Row = {
@@ -1293,10 +1303,11 @@ export function useVendorSpendSummary(dateRange?: DateRange) {
     enabled: !!restaurantId,
     queryFn: async (): Promise<VendorSpendSummary[]> => {
       const [vendorsRes, invoicesRes] = await Promise.all([
-        supabase.from("vendors").select("*").order("name"),
+        supabase.from("vendors").select("*").eq("restaurant_id", restaurantId!).order("name"),
         supabase
           .from("invoices")
-          .select("vendor_id, status, total_cents, invoice_date, created_at"),
+          .select("vendor_id, status, total_cents, invoice_date, created_at")
+          .eq("restaurant_id", restaurantId!),
       ]);
       if (vendorsRes.error) throw vendorsRes.error;
       if (invoicesRes.error) throw invoicesRes.error;
@@ -1359,10 +1370,11 @@ export function useExpenseCategorySpend(dateRange?: DateRange) {
     enabled: !!restaurantId,
     queryFn: async (): Promise<ExpenseCategorySpend[]> => {
       const [vendorsRes, invoicesRes] = await Promise.all([
-        supabase.from("vendors").select("id, category"),
+        supabase.from("vendors").select("id, category").eq("restaurant_id", restaurantId!),
         supabase
           .from("invoices")
           .select("vendor_id, status, total_cents, invoice_date, created_at")
+          .eq("restaurant_id", restaurantId!)
           .eq("status", "approved"),
       ]);
       if (vendorsRes.error) throw vendorsRes.error;
@@ -1422,6 +1434,7 @@ export function useSavingsSummary(dateRange?: DateRange) {
         .select(
           "id, invoice_number, invoice_date, created_at, total_cents, discount_cents, status, vendor_id, vendors(name)",
         )
+        .eq("restaurant_id", restaurantId!)
         .eq("status", "approved")
         .order("invoice_date", { ascending: false });
       if (error) throw error;
@@ -1506,7 +1519,8 @@ export function useTopLineItems(dateRange?: DateRange) {
         .from("invoice_lines")
         .select(
           "line_total_cents, ingredient_id, ingredients(name), invoices!inner(status, invoice_date, created_at, vendors(name))",
-        );
+        )
+        .eq("restaurant_id", restaurantId!);
       if (error) throw error;
       type Row = {
         line_total_cents: number | null;
@@ -1601,7 +1615,8 @@ export function useCategorySpend(dateRange?: DateRange) {
         .from("invoice_lines")
         .select(
           "line_total_cents, ingredients(category), invoices!inner(status, invoice_date, created_at)",
-        );
+        )
+        .eq("restaurant_id", restaurantId!);
       if (error) throw error;
       type Row = {
         line_total_cents: number | null;
@@ -1644,6 +1659,7 @@ export function useEmailIngestionStatus() {
       const { data, error } = await supabase
         .from("email_ingestion_credentials")
         .select("connected_email, label_filter, last_synced_at")
+        .eq("restaurant_id", restaurantId!)
         .eq("provider", "gmail")
         .maybeSingle();
       if (error) throw error;
@@ -1688,6 +1704,7 @@ export function useEmailIngestionActivity() {
         .select(
           "id, created_at, outcome, reason, filename, invoice_id, invoices(total_cents, flags, vendors(name))",
         )
+        .eq("restaurant_id", restaurantId!)
         .order("created_at", { ascending: false })
         .limit(20);
       if (error) throw error;

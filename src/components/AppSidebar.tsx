@@ -25,6 +25,7 @@ import {
 import { hasAccess, useCurrentMembership, type PermissionKey } from "@/lib/permissions";
 import { NAV_OVERVIEW, NAV_GROWTH, NAV_OPERATIONS, NAV_UNGATED } from "@/lib/nav-items";
 import { useAuth } from "@/lib/supabase/auth-context";
+import { useCurrentRestaurant } from "@/lib/restaurant-context";
 import { useLanguage } from "@/lib/i18n/language-context";
 import { LANGUAGES, type Language } from "@/lib/i18n/translations";
 
@@ -41,6 +42,8 @@ export function AppSidebar() {
   const membership = useCurrentMembership();
   const { signOut } = useAuth();
   const { language, setLanguage, t } = useLanguage();
+  const { restaurants, currentRestaurantId, currentRestaurant, setCurrentRestaurantId } =
+    useCurrentRestaurant();
 
   const visibleOverview = visibleFor(NAV_OVERVIEW, membership);
   const visibleGrowth = visibleFor(NAV_GROWTH, membership);
@@ -83,7 +86,9 @@ export function AppSidebar() {
             <UtensilsCrossed className="h-5 w-5" />
           </div>
           <div className="min-w-0">
-            <div className="font-display text-base leading-tight">Thrasher's Pub</div>
+            <div className="truncate font-display text-base leading-tight">
+              {currentRestaurant?.name ?? "Thrasher's Pub"}
+            </div>
             <div className="truncate text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
               {t.sidebar.tagline}
             </div>
@@ -107,13 +112,31 @@ export function AppSidebar() {
               </div>
               <div className="min-w-0">
                 <div className="truncate text-sm font-medium">Bali Singh</div>
-                <div className="truncate text-[11px] text-muted-foreground">
-                  Owner · West Village
+                <div className="truncate text-[11px] capitalize text-muted-foreground">
+                  {membership?.role ?? "…"} · {currentRestaurant?.name ?? "…"}
                 </div>
               </div>
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" side="top" className="w-56">
+            {restaurants.length > 1 && (
+              <>
+                <DropdownMenuLabel className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+                  {t.profile.restaurant}
+                </DropdownMenuLabel>
+                <DropdownMenuRadioGroup
+                  value={currentRestaurantId ?? ""}
+                  onValueChange={(v) => setCurrentRestaurantId(v)}
+                >
+                  {restaurants.map((r) => (
+                    <DropdownMenuRadioItem key={r.id} value={r.id}>
+                      {r.name}
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+                <DropdownMenuSeparator />
+              </>
+            )}
             <DropdownMenuLabel className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
               {t.profile.language}
             </DropdownMenuLabel>

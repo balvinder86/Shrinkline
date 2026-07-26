@@ -69,6 +69,7 @@ export function useCustomers() {
       const { data, error } = await supabase
         .from("customers")
         .select("*")
+        .eq("restaurant_id", restaurantId!)
         .order("created_at", { ascending: false });
       if (error) throw error;
       return (data ?? []).map(fromRow);
@@ -152,7 +153,11 @@ export function useDeleteSampleCustomers() {
   return useMutation({
     mutationFn: async () => {
       if (!restaurantId) throw new Error("no current restaurant");
-      const { error } = await supabase.from("customers").delete().eq("source", "sample");
+      const { error } = await supabase
+        .from("customers")
+        .delete()
+        .eq("restaurant_id", restaurantId)
+        .eq("source", "sample");
       if (error) throw error;
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["customers"] }),
