@@ -94,6 +94,7 @@ import {
   useEnqueueOcr,
   useIngredients,
   useCategorySpend,
+  useExpenseCategorySpend,
   dateInRange,
   usePromoteSenderAndAssignVendor,
   useRealInvoiceLines,
@@ -109,6 +110,7 @@ import {
   type RealInvoice,
 } from "@/lib/boh/queries";
 import { attachmentGateError } from "@/lib/boh/attachmentGate";
+import { VENDOR_CATEGORIES, VENDOR_CATEGORY_LABEL, VENDOR_CATEGORY_COLOR } from "@/lib/boh/vendor-categories";
 
 export const Route = createFileRoute("/invoices")({
   head: () => ({
@@ -222,6 +224,7 @@ function InvoicesPage() {
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "pending_review" | "approved">("all");
   const [vendorFilter, setVendorFilter] = useState<string>("all");
+  const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [ocrSheetInvoiceId, setOcrSheetInvoiceId] = useState<string | null | undefined>(undefined);
   const [page, setPage] = useState(1);
   const [invoiceToDelete, setInvoiceToDelete] = useState<RealInvoice | null>(null);
@@ -246,14 +249,28 @@ function InvoicesPage() {
   // otherwise a narrower filter can strand you on a now-empty page.
   useEffect(() => {
     setPage(1);
-  }, [query, statusFilter, vendorFilter, dateRange.from, dateRange.to]);
+  }, [query, statusFilter, vendorFilter, categoryFilter, dateRange.from, dateRange.to]);
 
   const { data: realInvoices = [] } = useRealInvoices();
   const { data: realVendors = [] } = useRealVendors();
   const { data: vendorSpend = [] } = useVendorSpendSummary(dateRange);
   const { data: topLineItems = [] } = useTopLineItems(dateRange);
   const { data: categorySpend = [] } = useCategorySpend(dateRange);
+  const { data: expenseCategorySpend = [] } = useExpenseCategorySpend(dateRange);
   const { data: savingsSummary } = useSavingsSummary(dateRange);
+
+  // vendorId -> expense category, for filtering "All invoices" by
+  // category without a second query (useVendorSpendSummary already
+  // carries category per vendor).
+  const vendorCategoryById = useMemo(
+    () => new Map(vendorSpend.map((v) => [v.vendorId, v.category])),
+    [vendorSpend],
+  );
+
+  const sortedExpenseCategorySpend = useMemo(
+    () => [...expenseCategorySpend].sort((a, b) => b.spendCents - a.spendCents),
+    [expenseCategorySpend],
+  );
 
   // Every invoice-derived calc on this page (KPIs, charts, the
   // "All invoices" table) filters from this one place, so the global
@@ -322,13 +339,17 @@ function InvoicesPage() {
     return dateFilteredInvoices.filter((inv) => {
       if (statusFilter !== "all" && inv.status !== statusFilter) return false;
       if (vendorFilter !== "all" && inv.vendorName !== vendorFilter) return false;
+      if (categoryFilter !== "all") {
+        const category = inv.vendorId ? vendorCategoryById.get(inv.vendorId) : undefined;
+        if (category !== categoryFilter) return false;
+      }
       if (query) {
         const haystack = `${inv.invoiceNumber ?? ""} ${inv.vendorName ?? ""}`.toLowerCase();
         if (!haystack.includes(query.toLowerCase())) return false;
       }
       return true;
     });
-  }, [dateFilteredInvoices, query, statusFilter, vendorFilter]);
+  }, [dateFilteredInvoices, query, statusFilter, vendorFilter, categoryFilter, vendorCategoryById]);
 
   const totalPages = Math.max(1, Math.ceil(filteredInvoices.length / INVOICES_PAGE_SIZE));
   const pagedInvoices = useMemo(
@@ -530,6 +551,63 @@ function InvoicesPage() {
           </Card>
         </div>
 
+        {/* By expense category — the real Food & Beverage vs Utilities
+            vs Maintenance vs Rent vs Insurance vs Other breakdown,
+            distinct from the ingredient-category "Category mix" chart
+            above (that one is what you bought; this is why). */}
+        <Card className="p-5">
+          <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+            By expense category
+          </div>
+          <h3 className="mt-1 font-display text-xl">Where operating costs go</h3>
+          {expenseCategorySpend.every((c) => c.spendCents === 0) ? (
+            <div className="mt-4 flex h-[180px] items-center justify-center rounded-xl border border-dashed text-center text-sm text-muted-foreground">
+              No approved invoices in {rangeLabel} yet.
+            </div>
+          ) : (
+            <div className="mt-4 h-[220px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={sortedExpenseCategorySpend} layout="vertical" margin={{ left: 8, right: 8 }}>
+                  <CartesianGrid stroke="var(--border)" strokeDasharray="2 4" horizontal={false} />
+                  <XAxis
+                    type="number"
+                    tick={{ fontSize: 11 }}
+                    tickFormatter={(v: number) => formatMoney(v / 100, { compact: true })}
+                  />
+                  <YAxis
+                    type="category"
+                    dataKey="category"
+                    tick={{ fontSize: 11 }}
+                    width={140}
+                    tickFormatter={(c: string) => VENDOR_CATEGORY_LABEL[c as keyof typeof VENDOR_CATEGORY_LABEL]}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      background: "var(--background)",
+                      border: "1px solid var(--border)",
+                      borderRadius: 8,
+                      fontSize: 12,
+                    }}
+                    formatter={(v: number, _name, item) => {
+                      const category = item?.payload?.category as keyof typeof VENDOR_CATEGORY_LABEL;
+                      const count = item?.payload?.invoiceCount ?? 0;
+                      return [
+                        `${formatMoney(v / 100)} · ${count} invoice${count === 1 ? "" : "s"}`,
+                        VENDOR_CATEGORY_LABEL[category],
+                      ];
+                    }}
+                  />
+                  <Bar dataKey="spendCents" radius={[0, 4, 4, 0]}>
+                    {sortedExpenseCategorySpend.map((c) => (
+                      <Cell key={c.category} fill={VENDOR_CATEGORY_COLOR[c.category]} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+        </Card>
+
         {/* Tabs */}
         <Tabs defaultValue="invoices" className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -596,9 +674,29 @@ function InvoicesPage() {
                   className="h-9 rounded-md border border-input bg-background px-3 text-sm"
                 >
                   <option value="all">All vendors</option>
-                  {realVendors.map((v) => (
-                    <option key={v.id} value={v.name}>
-                      {v.name}
+                  {VENDOR_CATEGORIES.map((c) => {
+                    const vendorsInCategory = realVendors.filter((v) => v.category === c.value);
+                    if (vendorsInCategory.length === 0) return null;
+                    return (
+                      <optgroup key={c.value} label={c.label}>
+                        {vendorsInCategory.map((v) => (
+                          <option key={v.id} value={v.name}>
+                            {v.name}
+                          </option>
+                        ))}
+                      </optgroup>
+                    );
+                  })}
+                </select>
+                <select
+                  value={categoryFilter}
+                  onChange={(e) => setCategoryFilter(e.target.value)}
+                  className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+                >
+                  <option value="all">All expense categories</option>
+                  {VENDOR_CATEGORIES.map((c) => (
+                    <option key={c.value} value={c.value}>
+                      {c.label}
                     </option>
                   ))}
                 </select>
@@ -791,11 +889,19 @@ function InvoicesPage() {
                         </div>
                       )}
                     </div>
-                    {v.terms && (
-                      <Badge variant="outline" className="shrink-0 text-xs">
-                        {v.terms}
+                    <div className="flex shrink-0 flex-col items-end gap-1">
+                      {v.terms && (
+                        <Badge variant="outline" className="text-xs">
+                          {v.terms}
+                        </Badge>
+                      )}
+                      <Badge
+                        className="text-xs text-white hover:opacity-90"
+                        style={{ background: VENDOR_CATEGORY_COLOR[v.category] }}
+                      >
+                        {VENDOR_CATEGORY_LABEL[v.category]}
                       </Badge>
-                    )}
+                    </div>
                   </div>
 
                   <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
@@ -1493,11 +1599,19 @@ function InvoiceOcrSheet({
                 className="mt-1.5 h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
               >
                 <option value="">Select a vendor (optional — we'll try to detect it)…</option>
-                {vendors.map((v) => (
-                  <option key={v.id} value={v.id}>
-                    {v.name}
-                  </option>
-                ))}
+                {VENDOR_CATEGORIES.map((c) => {
+                  const vendorsInCategory = vendors.filter((v) => v.category === c.value);
+                  if (vendorsInCategory.length === 0) return null;
+                  return (
+                    <optgroup key={c.value} label={c.label}>
+                      {vendorsInCategory.map((v) => (
+                        <option key={v.id} value={v.id}>
+                          {v.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  );
+                })}
               </select>
               {vendors.length === 0 && (
                 <p className="mt-1.5 text-xs text-muted-foreground">
@@ -1612,11 +1726,19 @@ function InvoiceOcrSheet({
               className="mt-2.5 h-9 w-full rounded-md border border-amber-300 bg-white px-3 text-sm"
             >
               <option value="">Select a vendor…</option>
-              {vendors.map((v) => (
-                <option key={v.id} value={v.id}>
-                  {v.name}
-                </option>
-              ))}
+              {VENDOR_CATEGORIES.map((c) => {
+                const vendorsInCategory = vendors.filter((v) => v.category === c.value);
+                if (vendorsInCategory.length === 0) return null;
+                return (
+                  <optgroup key={c.value} label={c.label}>
+                    {vendorsInCategory.map((v) => (
+                      <option key={v.id} value={v.id}>
+                        {v.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                );
+              })}
             </select>
           </div>
         )}

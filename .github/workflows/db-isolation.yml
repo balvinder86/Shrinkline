@@ -149,6 +149,9 @@ jobs:
       - name: Apply Phase 2 invoice agent rules schema
         run: $PSQL -f db/phase2/44_invoice_agent_rules.sql
 
+      - name: Apply Phase 2 vendor expense category column
+        run: $PSQL -f db/phase2/45_vendor_expense_category.sql
+
       - name: Seed test tenants
         run: $PSQL -f db/phase0/02_seed.sql
 

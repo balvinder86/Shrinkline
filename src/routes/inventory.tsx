@@ -26,6 +26,7 @@ import {
   type BulkCreateResult,
 } from "@/lib/boh/queries";
 import { isFreeEmailProviderDomain } from "@/lib/boh/emailDomains";
+import { VENDOR_CATEGORIES } from "@/lib/boh/vendor-categories";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   AlertTriangle,
@@ -333,6 +334,7 @@ function InventoryPage() {
     terms: "Net 30",
     notes: "",
     invoicingSenderEmails: [],
+    category: "food_beverage",
   });
   // Kept as free-typed text, not the draft's string[] directly — parsing
   // every keystroke into an array and joining it back for display would
@@ -343,6 +345,17 @@ function InventoryPage() {
   const [vendorToDelete, setVendorToDelete] = useState<Vendor | null>(null);
 
   const vendorNames = useMemo(() => vendors.map((v) => v.name), [vendors]);
+  // An ingredient's "preferred vendor" only ever makes sense as a real
+  // food/bev supplier — a Utilities or Rent vendor should never be
+  // selectable here, or in the bulk-assign/bulk-import vendor pickers.
+  const foodBeverageVendors = useMemo(
+    () => vendors.filter((v) => v.category === "food_beverage"),
+    [vendors],
+  );
+  const foodBeverageVendorNames = useMemo(
+    () => foodBeverageVendors.map((v) => v.name),
+    [foodBeverageVendors],
+  );
   const vendorsTotalPages = Math.max(1, Math.ceil(vendors.length / VENDORS_PAGE_SIZE));
   const pagedVendors = useMemo(
     () => vendors.slice((vendorsPage - 1) * VENDORS_PAGE_SIZE, vendorsPage * VENDORS_PAGE_SIZE),
@@ -553,6 +566,7 @@ function InventoryPage() {
       terms: "Net 30",
       notes: "",
       invoicingSenderEmails: [],
+      category: "food_beverage",
     });
     setVendorSenderEmailsText("");
     setVendorSenderEmailsError(null);
@@ -946,7 +960,7 @@ function InventoryPage() {
                     className="h-9 rounded-md border border-stone-200 bg-white px-2 text-sm"
                   >
                     <option value="">Assign vendor…</option>
-                    {vendors.map((v) => (
+                    {foodBeverageVendors.map((v) => (
                       <option key={v.id} value={v.id}>
                         {v.name}
                       </option>
@@ -1652,7 +1666,7 @@ function InventoryPage() {
                 className="h-10 w-full rounded-md border border-stone-200 bg-white px-2 text-sm"
               >
                 <option value="">No vendor</option>
-                {vendorNames.map((v) => (
+                {foodBeverageVendorNames.map((v) => (
                   <option key={v} value={v}>
                     {v}
                   </option>
@@ -1796,7 +1810,7 @@ function InventoryPage() {
                     className="h-9 rounded-md border border-stone-200 bg-white px-2 text-sm"
                   >
                     <option value="">Assign vendor to checked rows…</option>
-                    {vendors.map((v) => (
+                    {foodBeverageVendors.map((v) => (
                       <option key={v.id} value={v.id}>
                         {v.name}
                       </option>
@@ -1861,7 +1875,7 @@ function InventoryPage() {
                           className="h-8 rounded-md border border-stone-200 bg-white px-2 text-sm"
                         >
                           <option value="">No vendor</option>
-                          {vendors.map((v) => (
+                          {foodBeverageVendors.map((v) => (
                             <option key={v.id} value={v.id}>
                               {v.name}
                             </option>
@@ -2028,6 +2042,23 @@ function InventoryPage() {
                 value={vendorDraft.name}
                 onChange={(e) => setVendorDraft({ ...vendorDraft, name: e.target.value })}
               />
+            </div>
+            <div className="col-span-2">
+              <Label htmlFor="v-category">Expense category</Label>
+              <select
+                id="v-category"
+                value={vendorDraft.category}
+                onChange={(e) =>
+                  setVendorDraft({ ...vendorDraft, category: e.target.value as Vendor["category"] })
+                }
+                className="h-10 w-full rounded-md border border-stone-200 bg-white px-2 text-sm"
+              >
+                {VENDOR_CATEGORIES.map((c) => (
+                  <option key={c.value} value={c.value}>
+                    {c.label}
+                  </option>
+                ))}
+              </select>
             </div>
             <div>
               <Label htmlFor="v-contact">Contact name</Label>

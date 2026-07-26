@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { supabase } from "@/lib/supabase/client";
 import { useLocationIds, useRestaurantIds } from "@/lib/supabase/scope";
+import { VENDOR_CATEGORIES, type VendorCategory } from "@/lib/boh/vendor-categories";
 
 // A user's dashboard today only ever shows one location — same
 // simplification as useCurrentRestaurantId, revisit when multi-location
@@ -31,6 +32,11 @@ export type Vendor = {
   deliveryDays: string;
   terms: string;
   notes?: string;
+  // What kind of expense this vendor's invoices represent — drives
+  // whether their approved-invoice totals count toward Food Cost %
+  // (see useFoodCostSummary in lib/pos/queries.ts) and the Invoices
+  // page's expense-category breakdown.
+  category: VendorCategory;
   // Inbound addresses this vendor's invoices actually arrive from
   // (distinct from `email`, the outbound order-contact address) —
   // email-ingest matches an incoming message's From: header against
@@ -51,6 +57,7 @@ function fromRow(row: any): Vendor {
     terms: row.payment_terms ?? "",
     notes: row.notes ?? undefined,
     invoicingSenderEmails: row.invoicing_sender_emails ?? [],
+    category: (row.category as VendorCategory) ?? "food_beverage",
   };
 }
 
@@ -79,6 +86,7 @@ function toRow(input: VendorInput) {
     delivery_days: input.deliveryDays || null,
     payment_terms: input.terms || null,
     notes: input.notes || null,
+    category: input.category,
     // Normalized here (not just trimmed) so email-ingest's lookup can
     // do a plain case-sensitive array match against a lowercased
     // From: address, no matter how the user typed it in the UI.
@@ -1272,6 +1280,7 @@ export type VendorSpendSummary = {
   contactName: string;
   email: string;
   phone: string;
+  category: VendorCategory;
   approvedSpendCents: number;
   approvedInvoiceCount: number;
   pendingInvoiceCount: number;
@@ -1322,11 +1331,60 @@ export function useVendorSpendSummary(dateRange?: DateRange) {
           contactName: v.contact_name ?? "",
           email: v.contact_email ?? "",
           phone: v.phone ?? "",
+          category: (v.category as VendorCategory) ?? "food_beverage",
           approvedSpendCents: stats.approvedCents,
           approvedInvoiceCount: stats.approvedCount,
           pendingInvoiceCount: stats.pendingCount,
         };
       });
+    },
+  });
+}
+
+// Real operating-expense breakdown by category (Food & Beverage,
+// Utilities, Maintenance, Rent, Insurance, Other) — the direct answer
+// to "what am I actually spending on non-food costs." All 6
+// categories are always present, 0 if unused, so the chart never
+// silently omits a category that genuinely has no spend yet.
+export type ExpenseCategorySpend = {
+  category: VendorCategory;
+  spendCents: number;
+  invoiceCount: number;
+};
+
+export function useExpenseCategorySpend(dateRange?: DateRange) {
+  const restaurantId = useCurrentRestaurantId();
+  return useQuery({
+    queryKey: ["expense-category-spend", restaurantId, dateRange?.from, dateRange?.to],
+    enabled: !!restaurantId,
+    queryFn: async (): Promise<ExpenseCategorySpend[]> => {
+      const [vendorsRes, invoicesRes] = await Promise.all([
+        supabase.from("vendors").select("id, category"),
+        supabase
+          .from("invoices")
+          .select("vendor_id, status, total_cents, invoice_date, created_at")
+          .eq("status", "approved"),
+      ]);
+      if (vendorsRes.error) throw vendorsRes.error;
+      if (invoicesRes.error) throw invoicesRes.error;
+
+      const categoryByVendorId = new Map<string, VendorCategory>(
+        (vendorsRes.data ?? []).map((v) => [v.id, (v.category as VendorCategory) ?? "food_beverage"]),
+      );
+
+      const byCategory = new Map<VendorCategory, { spendCents: number; invoiceCount: number }>();
+      for (const c of VENDOR_CATEGORIES) byCategory.set(c.value, { spendCents: 0, invoiceCount: 0 });
+
+      for (const inv of invoicesRes.data ?? []) {
+        if (!inv.vendor_id) continue;
+        if (dateRange && !dateInRange(inv.invoice_date ?? inv.created_at, dateRange)) continue;
+        const category = categoryByVendorId.get(inv.vendor_id) ?? "food_beverage";
+        const cur = byCategory.get(category)!;
+        cur.spendCents += inv.total_cents ?? 0;
+        cur.invoiceCount += 1;
+      }
+
+      return VENDOR_CATEGORIES.map((c) => ({ category: c.value, ...byCategory.get(c.value)! }));
     },
   });
 }

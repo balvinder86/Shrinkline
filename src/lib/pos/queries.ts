@@ -252,11 +252,16 @@ export function useFoodCostSummary(range: DateRange) {
           .from("recipe_lines")
           .select("menu_item_pos_id, quantity, ingredients (unit_cost_cents)")
           .in("location_id", locationIds!),
+        // Inner-joined to vendors and filtered to food_beverage so a
+        // utility/maintenance/rent bill can't inflate "actual food
+        // spend" — see feedback_thrasherspub_ui_preferences /
+        // project_thrasherspub_saas memory on the vendor-category fix.
         supabase
           .from("invoices")
-          .select("total_cents")
+          .select("total_cents, vendors!inner(category)")
           .in("location_id", locationIds!)
           .eq("status", "approved")
+          .eq("vendors.category", "food_beverage")
           .gte("invoice_date", fromIso)
           .lte("invoice_date", toIso),
       ]);
