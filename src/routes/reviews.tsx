@@ -360,14 +360,9 @@ function ReviewsPage() {
     setReplyDraft(r.editedReply ?? r.aiDraftReply ?? "");
   };
 
-  // Sourced from the full, unfiltered `reviews` — not dateFilteredReviews.
-  // This is the actual reply queue; a real still-unanswered old review
-  // must never disappear just because it falls outside the selected
-  // date range. Deliberate, not an oversight — see the comment on
-  // dateFilteredReviews above.
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return reviews.filter((r) => {
+    return dateFilteredReviews.filter((r) => {
       if (r.status === "dismissed") return false;
       if (ratingFilter === "low" && r.starRating > 2) return false;
       if (ratingFilter === "mid" && r.starRating !== 3) return false;
@@ -378,7 +373,7 @@ function ReviewsPage() {
       }
       return true;
     });
-  }, [reviews, ratingFilter, search]);
+  }, [dateFilteredReviews, ratingFilter, search]);
 
   // Any change to what's being filtered should land back on page 1 —
   // otherwise a narrower filter can strand you on a now-empty page.
@@ -393,16 +388,17 @@ function ReviewsPage() {
   );
 
   const kpis = useMemo(() => {
-    // Live current-state facts — always the true backlog, regardless
-    // of the selected date range (see comment above dateFilteredReviews).
-    const needsReply = reviews.filter(
+    // Every KPI here scopes to the selected global range — same as
+    // Invoices' "Pending review" count, which is the precedent this
+    // page follows (not Home's separate always-live backlog widget,
+    // which has no equivalent full list/page underneath it to stay
+    // consistent with).
+    const needsReply = dateFilteredReviews.filter(
       (r) => r.status === "drafted" || r.status === "approved_pending_post",
     ).length;
-    const postedCount = reviews.filter((r) => r.status === "posted").length;
-
-    // Retrospective metrics — scoped to the selected period, same as
-    // every other page's KPI row.
     const datePosted = dateFilteredReviews.filter((r) => r.status === "posted");
+    const postedCount = datePosted.length;
+
     const avgRating =
       dateFilteredReviews.length >= MIN_SAMPLE_FOR_RATING
         ? dateFilteredReviews.reduce((s, r) => s + r.starRating, 0) / dateFilteredReviews.length
@@ -417,7 +413,7 @@ function ReviewsPage() {
         : null;
 
     return { needsReply, postedCount, avgRating, avgResponseMs };
-  }, [reviews, dateFilteredReviews]);
+  }, [dateFilteredReviews]);
 
   // Real review volume + avg rating over the selected global range —
   // day-bucketed for a short range, week-bucketed (Monday-start) for a
@@ -510,14 +506,14 @@ function ReviewsPage() {
           <KpiCard
             label="Needs reply"
             value={String(kpis.needsReply)}
-            hint="AI has a draft ready for each"
+            hint={`${rangeLabel} — AI has a draft ready for each`}
             icon={Inbox}
             attention={kpis.needsReply > 0}
           />
           <KpiCard
             label="AI replies posted"
             value={String(kpis.postedCount)}
-            hint="All-time, this agent"
+            hint={rangeLabel}
             icon={CheckCircle2}
           />
           <KpiCard
