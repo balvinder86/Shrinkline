@@ -83,6 +83,8 @@ import {
 } from "recharts";
 
 import { Topbar } from "@/components/dashboard/Topbar";
+import { useDateRange } from "@/lib/date-range-context";
+import { isoDate, formatDateRange } from "@/lib/date-range";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -463,13 +465,22 @@ function SeoPage() {
   const keywordDetail = useSearchConsoleKeywordDetail(selectedQuery);
   const [drawerBrief, setDrawerBrief] = useState<ContentBrief | null>(null);
 
+  // Same global range as every other page — set once in the Topbar,
+  // applies here to every real Search Console report (Overview,
+  // Keywords, Pages, Content gaps). The rest of this page (Technical,
+  // Schema, GBP Insights, Citations, Backlinks, Competitors, Agent)
+  // is on-demand tools/config, not a time-series report, so it's
+  // deliberately left out of range scoping.
+  const { dateRange } = useDateRange();
+  const rangeLabel = useMemo(() => formatDateRange(dateRange), [dateRange]);
+
   const { data: scConnection, isLoading: scConnectionLoading } = useSearchConsoleConnection();
   const connectSearchConsole = useConnectSearchConsole();
   const isConnected = !!scConnection;
-  const overview = useSearchConsoleOverview(isConnected);
-  const scKeywords = useSearchConsoleKeywords(isConnected);
-  const scPages = useSearchConsolePages(isConnected);
-  const contentGaps = useSearchConsoleContentGaps(isConnected);
+  const overview = useSearchConsoleOverview(isConnected, dateRange);
+  const scKeywords = useSearchConsoleKeywords(isConnected, dateRange);
+  const scPages = useSearchConsolePages(isConnected, dateRange);
+  const contentGaps = useSearchConsoleContentGaps(isConnected, dateRange);
   const pageSpeedAudit = usePageSpeedAudit();
   const refetchConnection = useRefetchSearchConsoleConnection();
   const generateSeoSuggestions = useGenerateSeoSuggestions();
@@ -718,7 +729,7 @@ function SeoPage() {
             value={avgSearchPosition != null ? `Avg. #${avgSearchPosition.toFixed(1)}` : "—"}
             hint={
               avgSearchPosition != null
-                ? "Real avg. position, last 8 weeks (Search Console)"
+                ? `Real avg. position, ${rangeLabel} (Search Console)`
                 : "Connect Search Console on the Pages tab"
             }
             icon={Eye}
@@ -754,7 +765,7 @@ function SeoPage() {
                   {isConnected ? "Real clicks — Google Search Console" : "Visibility & clicks"}
                 </div>
                 <h2 className="mt-1 font-display text-2xl">
-                  {isConnected ? "Last 8 weeks" : "Example data · not connected"}
+                  {isConnected ? rangeLabel : "Example data · not connected"}
                 </h2>
               </div>
               <div className="flex gap-2">
@@ -990,7 +1001,7 @@ function SeoPage() {
               <Card className="overflow-hidden">
                 <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/70 p-4">
                   <div className="text-sm text-muted-foreground">
-                    Real search queries from Google Search Console · last 28 days, top{" "}
+                    Real search queries from Google Search Console · {rangeLabel}, top{" "}
                     {scKeywords.data?.rows.length ?? 0} by clicks
                   </div>
                   <Button
@@ -1120,7 +1131,7 @@ function SeoPage() {
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <div className="text-sm text-muted-foreground">
-                    Real pages from Google Search Console · last 28 days, top{" "}
+                    Real pages from Google Search Console · {rangeLabel}, top{" "}
                     {scPages.data?.rows.length ?? 0} by clicks. Click "Audit" for a real PageSpeed
                     technical check on any page (takes up to a minute — it's a real Lighthouse run,
                     not a lookup).
@@ -2343,7 +2354,7 @@ function SeoPage() {
             ) : (
               <div className="space-y-3">
                 <div className="text-sm text-muted-foreground">
-                  Real search queries (last 28 days) that earn impressions but rank past page 1,
+                  Real search queries ({rangeLabel}) that earn impressions but rank past page 1,
                   computed purely from your Search Console numbers — no page currently targets them
                   well. Claude drafts a content brief for any gap you want to pursue.
                 </div>

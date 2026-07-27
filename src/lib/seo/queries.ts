@@ -128,21 +128,21 @@ export function useSearchConsoleOverview(enabled: boolean, range?: DateRange) {
   });
 }
 
-export function useSearchConsoleKeywords(enabled: boolean) {
+export function useSearchConsoleKeywords(enabled: boolean, range?: DateRange) {
   const restaurantId = useCurrentRestaurantId();
   return useQuery({
-    queryKey: ["search-console-keywords", restaurantId],
+    queryKey: ["search-console-keywords", restaurantId, range?.from, range?.to],
     enabled: enabled && !!restaurantId,
-    queryFn: () => callSearchConsoleData<KeywordRow>(restaurantId!, "keywords"),
+    queryFn: () => callSearchConsoleData<KeywordRow>(restaurantId!, "keywords", range),
   });
 }
 
-export function useSearchConsolePages(enabled: boolean) {
+export function useSearchConsolePages(enabled: boolean, range?: DateRange) {
   const restaurantId = useCurrentRestaurantId();
   return useQuery({
-    queryKey: ["search-console-pages", restaurantId],
+    queryKey: ["search-console-pages", restaurantId, range?.from, range?.to],
     enabled: enabled && !!restaurantId,
-    queryFn: () => callSearchConsoleData<PageRow>(restaurantId!, "pages"),
+    queryFn: () => callSearchConsoleData<PageRow>(restaurantId!, "pages", range),
   });
 }
 
@@ -158,12 +158,12 @@ export type ContentGapRow = {
 // (past page 1) and no dedicated page — computed server-side purely
 // from real Search Console numbers (query+page dimensions), no AI
 // judgment involved in *finding* the gap, only in drafting a fix.
-export function useSearchConsoleContentGaps(enabled: boolean) {
+export function useSearchConsoleContentGaps(enabled: boolean, range?: DateRange) {
   const restaurantId = useCurrentRestaurantId();
   return useQuery({
-    queryKey: ["search-console-content-gaps", restaurantId],
+    queryKey: ["search-console-content-gaps", restaurantId, range?.from, range?.to],
     enabled: enabled && !!restaurantId,
-    queryFn: () => callSearchConsoleData<ContentGapRow>(restaurantId!, "content-gaps"),
+    queryFn: () => callSearchConsoleData<ContentGapRow>(restaurantId!, "content-gaps", range),
   });
 }
 

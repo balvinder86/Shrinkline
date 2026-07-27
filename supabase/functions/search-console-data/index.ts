@@ -169,6 +169,29 @@ function computeContentGaps(rows: SearchAnalyticsRow[]) {
     .slice(0, 20);
 }
 
+// Explicit start/end from the caller (the global date-range filter,
+// shared by Home's SEO tile and the dedicated /seo page) wins over the
+// view's own default lookback window — but never past the real ~3-day
+// GSC data lag (`maxEnd`), so a range including "today" doesn't
+// silently ask for days Google hasn't indexed yet.
+function resolveRange(
+  requestedStartDate: string | undefined,
+  requestedEndDate: string | undefined,
+  maxEnd: Date,
+  defaultLookbackDays: number,
+): { start: Date; end: Date } {
+  const requestedEnd = requestedEndDate ? new Date(requestedEndDate) : null;
+  const end = requestedEnd && requestedEnd < maxEnd ? requestedEnd : maxEnd;
+  const start = requestedStartDate
+    ? new Date(requestedStartDate)
+    : (() => {
+        const d = new Date(end);
+        d.setDate(d.getDate() - defaultLookbackDays);
+        return d;
+      })();
+  return { start, end };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: CORS_HEADERS });
@@ -247,20 +270,12 @@ Deno.serve(async (req) => {
     end.setDate(end.getDate() - 3);
 
     if (view === "overview") {
-      // Explicit start/end from the caller (Home's SEO tile, driven by
-      // the global date-range filter) wins over the default 8-week
-      // window — but never past the real ~3-day GSC data lag, so a
-      // range including "today" doesn't silently ask for days Google
-      // hasn't indexed yet.
-      const requestedEnd = requestedEndDate ? new Date(requestedEndDate) : null;
-      const effectiveEnd = requestedEnd && requestedEnd < end ? requestedEnd : end;
-      const start = requestedStartDate
-        ? new Date(requestedStartDate)
-        : (() => {
-            const d = new Date(effectiveEnd);
-            d.setDate(d.getDate() - 56); // 8 weeks, default window
-            return d;
-          })();
+      const { start, end: effectiveEnd } = resolveRange(
+        requestedStartDate,
+        requestedEndDate,
+        end,
+        56, // 8 weeks, default window
+      );
       const rows = await queryOneDimension(
         googleAccessToken,
         cred.site_url,
@@ -295,14 +310,18 @@ Deno.serve(async (req) => {
     }
 
     if (view === "keywords") {
-      const start = new Date(end);
-      start.setDate(start.getDate() - 28);
+      const { start, end: effectiveEnd } = resolveRange(
+        requestedStartDate,
+        requestedEndDate,
+        end,
+        28,
+      );
       const rows = await queryOneDimension(
         googleAccessToken,
         cred.site_url,
         "query",
         isoDate(start),
-        isoDate(end),
+        isoDate(effectiveEnd),
         25,
       );
       return json(
@@ -324,14 +343,18 @@ Deno.serve(async (req) => {
     }
 
     if (view === "content-gaps") {
-      const start = new Date(end);
-      start.setDate(start.getDate() - 28);
+      const { start, end: effectiveEnd } = resolveRange(
+        requestedStartDate,
+        requestedEndDate,
+        end,
+        28,
+      );
       const rows = await queryDimensions(
         googleAccessToken,
         cred.site_url,
         ["query", "page"],
         isoDate(start),
-        isoDate(end),
+        isoDate(effectiveEnd),
         500,
       );
       return json({ ok: true, connected: true, rows: computeContentGaps(rows) }, 200);
@@ -389,14 +412,18 @@ Deno.serve(async (req) => {
     }
 
     // view === "pages"
-    const start = new Date(end);
-    start.setDate(start.getDate() - 28);
+    const { start, end: effectiveEnd } = resolveRange(
+      requestedStartDate,
+      requestedEndDate,
+      end,
+      28,
+    );
     const rows = await queryOneDimension(
       googleAccessToken,
       cred.site_url,
       "page",
       isoDate(start),
-      isoDate(end),
+      isoDate(effectiveEnd),
       25,
     );
     return json(

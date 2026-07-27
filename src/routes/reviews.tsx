@@ -14,6 +14,7 @@ import {
   type ReviewStatus,
   type InsightsResult,
 } from "@/lib/reviews/queries";
+import { dateInRange } from "@/lib/boh/queries";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import {
   AlertTriangle,
@@ -38,6 +39,8 @@ import {
 } from "lucide-react";
 
 import { Topbar } from "@/components/dashboard/Topbar";
+import { useDateRange } from "@/lib/date-range-context";
+import { isoDate, formatDateRange } from "@/lib/date-range";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -330,6 +333,26 @@ function ReviewsPage() {
   const [page, setPage] = useState(1);
   const [activeTab, setActiveTab] = useState("inbox");
 
+  // Same global range as every other page — set once in the Topbar.
+  // Only the retrospective metrics (avg rating, avg response time, the
+  // volume trend chart) respect it; the Inbox list and the "Needs
+  // reply"/"AI replies posted" KPIs deliberately stay unfiltered — a
+  // real still-unanswered old review shouldn't disappear from the
+  // backlog just because it falls outside the selected period, same
+  // "live current-state fact, not a historical window" reasoning
+  // Home's own real-backlog panel already documents for this exact
+  // "reviews awaiting reply" count (src/routes/index.tsx).
+  const { dateRange: globalDateRange } = useDateRange();
+  const dateRange = useMemo(
+    () => ({ from: isoDate(globalDateRange.from), to: isoDate(globalDateRange.to) }),
+    [globalDateRange],
+  );
+  const rangeLabel = useMemo(() => formatDateRange(globalDateRange), [globalDateRange]);
+  const dateFilteredReviews = useMemo(
+    () => reviews.filter((r) => dateInRange(r.reviewWrittenAt ?? r.reviewFoundAt, dateRange)),
+    [reviews, dateRange],
+  );
+
   const active = reviews.find((r) => r.id === activeId) ?? null;
 
   const openReview = (r: Review) => {
@@ -337,6 +360,11 @@ function ReviewsPage() {
     setReplyDraft(r.editedReply ?? r.aiDraftReply ?? "");
   };
 
+  // Sourced from the full, unfiltered `reviews` — not dateFilteredReviews.
+  // This is the actual reply queue; a real still-unanswered old review
+  // must never disappear just because it falls outside the selected
+  // date range. Deliberate, not an oversight — see the comment on
+  // dateFilteredReviews above.
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return reviews.filter((r) => {
@@ -365,17 +393,22 @@ function ReviewsPage() {
   );
 
   const kpis = useMemo(() => {
+    // Live current-state facts — always the true backlog, regardless
+    // of the selected date range (see comment above dateFilteredReviews).
     const needsReply = reviews.filter(
       (r) => r.status === "drafted" || r.status === "approved_pending_post",
     ).length;
-    const posted = reviews.filter((r) => r.status === "posted");
+    const postedCount = reviews.filter((r) => r.status === "posted").length;
 
+    // Retrospective metrics — scoped to the selected period, same as
+    // every other page's KPI row.
+    const datePosted = dateFilteredReviews.filter((r) => r.status === "posted");
     const avgRating =
-      reviews.length >= MIN_SAMPLE_FOR_RATING
-        ? reviews.reduce((s, r) => s + r.starRating, 0) / reviews.length
+      dateFilteredReviews.length >= MIN_SAMPLE_FOR_RATING
+        ? dateFilteredReviews.reduce((s, r) => s + r.starRating, 0) / dateFilteredReviews.length
         : null;
 
-    const responseTimes = posted
+    const responseTimes = datePosted
       .filter((r) => r.postedAt)
       .map((r) => new Date(r.postedAt!).getTime() - new Date(r.reviewFoundAt).getTime());
     const avgResponseMs =
@@ -383,26 +416,44 @@ function ReviewsPage() {
         ? responseTimes.reduce((s, ms) => s + ms, 0) / responseTimes.length
         : null;
 
-    return { needsReply, postedCount: posted.length, avgRating, avgResponseMs };
-  }, [reviews]);
+    return { needsReply, postedCount, avgRating, avgResponseMs };
+  }, [reviews, dateFilteredReviews]);
 
-  // Weekly review volume + avg rating, purely from data already
-  // captured (star rating + real write date where we have it) — no AI
-  // involved. Sparse weeks are shown as real zeros, not hidden, same
-  // honesty pattern as the other trend charts in this app.
+  // Real review volume + avg rating over the selected global range —
+  // day-bucketed for a short range, week-bucketed (Monday-start) for a
+  // longer one, same >21-day threshold useLaborCostTrend/useItemTrend
+  // already use elsewhere in this app. Sparse buckets are shown as
+  // real zeros, not hidden, same honesty pattern as every other trend
+  // chart in this app.
   const ratingTrend = useMemo(() => {
-    const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
-    const now = new Date();
-    const currentWeekStart = new Date(now);
-    currentWeekStart.setHours(0, 0, 0, 0);
-    currentWeekStart.setDate(currentWeekStart.getDate() - currentWeekStart.getDay());
+    const days =
+      Math.round((globalDateRange.to.getTime() - globalDateRange.from.getTime()) / 86_400_000) +
+      1;
+    const useWeekly = days > 21;
+    const bucketMs = useWeekly ? 7 * 24 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000;
 
-    const buckets = Array.from({ length: 8 }, (_, i) => {
-      const start = new Date(currentWeekStart.getTime() - (7 - i) * WEEK_MS);
-      return { start, end: new Date(start.getTime() + WEEK_MS), count: 0, ratingSum: 0 };
-    });
+    const rangeStart = new Date(globalDateRange.from);
+    rangeStart.setHours(0, 0, 0, 0);
+    const firstBucketStart = useWeekly
+      ? (() => {
+          const d = new Date(rangeStart);
+          const diff = (d.getDay() + 6) % 7; // days since Monday
+          d.setDate(d.getDate() - diff);
+          return d;
+        })()
+      : rangeStart;
 
-    for (const r of reviews) {
+    const rangeEnd = new Date(globalDateRange.to);
+    rangeEnd.setHours(23, 59, 59, 999);
+
+    const buckets: { start: Date; end: Date; count: number; ratingSum: number }[] = [];
+    for (let cursor = new Date(firstBucketStart); cursor <= rangeEnd; ) {
+      const end = new Date(cursor.getTime() + bucketMs);
+      buckets.push({ start: new Date(cursor), end, count: 0, ratingSum: 0 });
+      cursor = end;
+    }
+
+    for (const r of dateFilteredReviews) {
       if (r.status === "dismissed") continue;
       const written = new Date(r.reviewWrittenAt ?? r.reviewFoundAt);
       const bucket = buckets.find((b) => written >= b.start && written < b.end);
@@ -417,7 +468,7 @@ function ReviewsPage() {
       count: b.count,
       avgRating: b.count > 0 ? b.ratingSum / b.count : null,
     }));
-  }, [reviews]);
+  }, [dateFilteredReviews, globalDateRange]);
 
   const formatResponseTime = (ms: number) => {
     const hours = ms / 3_600_000;
@@ -474,7 +525,7 @@ function ReviewsPage() {
             value={kpis.avgRating != null ? kpis.avgRating.toFixed(1) : "—"}
             hint={
               kpis.avgRating != null
-                ? "Across reviews this agent has seen — not Google's public rating"
+                ? `${rangeLabel} — not Google's public rating`
                 : "Not enough data yet"
             }
             icon={Star}
@@ -484,7 +535,7 @@ function ReviewsPage() {
             value={kpis.avgResponseMs != null ? formatResponseTime(kpis.avgResponseMs) : "—"}
             hint={
               kpis.avgResponseMs != null
-                ? "From when the agent found it to when it posted"
+                ? `${rangeLabel} — found to posted`
                 : "Not enough data yet"
             }
             icon={Clock}
@@ -854,9 +905,9 @@ function ReviewsPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
-                    Weekly trend
+                    Trend
                   </div>
-                  <h3 className="mt-1 font-display text-xl">Review volume · last 8 weeks</h3>
+                  <h3 className="mt-1 font-display text-xl">Review volume · {rangeLabel}</h3>
                 </div>
               </div>
               {reviews.length === 0 ? (
