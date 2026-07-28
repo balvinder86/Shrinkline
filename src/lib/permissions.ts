@@ -21,6 +21,7 @@ export const PERMISSION_KEYS = [
   "marketing",
   "loyalty",
   "scheduling",
+  "pnl",
 ] as const;
 
 export type PermissionKey = (typeof PERMISSION_KEYS)[number];
@@ -35,6 +36,7 @@ export const PERMISSION_LABEL: Record<PermissionKey, string> = {
   marketing: "Marketing",
   loyalty: "Loyalty",
   scheduling: "Scheduling",
+  pnl: "P&L",
 };
 
 // Maps a route pathname to the permission that gates it — used by
@@ -52,6 +54,7 @@ export const ROUTE_PERMISSION: Record<string, PermissionKey> = {
   "/loyalty": "loyalty",
   "/scheduling": "scheduling",
   "/labor": "scheduling",
+  "/pnl": "pnl",
 };
 
 // Owners always have full access, independent of what's stored — a

@@ -9,6 +9,7 @@ import {
   Gift,
   CalendarClock,
   Wallet,
+  Landmark,
   Shield,
   Settings,
   type LucideIcon,
@@ -34,6 +35,10 @@ export const NAV_OVERVIEW: NavItem[] = [
   { titleKey: "productMix", url: "/product-mix", icon: PieChart, permission: "product_mix" },
   { titleKey: "inventory", url: "/inventory", icon: Package, permission: "inventory" },
   { titleKey: "invoices", url: "/invoices", icon: Receipt, permission: "invoices" },
+  // Rolls up Sales + COGS + Labor + Operating Expenses — spans every
+  // Overview-section page rather than belonging to one, so it lives
+  // here rather than in Growth/Operations.
+  { titleKey: "pnl", url: "/pnl", icon: Landmark, permission: "pnl" },
 ];
 
 export const NAV_GROWTH: NavItem[] = [
