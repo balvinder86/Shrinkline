@@ -31,6 +31,12 @@ export type ToastMenuItemFlat = {
   name: string;
   category: string;
   priceCents: number | null;
+  // True when priceCents was resolved from a "size" modifier group's
+  // cheapest option (e.g. a well pour priced Single/Double, no single
+  // fixed price) rather than the item's own fixed price — the item
+  // genuinely has more than one real price, and priceCents is the
+  // cheapest of them, not the only one.
+  isStartingPrice: boolean;
 };
 
 export type ToastRevenueCenter = {
@@ -129,17 +135,67 @@ export async function fetchOrdersForDate(
   return all;
 }
 
-function flattenMenuGroup(group: any, category: string, out: ToastMenuItemFlat[]) {
+type ToastModifierGroupRef = {
+  guid: string;
+  modifierOptionReferences?: number[];
+};
+
+type ToastModifierOptionRef = {
+  guid: string;
+  price: number | null;
+};
+
+// Resolves the real, current cheapest price for an item priced via a
+// Toast "size" modifier group (well-pour liquor: Single/Double, rail
+// vs. call, etc.) instead of a single fixed price. Reads live menu
+// configuration — not historical sales — so it's immune to happy-hour
+// pricing, comps, and tax-inclusive/exclusive noise in the order data,
+// all of which showed up as false "cheapest price" signals when this
+// was first tried from pmix_sales history instead.
+function resolveSizePriceCents(
+  item: any,
+  modifierGroups: Record<string, ToastModifierGroupRef>,
+  modifierOptions: Record<string, ToastModifierOptionRef>,
+): number | null {
+  if (item.pricingStrategy !== "SIZE_PRICE") return null;
+  const sizeGuid: string | null | undefined = item.pricingRules?.sizeSpecificPricingGuid;
+  if (!sizeGuid) return null;
+  const groupRefIds: number[] = item.modifierGroupReferences ?? [];
+  const sizeGroup = groupRefIds
+    .map((id) => modifierGroups[String(id)])
+    .find((g) => g?.guid === sizeGuid);
+  if (!sizeGroup) return null;
+  let minPriceDollars: number | null = null;
+  for (const optId of sizeGroup.modifierOptionReferences ?? []) {
+    const opt = modifierOptions[String(optId)];
+    if (typeof opt?.price === "number") {
+      minPriceDollars = minPriceDollars == null ? opt.price : Math.min(minPriceDollars, opt.price);
+    }
+  }
+  return minPriceDollars != null ? Math.round(minPriceDollars * 100) : null;
+}
+
+function flattenMenuGroup(
+  group: any,
+  category: string,
+  out: ToastMenuItemFlat[],
+  modifierGroups: Record<string, ToastModifierGroupRef>,
+  modifierOptions: Record<string, ToastModifierOptionRef>,
+) {
   for (const item of group.menuItems ?? []) {
+    const basePriceCents = typeof item.price === "number" ? Math.round(item.price * 100) : null;
+    const startingPriceCents =
+      basePriceCents == null ? resolveSizePriceCents(item, modifierGroups, modifierOptions) : null;
     out.push({
       posId: item.guid,
       name: item.name,
       category,
-      priceCents: typeof item.price === "number" ? Math.round(item.price * 100) : null,
+      priceCents: basePriceCents ?? startingPriceCents,
+      isStartingPrice: basePriceCents == null && startingPriceCents != null,
     });
   }
   for (const sub of group.menuGroups ?? []) {
-    flattenMenuGroup(sub, sub.name ?? category, out);
+    flattenMenuGroup(sub, sub.name ?? category, out, modifierGroups, modifierOptions);
   }
 }
 
@@ -169,10 +225,12 @@ export async function fetchMenus(
   restaurantExternalId: string,
 ): Promise<ToastMenuItemFlat[]> {
   const menus = await toastFetch(hostname, `/menus/v2/menus`, token, restaurantExternalId);
+  const modifierGroups: Record<string, ToastModifierGroupRef> = menus.modifierGroupReferences ?? {};
+  const modifierOptions: Record<string, ToastModifierOptionRef> = menus.modifierOptionReferences ?? {};
   const out: ToastMenuItemFlat[] = [];
   for (const menu of Array.isArray(menus) ? menus : (menus.menus ?? [])) {
     for (const group of menu.menuGroups ?? []) {
-      flattenMenuGroup(group, group.name ?? "Uncategorized", out);
+      flattenMenuGroup(group, group.name ?? "Uncategorized", out, modifierGroups, modifierOptions);
     }
   }
   return out;

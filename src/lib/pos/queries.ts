@@ -175,12 +175,12 @@ export type RealMenuItem = {
   name: string;
   category: string;
   price: number;
-  // True when `price` is menu_items.price_cents, Toast's real catalog
-  // price. False when there's no catalog price (well-pour items priced
-  // per-sale, e.g. single/double) and `price` is instead the cheapest
-  // real unit price ever observed in pmix_sales — a derived "starting
-  // price," not a fixed one. Also false (with price 0) when there's no
-  // data at all yet.
+  // True when `price` is a single, fixed real Toast catalog price. False
+  // when the item has no single price and is instead priced via a Toast
+  // "size" modifier group (e.g. well-pour Single/Double) — `price` is
+  // then the cheapest of the item's real, currently-configured size
+  // prices, a genuine "starting price" rather than a fixed one. Also
+  // false (with price 0) when there's no price data at all.
   hasRealPrice: boolean;
   cost?: number;
   // True only when `cost` came from actual recipe_lines rows, false when
@@ -218,10 +218,10 @@ export function useProductMix(range: DateRange) {
       const prevFromIso = isoDate(prevFrom);
       const prevToIso = isoDate(prevTo);
 
-      const [menuItemsRes, currentRows, prevRows, minPriceRows, recipeCostCtx] = await Promise.all([
+      const [menuItemsRes, currentRows, prevRows, recipeCostCtx] = await Promise.all([
         supabase
           .from("menu_items")
-          .select("pos_id, location_id, name, category, price_cents, cost_cents")
+          .select("pos_id, location_id, name, category, price_cents, price_is_starting_price, cost_cents")
           .in("location_id", locationIds!)
           .eq("active", true),
         fetchAllRows((from, to) =>
@@ -244,30 +244,9 @@ export function useProductMix(range: DateRange) {
             .order("business_date", { ascending: true })
             .range(from, to),
         ),
-        // Not date-range-scoped, on purpose — a "starting price" fallback
-        // should reflect the cheapest real sale ever synced, not just
-        // whatever range happens to be selected right now.
-        fetchAllRows((from, to) =>
-          supabase
-            .from("pmix_sales")
-            .select("menu_item_pos_id, min_unit_price_cents")
-            .in("location_id", locationIds!)
-            .not("min_unit_price_cents", "is", null)
-            .range(from, to),
-        ),
         fetchRecipeCostContext(locationIds!),
       ]);
       if (menuItemsRes.error) throw menuItemsRes.error;
-
-      const minPriceCentsByPosId = new Map<string, number>();
-      for (const r of minPriceRows) {
-        if (r.min_unit_price_cents == null) continue;
-        const prevMin = minPriceCentsByPosId.get(r.menu_item_pos_id);
-        minPriceCentsByPosId.set(
-          r.menu_item_pos_id,
-          prevMin == null ? Number(r.min_unit_price_cents) : Math.min(prevMin, Number(r.min_unit_price_cents)),
-        );
-      }
 
       const sumQtyBy = (rows: { menu_item_pos_id: string; quantity_sold: number }[]) => {
         const map = new Map<string, number>();
@@ -297,8 +276,8 @@ export function useProductMix(range: DateRange) {
           locationId: m.location_id,
           name: m.name,
           category: m.category ?? "Uncategorized",
-          price: (m.price_cents ?? minPriceCentsByPosId.get(m.pos_id) ?? 0) / 100,
-          hasRealPrice: m.price_cents != null,
+          price: (m.price_cents ?? 0) / 100,
+          hasRealPrice: m.price_cents != null && !m.price_is_starting_price,
           cost: costCents != null ? costCents / 100 : undefined,
           hasRecipe: recipeCents != null,
           soldWk: current.get(m.pos_id) ?? 0,

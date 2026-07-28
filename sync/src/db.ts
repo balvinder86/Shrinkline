@@ -72,7 +72,6 @@ export type PmixRow = {
   name: string;
   quantitySold: number;
   netSalesCents: number;
-  minUnitPriceCents: number | null;
 };
 
 export async function replacePmixForDate(
@@ -91,7 +90,6 @@ export async function replacePmixForDate(
       name: r.name,
       quantity_sold: r.quantitySold,
       net_sales_cents: r.netSalesCents,
-      min_unit_price_cents: r.minUnitPriceCents,
       updated_at: new Date().toISOString(),
     })),
     { onConflict: "location_id,business_date,menu_item_pos_id" },
@@ -101,7 +99,13 @@ export async function replacePmixForDate(
 
 export async function upsertMenuItems(
   cred: PosCredential,
-  items: { posId: string; name: string; category: string; priceCents: number | null }[],
+  items: {
+    posId: string;
+    name: string;
+    category: string;
+    priceCents: number | null;
+    isStartingPrice: boolean;
+  }[],
 ) {
   if (items.length === 0) return;
   const { error } = await supabase.from("menu_items").upsert(
@@ -112,6 +116,7 @@ export async function upsertMenuItems(
       name: i.name,
       category: i.category,
       price_cents: i.priceCents,
+      price_is_starting_price: i.isStartingPrice,
       active: true,
       updated_at: new Date().toISOString(),
     })),
