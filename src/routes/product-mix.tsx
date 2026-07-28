@@ -18,12 +18,12 @@ import {
 } from "@/lib/boh/queries";
 import {
   ArrowDownRight,
+  ArrowUpDown,
   ArrowUpRight,
   Award,
   ChevronLeft,
   ChevronRight,
   Clock,
-  Filter,
   Plug,
   RefreshCw,
   Search,
@@ -155,6 +155,7 @@ function ProductMixPage() {
     Math.round((dateRange.to.getTime() - dateRange.from.getTime()) / 86_400_000) + 1;
   const [cat, setCat] = useState<Category | "All">("All");
   const [q, setQ] = useState("");
+  const [sortOrder, setSortOrder] = useState<"default" | "most-sold" | "least-sold">("default");
   const [selected, setSelected] = useState<MenuItem | null>(null);
 
   const { data: items = [], isLoading, error } = useProductMix(dateRange);
@@ -197,12 +198,15 @@ function ProductMixPage() {
   );
 
   const filtered = useMemo(() => {
-    return items.filter(
+    const matched = items.filter(
       (i) =>
         (cat === "All" || i.category === cat) &&
         (q === "" || i.name.toLowerCase().includes(q.toLowerCase())),
     );
-  }, [items, cat, q]);
+    if (sortOrder === "most-sold") return [...matched].sort((a, b) => b.soldWk - a.soldWk);
+    if (sortOrder === "least-sold") return [...matched].sort((a, b) => a.soldWk - b.soldWk);
+    return matched;
+  }, [items, cat, q, sortOrder]);
 
   const [itemsPage, setItemsPage] = useState(1);
 
@@ -210,7 +214,7 @@ function ProductMixPage() {
   // otherwise a narrower filter can strand you on a now-empty page.
   useEffect(() => {
     setItemsPage(1);
-  }, [cat, q]);
+  }, [cat, q, sortOrder]);
 
   const itemsTotalPages = Math.max(1, Math.ceil(filtered.length / ITEMS_PAGE_SIZE));
   const pagedFiltered = useMemo(
@@ -477,9 +481,20 @@ function ProductMixPage() {
                     </button>
                   ))}
                 </div>
-                <Button variant="outline" size="sm" className="gap-2">
-                  <Filter className="h-3.5 w-3.5" /> More filters
-                </Button>
+                <Select
+                  value={sortOrder}
+                  onValueChange={(v) => setSortOrder(v as typeof sortOrder)}
+                >
+                  <SelectTrigger className="h-9 w-[168px] gap-2 bg-background text-xs">
+                    <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground" />
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="default">Default order</SelectItem>
+                    <SelectItem value="most-sold">Most sold first</SelectItem>
+                    <SelectItem value="least-sold">Least sold first</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
 
               <div className="overflow-x-auto">
