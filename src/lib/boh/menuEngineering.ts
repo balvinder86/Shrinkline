@@ -27,3 +27,17 @@ export function quadrant(
   if (pop < popMedian && margin >= marginMedian) return "Puzzle";
   return "Dog";
 }
+
+// Some real items (well-pour liquor: single/double, rail vs. call) have
+// no fixed Toast catalog price — `price` for those is instead the
+// cheapest real unit price ever observed in sales, a derived "starting
+// price" rather than a fixed one. Label it as such so it doesn't read
+// as a real menu price.
+export function formatItemPrice(
+  item: { price: number; hasRealPrice: boolean },
+  options?: { lowercase?: boolean },
+): string {
+  if (item.hasRealPrice) return `$${item.price.toFixed(2)}`;
+  if (item.price > 0) return `${options?.lowercase ? "from" : "From"} $${item.price.toFixed(2)}`;
+  return "$0.00";
+}

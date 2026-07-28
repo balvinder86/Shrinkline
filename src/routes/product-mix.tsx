@@ -44,7 +44,7 @@ import {
 } from "recharts";
 
 import { Topbar } from "@/components/dashboard/Topbar";
-import { quadrant, QUAD_COLOR } from "@/lib/boh/menuEngineering";
+import { quadrant, QUAD_COLOR, formatItemPrice } from "@/lib/boh/menuEngineering";
 import { formatDateRange } from "@/lib/date-range";
 import { useDateRange } from "@/lib/date-range-context";
 import { Card } from "@/components/ui/card";
@@ -511,7 +511,7 @@ function ProductMixPage() {
                               {i.category}
                             </Badge>
                           </td>
-                          <td className="py-3 px-3 text-right font-mono">${i.price.toFixed(2)}</td>
+                          <td className="py-3 px-3 text-right font-mono">{formatItemPrice(i)}</td>
                           <td className="py-3 px-3 text-right font-mono text-muted-foreground">
                             {i.cost != null ? `$${i.cost.toFixed(2)}` : "—"}
                           </td>
@@ -879,7 +879,7 @@ function ProductMixPage() {
                 </div>
                 <SheetTitle className="font-serif text-2xl">{selected.name}</SheetTitle>
                 <SheetDescription>
-                  ${selected.price.toFixed(2)} · {selected.soldWk} sold / wk
+                  {formatItemPrice(selected)} · {selected.soldWk} sold / wk
                 </SheetDescription>
               </SheetHeader>
               <div className="mt-6 space-y-5">

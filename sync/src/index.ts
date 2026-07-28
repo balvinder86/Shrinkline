@@ -70,7 +70,10 @@ function businessDatesBetween(start: Date, end: Date): string[] {
 }
 
 function aggregatePmix(orders: ToastOrder[]) {
-  const map = new Map<string, { name: string; qty: number; netCents: number }>();
+  const map = new Map<
+    string,
+    { name: string; qty: number; netCents: number; minUnitPriceCents: number | null }
+  >();
   for (const order of orders) {
     if (order.deleted || order.voided) continue;
     for (const check of order.checks ?? []) {
@@ -82,9 +85,26 @@ function aggregatePmix(orders: ToastOrder[]) {
           name: sel.displayName ?? "Unknown Item",
           qty: 0,
           netCents: 0,
+          minUnitPriceCents: null,
         };
         cur.qty += sel.quantity ?? 1;
         cur.netCents += Math.round((sel.price ?? 0) * 100);
+        // sel.price is the extended (line-total) price, not per-unit —
+        // divide by quantity to get what was actually charged per item,
+        // so a multi-size well pour (Vodka single vs. double, etc.)
+        // tracks its real cheapest unit price, not a quantity-inflated one.
+        // Excludes price === 0: real Toast data includes genuine, non-voided
+        // $0 selections (comps/give-aways) — those still count toward
+        // quantity/revenue above, but a comp isn't a real menu price point
+        // and would otherwise always win the "cheapest observed" minimum.
+        const qty = sel.quantity ?? 1;
+        if (qty > 0 && sel.price != null && sel.price > 0) {
+          const unitPriceCents = Math.round((sel.price / qty) * 100);
+          cur.minUnitPriceCents =
+            cur.minUnitPriceCents == null
+              ? unitPriceCents
+              : Math.min(cur.minUnitPriceCents, unitPriceCents);
+        }
         map.set(posId, cur);
       }
     }
@@ -94,6 +114,7 @@ function aggregatePmix(orders: ToastOrder[]) {
     name: v.name,
     quantitySold: v.qty,
     netSalesCents: v.netCents,
+    minUnitPriceCents: v.minUnitPriceCents,
   }));
 }
 

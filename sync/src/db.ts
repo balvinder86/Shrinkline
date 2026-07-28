@@ -72,6 +72,7 @@ export type PmixRow = {
   name: string;
   quantitySold: number;
   netSalesCents: number;
+  minUnitPriceCents: number | null;
 };
 
 export async function replacePmixForDate(
@@ -90,6 +91,7 @@ export async function replacePmixForDate(
       name: r.name,
       quantity_sold: r.quantitySold,
       net_sales_cents: r.netSalesCents,
+      min_unit_price_cents: r.minUnitPriceCents,
       updated_at: new Date().toISOString(),
     })),
     { onConflict: "location_id,business_date,menu_item_pos_id" },

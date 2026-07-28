@@ -63,6 +63,9 @@ jobs:
       - name: Apply Phase 1 labor schema
         run: $PSQL -f db/phase1/14_labor_schema.sql
 
+      - name: Apply Phase 1 pmix price range schema
+        run: $PSQL -f db/phase1/15_pmix_price_range.sql
+
       # Note: db/phase1/11_vault_read_secret.sql is NOT applied here —
       # it references the `vault` schema, which only exists on actual
       # Supabase projects, not a bare throwaway Postgres. Vault-secret

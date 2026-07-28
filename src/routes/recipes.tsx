@@ -20,7 +20,7 @@ import {
   type PrepRecipe,
   type PrepRecipeLine,
 } from "@/lib/boh/queries";
-import { quadrant, QUAD_COLOR } from "@/lib/boh/menuEngineering";
+import { quadrant, QUAD_COLOR, formatItemPrice } from "@/lib/boh/menuEngineering";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -145,7 +145,7 @@ function RecipesPage() {
                                 {item.category}
                               </Badge>
                             </td>
-                            <td className="px-3 py-3 text-right font-mono">${item.price.toFixed(2)}</td>
+                            <td className="px-3 py-3 text-right font-mono">{formatItemPrice(item)}</td>
                             <td className="px-3 py-3 text-right font-mono text-muted-foreground">
                               {item.hasRecipe && item.cost != null ? `$${item.cost.toFixed(2)}` : "—"}
                             </td>
@@ -381,7 +381,8 @@ function MenuItemRecipeSheet({ item }: { item: RealMenuItem }) {
         {totalCents != null && marginPct != null && foodCostPct != null ? (
           <>
             Costs <span className="font-medium">{formatMoney(totalCents)}</span> · Sells{" "}
-            <span className="font-medium">${item.price.toFixed(2)}</span> · Margin{" "}
+            <span className="font-medium">{formatItemPrice(item, { lowercase: true })}</span> ·{" "}
+            Margin{" "}
             <span className="font-medium">{marginPct.toFixed(0)}%</span> (food cost{" "}
             {foodCostPct.toFixed(0)}%)
           </>
