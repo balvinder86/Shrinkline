@@ -37,10 +37,14 @@ import {
   LineChart,
   Pie,
   PieChart,
+  ReferenceLine,
   ResponsiveContainer,
+  Scatter,
+  ScatterChart,
   Tooltip,
   XAxis,
   YAxis,
+  ZAxis,
 } from "recharts";
 
 import { Topbar } from "@/components/dashboard/Topbar";
@@ -218,6 +222,28 @@ function ProductMixPage() {
     const mid = arr[Math.floor(arr.length / 2)];
     return mid.price - mid.cost!;
   }, [items]);
+
+  // Only real, priced items — same guard the items table's Margin
+  // column already uses, since plotting a $0-price item's margin is
+  // meaningless even though quadrant() itself doesn't enforce price > 0.
+  const engineeringData = useMemo(() => {
+    return items
+      .filter((i) => i.cost != null && i.price > 0)
+      .map((i) => {
+        const q = quadrant(i, popMedian, marginMedian);
+        return {
+          id: i.id,
+          name: i.name,
+          category: i.category,
+          soldWk: i.soldWk,
+          margin: i.price - i.cost!,
+          revenueWk: i.revenueWk,
+          quadrant: q,
+          color: QUAD_COLOR[q],
+          item: i,
+        };
+      });
+  }, [items, popMedian, marginMedian]);
 
   const totals = useMemo(() => {
     const revenue = items.reduce((s, i) => s + i.revenueWk, 0);
@@ -424,6 +450,7 @@ function ProductMixPage() {
             <TabsTrigger value="categories">Categories</TabsTrigger>
             <TabsTrigger value="dayparts">Dayparts</TabsTrigger>
             <TabsTrigger value="trends">Trends</TabsTrigger>
+            <TabsTrigger value="engineering">Menu Engineering</TabsTrigger>
           </TabsList>
 
           {/* ITEMS */}
@@ -864,7 +891,124 @@ function ProductMixPage() {
             </div>
           </TabsContent>
 
-          {/* AI ENGINEER */}
+          <TabsContent value="engineering">
+            <Card className="p-6">
+              <p className="text-xs uppercase tracking-widest text-muted-foreground mb-1">
+                {rangeLabel}
+              </p>
+              <h3 className="font-serif text-2xl">Menu engineering</h3>
+              <p className="text-xs text-muted-foreground mt-1">
+                Popularity vs. margin for every priced item · bubble size = weekly revenue
+              </p>
+
+              {isLoading ? (
+                <div className="h-96 flex items-center justify-center text-sm text-muted-foreground">
+                  Loading real sales data…
+                </div>
+              ) : engineeringData.length === 0 ? (
+                <div className="h-96 flex items-center justify-center text-center text-sm text-muted-foreground">
+                  No priced items in {rangeLabel} yet. Add a cost to at least one item to see it
+                  plotted.
+                </div>
+              ) : (
+                <>
+                  <div className="mt-4 h-96">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <ScatterChart margin={{ top: 8, right: 16, bottom: 24, left: 8 }}>
+                        <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="2 4" />
+                        <XAxis
+                          type="number"
+                          dataKey="soldWk"
+                          name="Sold / wk"
+                          tick={{ fontSize: 11 }}
+                          domain={["dataMin - 1", "dataMax + 1"]}
+                          label={{
+                            value: "Units sold / wk",
+                            position: "insideBottom",
+                            offset: -8,
+                            fontSize: 11,
+                            fill: "hsl(var(--muted-foreground))",
+                          }}
+                        />
+                        <YAxis
+                          type="number"
+                          dataKey="margin"
+                          name="Margin"
+                          tick={{ fontSize: 11 }}
+                          tickFormatter={(v: number) => `$${v}`}
+                          domain={["dataMin - 1", "dataMax + 1"]}
+                          label={{
+                            value: "Margin $",
+                            angle: -90,
+                            position: "insideLeft",
+                            fontSize: 11,
+                            fill: "hsl(var(--muted-foreground))",
+                          }}
+                        />
+                        <ZAxis dataKey="revenueWk" range={[60, 400]} domain={[0, "dataMax"]} />
+                        <ReferenceLine x={popMedian} stroke={PALETTE.muted} strokeDasharray="4 4" />
+                        <ReferenceLine y={marginMedian} stroke={PALETTE.muted} strokeDasharray="4 4" />
+                        <Tooltip
+                          cursor={{ strokeDasharray: "2 4" }}
+                          content={({ active, payload }) => {
+                            if (!active || !payload?.length) return null;
+                            const d = payload[0].payload as (typeof engineeringData)[number];
+                            return (
+                              <div
+                                style={{
+                                  background: "hsl(var(--background))",
+                                  border: "1px solid hsl(var(--border))",
+                                  borderRadius: 8,
+                                  fontSize: 12,
+                                  padding: "8px 10px",
+                                }}
+                              >
+                                <div className="font-medium">{d.name}</div>
+                                <div className="text-muted-foreground">{d.category}</div>
+                                <div>
+                                  {d.soldWk} sold/wk · ${d.margin.toFixed(2)} margin
+                                </div>
+                                <div className="font-medium" style={{ color: d.color }}>
+                                  {d.quadrant}
+                                </div>
+                              </div>
+                            );
+                          }}
+                        />
+                        <Scatter
+                          data={engineeringData}
+                          onClick={(point: { payload: (typeof engineeringData)[number] }) =>
+                            setSelected(point.payload.item)
+                          }
+                          cursor="pointer"
+                        >
+                          {engineeringData.map((d) => (
+                            <Cell key={d.id} fill={d.color} fillOpacity={0.85} />
+                          ))}
+                        </Scatter>
+                      </ScatterChart>
+                    </ResponsiveContainer>
+                  </div>
+
+                  {/* Manual legend — recharts <Legend> labels per-series, not
+                      per-Cell, so it can't show which color maps to which
+                      quadrant here; same reason the pie chart above already
+                      hand-rolls its own legend instead of using <Legend>. */}
+                  <div className="mt-4 flex flex-wrap gap-4 text-xs">
+                    {(["Star", "Plowhorse", "Puzzle", "Dog"] as const).map((q) => (
+                      <span key={q} className="inline-flex items-center gap-1.5">
+                        <span
+                          className="h-2.5 w-2.5 rounded-full"
+                          style={{ background: QUAD_COLOR[q] }}
+                        />
+                        {q} ({engineeringData.filter((d) => d.quadrant === q).length})
+                      </span>
+                    ))}
+                  </div>
+                </>
+              )}
+            </Card>
+          </TabsContent>
         </Tabs>
       </main>
 
