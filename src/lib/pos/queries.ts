@@ -4,6 +4,110 @@ import type { PostgrestError } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase/client";
 import { useLocationIds } from "@/lib/supabase/scope";
 import { type DateRange, addDays, isoDate } from "@/lib/date-range";
+import {
+  resolveMenuItemRecipeCostCents,
+  type PrepRecipeLineRow,
+  type RecipeLineRow,
+} from "@/lib/boh/recipeCost";
+
+type IngredientCostJoin = { unit_cost_cents: number | null } | null;
+
+// Shared by useProductMix and useFoodCostSummary — fetches everything
+// the recursive cost resolver needs (recipe_lines for these locations'
+// menu items, every prep_recipe reachable from them, and every
+// ingredient cost referenced anywhere in that graph) and returns it
+// pre-shaped as the Maps resolveMenuItemRecipeCostCents expects.
+export async function fetchRecipeCostContext(locationIds: string[]) {
+  const [recipeLinesRes, prepRecipeLinesRes, prepRecipesRes] = await Promise.all([
+    supabase
+      .from("recipe_lines")
+      .select("menu_item_pos_id, ingredient_id, prep_recipe_id, quantity, ingredients (unit_cost_cents)")
+      .in("location_id", locationIds),
+    // prep_recipe_lines has two FKs into prep_recipes (the owning
+    // recipe via prep_recipe_id, and the referenced sub-recipe via
+    // sub_prep_recipe_id) — PostgREST can't infer which one a bare
+    // "prep_recipes(...)" embed means, so the owning relationship is
+    // disambiguated explicitly via the column name, aliased as
+    // `owner` for the location-scoping filter below.
+    supabase
+      .from("prep_recipe_lines")
+      .select(
+        "prep_recipe_id, ingredient_id, sub_prep_recipe_id, quantity, ingredients (unit_cost_cents), owner:prep_recipes!prep_recipe_id!inner(location_id)",
+      )
+      .in("owner.location_id", locationIds),
+    supabase.from("prep_recipes").select("id, yield_qty").in("location_id", locationIds),
+  ]);
+  if (recipeLinesRes.error) throw recipeLinesRes.error;
+  if (prepRecipeLinesRes.error) throw prepRecipeLinesRes.error;
+  if (prepRecipesRes.error) throw prepRecipesRes.error;
+
+  type RecipeLineDbRow = {
+    menu_item_pos_id: string;
+    ingredient_id: string | null;
+    prep_recipe_id: string | null;
+    quantity: number;
+    ingredients: IngredientCostJoin;
+  };
+  type PrepRecipeLineDbRow = {
+    prep_recipe_id: string;
+    ingredient_id: string | null;
+    sub_prep_recipe_id: string | null;
+    quantity: number;
+    ingredients: IngredientCostJoin;
+  };
+
+  const recipeLinesData = (recipeLinesRes.data ?? []) as unknown as RecipeLineDbRow[];
+  const prepRecipeLinesData = (prepRecipeLinesRes.data ?? []) as unknown as PrepRecipeLineDbRow[];
+
+  const ingredientCostById = new Map<string, number | null>();
+  for (const row of recipeLinesData) {
+    if (row.ingredient_id) ingredientCostById.set(row.ingredient_id, row.ingredients?.unit_cost_cents ?? null);
+  }
+  for (const row of prepRecipeLinesData) {
+    if (row.ingredient_id) ingredientCostById.set(row.ingredient_id, row.ingredients?.unit_cost_cents ?? null);
+  }
+
+  const prepRecipeLinesByPrepId = new Map<string, PrepRecipeLineRow[]>();
+  for (const row of prepRecipeLinesData) {
+    const list = prepRecipeLinesByPrepId.get(row.prep_recipe_id) ?? [];
+    list.push({
+      prep_recipe_id: row.prep_recipe_id,
+      ingredient_id: row.ingredient_id,
+      sub_prep_recipe_id: row.sub_prep_recipe_id,
+      quantity: Number(row.quantity),
+    });
+    prepRecipeLinesByPrepId.set(row.prep_recipe_id, list);
+  }
+
+  const prepRecipeYieldById = new Map(
+    (prepRecipesRes.data ?? []).map((r) => [r.id as string, Number(r.yield_qty)]),
+  );
+
+  const recipeLinesByMenuItem = new Map<string, RecipeLineRow[]>();
+  for (const row of recipeLinesData) {
+    const list = recipeLinesByMenuItem.get(row.menu_item_pos_id) ?? [];
+    list.push({
+      ingredient_id: row.ingredient_id,
+      prep_recipe_id: row.prep_recipe_id,
+      quantity: Number(row.quantity),
+    });
+    recipeLinesByMenuItem.set(row.menu_item_pos_id, list);
+  }
+
+  return { recipeLinesByMenuItem, prepRecipeLinesByPrepId, prepRecipeYieldById, ingredientCostById };
+}
+
+function resolveItemCostCents(
+  menuItemPosId: string,
+  ctx: Awaited<ReturnType<typeof fetchRecipeCostContext>>,
+): number | null {
+  return resolveMenuItemRecipeCostCents(
+    ctx.recipeLinesByMenuItem.get(menuItemPosId) ?? [],
+    ctx.prepRecipeLinesByPrepId,
+    ctx.prepRecipeYieldById,
+    ctx.ingredientCostById,
+  );
+}
 
 // PostgREST caps an unpaginated read at 1000 rows. pmix_sales and
 // pos_raw_events both scale with days-in-range × (menu items or
@@ -72,6 +176,11 @@ export type RealMenuItem = {
   category: string;
   price: number;
   cost?: number;
+  // True only when `cost` came from actual recipe_lines rows, false when
+  // it's the manual menu_items.cost_cents fallback (or absent). The
+  // Recipes page needs this to avoid showing a "Cost" figure for an item
+  // that, once opened, turns out to have no recipe at all.
+  hasRecipe: boolean;
   soldWk: number;
   soldPrevWk: number;
   // Real dollars Toast recorded for this item's sales (pmix_sales.net_sales_cents),
@@ -102,7 +211,7 @@ export function useProductMix(range: DateRange) {
       const prevFromIso = isoDate(prevFrom);
       const prevToIso = isoDate(prevTo);
 
-      const [menuItemsRes, currentRows, prevRows, recipeRes] = await Promise.all([
+      const [menuItemsRes, currentRows, prevRows, recipeCostCtx] = await Promise.all([
         supabase
           .from("menu_items")
           .select("pos_id, location_id, name, category, price_cents, cost_cents")
@@ -128,13 +237,9 @@ export function useProductMix(range: DateRange) {
             .order("business_date", { ascending: true })
             .range(from, to),
         ),
-        supabase
-          .from("recipe_lines")
-          .select("menu_item_pos_id, quantity, ingredients (unit_cost_cents)")
-          .in("location_id", locationIds!),
+        fetchRecipeCostContext(locationIds!),
       ]);
       if (menuItemsRes.error) throw menuItemsRes.error;
-      if (recipeRes.error) throw recipeRes.error;
 
       const sumQtyBy = (rows: { menu_item_pos_id: string; quantity_sold: number }[]) => {
         const map = new Map<string, number>();
@@ -156,16 +261,8 @@ export function useProductMix(range: DateRange) {
       const currentRevenueCents = sumRevenueBy(currentRows);
       const prevRevenueCents = sumRevenueBy(prevRows);
 
-      const recipeCostCents = new Map<string, number>();
-      for (const row of (recipeRes.data ?? []) as any[]) {
-        const unitCost = row.ingredients?.unit_cost_cents;
-        if (unitCost == null) continue; // an ingredient with no cost yet can't total this item
-        const cur = recipeCostCents.get(row.menu_item_pos_id) ?? 0;
-        recipeCostCents.set(row.menu_item_pos_id, cur + Number(row.quantity) * unitCost);
-      }
-
       return (menuItemsRes.data ?? []).map((m) => {
-        const recipeCents = recipeCostCents.get(m.pos_id);
+        const recipeCents = resolveItemCostCents(m.pos_id, recipeCostCtx);
         const costCents = recipeCents ?? m.cost_cents ?? undefined;
         return {
           id: m.pos_id,
@@ -174,6 +271,7 @@ export function useProductMix(range: DateRange) {
           category: m.category ?? "Uncategorized",
           price: (m.price_cents ?? 0) / 100,
           cost: costCents != null ? costCents / 100 : undefined,
+          hasRecipe: recipeCents != null,
           soldWk: current.get(m.pos_id) ?? 0,
           soldPrevWk: prev.get(m.pos_id) ?? 0,
           revenueWk: (currentRevenueCents.get(m.pos_id) ?? 0) / 100,
@@ -237,7 +335,7 @@ export function useFoodCostSummary(range: DateRange) {
     queryFn: async (): Promise<FoodCostSummary> => {
       const days = Math.round((range.to.getTime() - range.from.getTime()) / 86_400_000) + 1;
 
-      const [salesData, recipeRes, invoicesRes] = await Promise.all([
+      const [salesData, recipeCostCtx, invoicesRes] = await Promise.all([
         fetchAllRows((from, to) =>
           supabase
             .from("pmix_sales")
@@ -248,10 +346,7 @@ export function useFoodCostSummary(range: DateRange) {
             .order("business_date", { ascending: true })
             .range(from, to),
         ),
-        supabase
-          .from("recipe_lines")
-          .select("menu_item_pos_id, quantity, ingredients (unit_cost_cents)")
-          .in("location_id", locationIds!),
+        fetchRecipeCostContext(locationIds!),
         // Inner-joined to vendors and filtered to food_beverage so a
         // utility/maintenance/rent bill can't inflate "actual food
         // spend" — see feedback_thrasherspub_ui_preferences /
@@ -265,20 +360,13 @@ export function useFoodCostSummary(range: DateRange) {
           .gte("invoice_date", fromIso)
           .lte("invoice_date", toIso),
       ]);
-      if (recipeRes.error) throw recipeRes.error;
       if (invoicesRes.error) throw invoicesRes.error;
 
-      type RecipeRow = {
-        menu_item_pos_id: string;
-        quantity: number;
-        ingredients: { unit_cost_cents: number | null } | null;
-      };
-      const recipeCostPerUnit = new Map<string, number>();
-      for (const row of (recipeRes.data ?? []) as unknown as RecipeRow[]) {
-        const unitCost = row.ingredients?.unit_cost_cents;
-        if (unitCost == null) continue;
-        const cur = recipeCostPerUnit.get(row.menu_item_pos_id) ?? 0;
-        recipeCostPerUnit.set(row.menu_item_pos_id, cur + Number(row.quantity) * unitCost);
+      // Resolved once per menu item (recursing through any prep
+      // recipes it uses), then reused for every sold unit of that item.
+      const itemCostCentsById = new Map<string, number | null>();
+      for (const menuItemPosId of recipeCostCtx.recipeLinesByMenuItem.keys()) {
+        itemCostCentsById.set(menuItemPosId, resolveItemCostCents(menuItemPosId, recipeCostCtx));
       }
 
       let theoreticalCostCents = 0;
@@ -286,7 +374,7 @@ export function useFoodCostSummary(range: DateRange) {
       const itemsMissing = new Set<string>();
       for (const row of salesData) {
         netSalesCents += Number(row.net_sales_cents);
-        const perUnit = recipeCostPerUnit.get(row.menu_item_pos_id);
+        const perUnit = itemCostCentsById.get(row.menu_item_pos_id);
         if (perUnit == null) {
           itemsMissing.add(row.menu_item_pos_id);
           continue;
@@ -305,7 +393,7 @@ export function useFoodCostSummary(range: DateRange) {
       // variance instead of no-data.
       const hasInvoiceData = approvedInvoices.length > 0;
 
-      const hasRecipeData = recipeCostPerUnit.size > 0;
+      const hasRecipeData = Array.from(itemCostCentsById.values()).some((c) => c != null);
       const theoreticalPct =
         hasRecipeData && netSalesCents > 0 ? (theoreticalCostCents / netSalesCents) * 100 : null;
       const actualPct =

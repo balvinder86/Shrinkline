@@ -19,6 +19,7 @@ export type TranslationDict = {
   nav: {
     home: string;
     productMix: string;
+    recipes: string;
     inventory: string;
     invoices: string;
     reviews: string;
@@ -54,6 +55,7 @@ export const translations: Record<Language, TranslationDict> = {
     nav: {
       home: "Home",
       productMix: "Product Mix",
+      recipes: "Recipes",
       inventory: "Inventory & Ordering",
       invoices: "Invoices",
       reviews: "Reviews",
@@ -96,6 +98,7 @@ export const translations: Record<Language, TranslationDict> = {
     nav: {
       home: "Inicio",
       productMix: "Mezcla de productos",
+      recipes: "Recetas",
       inventory: "Inventario y pedidos",
       invoices: "Facturas",
       reviews: "Reseñas",

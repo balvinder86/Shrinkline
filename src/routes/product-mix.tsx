@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -10,12 +10,7 @@ import {
   useItemTrend,
   type RealMenuItem,
 } from "@/lib/pos/queries";
-import {
-  useIngredients,
-  useRecipeLinesForItem,
-  useAddRecipeLine,
-  useDeleteRecipeLine,
-} from "@/lib/boh/queries";
+import { useRecipeLinesForItem } from "@/lib/boh/queries";
 import {
   ArrowDownRight,
   ArrowUpDown,
@@ -29,7 +24,6 @@ import {
   Search,
   Star,
   Tag,
-  Trash2,
   TrendingUp,
   Utensils,
   DollarSign,
@@ -50,6 +44,7 @@ import {
 } from "recharts";
 
 import { Topbar } from "@/components/dashboard/Topbar";
+import { quadrant, QUAD_COLOR } from "@/lib/boh/menuEngineering";
 import { formatDateRange } from "@/lib/date-range";
 import { useDateRange } from "@/lib/date-range-context";
 import { Card } from "@/components/ui/card";
@@ -89,10 +84,6 @@ export const Route = createFileRoute("/product-mix")({
 });
 
 // ---------- Types ----------
-// "Unpriced" covers items with no cost_cents entered yet — quadrant
-// classification needs both popularity and margin, so an item with
-// unknown cost can't be placed until someone fills in a cost.
-type Quadrant = "Star" | "Plowhorse" | "Puzzle" | "Dog" | "Unpriced";
 type Category = string;
 
 type MenuItem = RealMenuItem;
@@ -120,24 +111,6 @@ const CATEGORY_ALIASES: Record<string, string> = {
 };
 function canonicalCategory(category: string): string {
   return CATEGORY_ALIASES[category] ?? category;
-}
-
-const QUAD_COLOR: Record<Quadrant, string> = {
-  Star: "#87a878",
-  Plowhorse: "#d4a574",
-  Puzzle: "#7da3c2",
-  Dog: "#c17c74",
-  Unpriced: "#9c9890",
-};
-
-function quadrant(item: MenuItem, popMedian: number, marginMedian: number): Quadrant {
-  if (item.cost == null) return "Unpriced";
-  const margin = item.price - item.cost;
-  const pop = item.soldWk;
-  if (pop >= popMedian && margin >= marginMedian) return "Star";
-  if (pop >= popMedian && margin < marginMedian) return "Plowhorse";
-  if (pop < popMedian && margin >= marginMedian) return "Puzzle";
-  return "Dog";
 }
 
 function fmt(n: number) {
@@ -515,7 +488,7 @@ function ProductMixPage() {
                   </thead>
                   <tbody>
                     {pagedFiltered.map((i) => {
-                      const margin = i.cost != null ? i.price - i.cost : null;
+                      const margin = i.cost != null && i.price > 0 ? i.price - i.cost : null;
                       const marginPct = margin != null ? (margin / i.price) * 100 : null;
                       const wow =
                         i.soldPrevWk > 0
@@ -911,10 +884,17 @@ function ProductMixPage() {
               </SheetHeader>
               <div className="mt-6 space-y-5">
                 <div>
-                  <div className="text-xs uppercase tracking-widest text-muted-foreground mb-2">
-                    Recipe
+                  <div className="mb-2 flex items-center justify-between">
+                    <div className="text-xs uppercase tracking-widest text-muted-foreground">Recipe</div>
+                    <Link
+                      to="/recipes"
+                      search={{ item: selected.id }}
+                      className="text-xs font-medium text-primary hover:underline"
+                    >
+                      Edit recipe →
+                    </Link>
                   </div>
-                  <RecipeEditor menuItemPosId={selected.id} />
+                  <RecipeSummary menuItemPosId={selected.id} />
                 </div>
                 <div>
                   <div className="text-xs uppercase tracking-widest text-muted-foreground mb-2">
@@ -948,7 +928,7 @@ function ProductMixPage() {
                   <Stat
                     label="Margin %"
                     value={
-                      selected.cost != null
+                      selected.cost != null && selected.price > 0
                         ? `${(((selected.price - selected.cost) / selected.price) * 100).toFixed(0)}%`
                         : "—"
                     }
@@ -1064,98 +1044,55 @@ function Stat({ label, value }: { label: string; value: string }) {
 // consumes. Once at least one line exists, useProductMix (pos/queries.ts)
 // computes this item's cost from these lines instead of the manual
 // override below.
-function RecipeEditor({ menuItemPosId }: { menuItemPosId: string }) {
+// Read-only — editing now lives on the dedicated /recipes page (see
+// the "Edit recipe →" link above this component), so this drawer
+// isn't a second, divergent place to add/remove recipe lines. A line
+// can be a raw ingredient or a prep recipe (e.g. a house sauce).
+function RecipeSummary({ menuItemPosId }: { menuItemPosId: string }) {
   const { data: lines = [], isLoading } = useRecipeLinesForItem(menuItemPosId);
-  const { data: ingredients = [] } = useIngredients();
-  const addLine = useAddRecipeLine();
-  const deleteLine = useDeleteRecipeLine();
 
-  const [ingredientId, setIngredientId] = useState("");
-  const [quantity, setQuantity] = useState("");
+  const totalCents = useMemo(() => {
+    if (lines.length === 0) return null;
+    let sum = 0;
+    for (const l of lines) {
+      const lineCost = l.ingredientId != null ? l.ingredientCostCents : l.prepRecipeCostPerYieldUnitCents;
+      if (lineCost == null) return null;
+      sum += l.quantity * lineCost;
+    }
+    return Math.round(sum);
+  }, [lines]);
 
-  const selectedIngredient = ingredients.find((i) => i.id === ingredientId);
-  const totalCents = lines.every((l) => l.ingredientCostCents != null)
-    ? lines.reduce((s, l) => s + l.quantity * (l.ingredientCostCents ?? 0), 0)
-    : null;
+  if (isLoading) return <p className="text-sm text-muted-foreground">Loading…</p>;
+  if (lines.length === 0)
+    return <p className="text-sm text-muted-foreground">No recipe yet — add one on the Recipes page.</p>;
 
   return (
-    <div className="space-y-2">
-      {isLoading ? (
-        <p className="text-sm text-muted-foreground">Loading…</p>
-      ) : lines.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No ingredients mapped yet.</p>
-      ) : (
-        <div className="rounded-md border divide-y">
-          {lines.map((l) => (
-            <div key={l.id} className="flex items-center justify-between px-3 py-2 text-sm">
+    <div className="rounded-md border divide-y">
+      {lines.map((l) => {
+        const isPrep = l.prepRecipeId != null;
+        const name = isPrep ? l.prepRecipeName : l.ingredientName;
+        const unitCostCents = isPrep ? l.prepRecipeCostPerYieldUnitCents : l.ingredientCostCents;
+        return (
+          <div key={l.id} className="flex items-center justify-between px-3 py-2 text-sm">
+            <div>
               <div>
-                <div>{l.ingredientName}</div>
-                <div className="text-xs text-muted-foreground">
-                  {l.quantity} {l.unit}
-                  {l.ingredientCostCents != null &&
-                    ` · $${((l.quantity * l.ingredientCostCents) / 100).toFixed(2)}`}
-                </div>
+                {name}
+                {isPrep && <span className="ml-1.5 text-xs text-muted-foreground">(prep recipe)</span>}
               </div>
-              <Button
-                size="icon"
-                variant="ghost"
-                className="h-7 w-7"
-                onClick={() => deleteLine.mutate(l.id)}
-                disabled={deleteLine.isPending}
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </Button>
+              <div className="text-xs text-muted-foreground">
+                {l.quantity} {l.unit}
+                {unitCostCents != null && ` · $${((l.quantity * unitCostCents) / 100).toFixed(2)}`}
+              </div>
             </div>
-          ))}
-          {totalCents != null && (
-            <div className="px-3 py-2 text-sm font-medium flex justify-between">
-              <span>Recipe cost</span>
-              <span>${(totalCents / 100).toFixed(2)}</span>
-            </div>
-          )}
+          </div>
+        );
+      })}
+      {totalCents != null && (
+        <div className="flex justify-between px-3 py-2 text-sm font-medium">
+          <span>Recipe cost</span>
+          <span>${(totalCents / 100).toFixed(2)}</span>
         </div>
       )}
-
-      <div className="flex items-center gap-2">
-        <Select value={ingredientId} onValueChange={setIngredientId}>
-          <SelectTrigger className="h-8 flex-1">
-            <SelectValue placeholder="Add ingredient…" />
-          </SelectTrigger>
-          <SelectContent>
-            {ingredients.map((i) => (
-              <SelectItem key={i.id} value={i.id}>
-                {i.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Input
-          type="number"
-          step="0.01"
-          min="0"
-          placeholder="qty"
-          value={quantity}
-          onChange={(e) => setQuantity(e.target.value)}
-          className="h-8 w-20"
-        />
-        <span className="text-xs text-muted-foreground w-10">{selectedIngredient?.unit ?? ""}</span>
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={!ingredientId || !quantity || addLine.isPending}
-          onClick={() => {
-            if (!selectedIngredient) return;
-            const qty = parseFloat(quantity);
-            if (!Number.isFinite(qty) || qty <= 0) return;
-            addLine.mutate(
-              { menuItemPosId, ingredientId, quantity: qty, unit: selectedIngredient.unit },
-              { onSuccess: () => setQuantity("") },
-            );
-          }}
-        >
-          Add
-        </Button>
-      </div>
     </div>
   );
 }

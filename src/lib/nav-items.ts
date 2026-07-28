@@ -3,6 +3,7 @@ import {
   PieChart,
   Package,
   Receipt,
+  ChefHat,
   Star,
   Search,
   Megaphone,
@@ -33,6 +34,9 @@ export type NavItem = {
 export const NAV_OVERVIEW: NavItem[] = [
   { titleKey: "home", url: "/", icon: LayoutDashboard, permission: "sales_overview" },
   { titleKey: "productMix", url: "/product-mix", icon: PieChart, permission: "product_mix" },
+  // Reuses "product_mix" — Recipes is the cost/recipe side of Product
+  // Mix's real menu items, same domain, no new permission needed.
+  { titleKey: "recipes", url: "/recipes", icon: ChefHat, permission: "product_mix" },
   { titleKey: "inventory", url: "/inventory", icon: Package, permission: "inventory" },
   { titleKey: "invoices", url: "/invoices", icon: Receipt, permission: "invoices" },
   // Rolls up Sales + COGS + Labor + Operating Expenses — spans every

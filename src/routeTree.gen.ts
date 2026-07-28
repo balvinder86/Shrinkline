@@ -15,6 +15,7 @@ import { Route as SeoRouteImport } from './routes/seo'
 import { Route as SegmentsRouteImport } from './routes/segments'
 import { Route as SchedulingRouteImport } from './routes/scheduling'
 import { Route as ReviewsRouteImport } from './routes/reviews'
+import { Route as RecipesRouteImport } from './routes/recipes'
 import { Route as ProductMixRouteImport } from './routes/product-mix'
 import { Route as PnlRouteImport } from './routes/pnl'
 import { Route as MarketingRouteImport } from './routes/marketing'
@@ -54,6 +55,11 @@ const SchedulingRoute = SchedulingRouteImport.update({
 const ReviewsRoute = ReviewsRouteImport.update({
   id: '/reviews',
   path: '/reviews',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RecipesRoute = RecipesRouteImport.update({
+  id: '/recipes',
+  path: '/recipes',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ProductMixRoute = ProductMixRouteImport.update({
@@ -118,6 +124,7 @@ export interface FileRoutesByFullPath {
   '/marketing': typeof MarketingRoute
   '/pnl': typeof PnlRoute
   '/product-mix': typeof ProductMixRoute
+  '/recipes': typeof RecipesRoute
   '/reviews': typeof ReviewsRoute
   '/scheduling': typeof SchedulingRoute
   '/segments': typeof SegmentsRoute
@@ -136,6 +143,7 @@ export interface FileRoutesByTo {
   '/marketing': typeof MarketingRoute
   '/pnl': typeof PnlRoute
   '/product-mix': typeof ProductMixRoute
+  '/recipes': typeof RecipesRoute
   '/reviews': typeof ReviewsRoute
   '/scheduling': typeof SchedulingRoute
   '/segments': typeof SegmentsRoute
@@ -155,6 +163,7 @@ export interface FileRoutesById {
   '/marketing': typeof MarketingRoute
   '/pnl': typeof PnlRoute
   '/product-mix': typeof ProductMixRoute
+  '/recipes': typeof RecipesRoute
   '/reviews': typeof ReviewsRoute
   '/scheduling': typeof SchedulingRoute
   '/segments': typeof SegmentsRoute
@@ -175,6 +184,7 @@ export interface FileRouteTypes {
     | '/marketing'
     | '/pnl'
     | '/product-mix'
+    | '/recipes'
     | '/reviews'
     | '/scheduling'
     | '/segments'
@@ -193,6 +203,7 @@ export interface FileRouteTypes {
     | '/marketing'
     | '/pnl'
     | '/product-mix'
+    | '/recipes'
     | '/reviews'
     | '/scheduling'
     | '/segments'
@@ -211,6 +222,7 @@ export interface FileRouteTypes {
     | '/marketing'
     | '/pnl'
     | '/product-mix'
+    | '/recipes'
     | '/reviews'
     | '/scheduling'
     | '/segments'
@@ -230,6 +242,7 @@ export interface RootRouteChildren {
   MarketingRoute: typeof MarketingRoute
   PnlRoute: typeof PnlRoute
   ProductMixRoute: typeof ProductMixRoute
+  RecipesRoute: typeof RecipesRoute
   ReviewsRoute: typeof ReviewsRoute
   SchedulingRoute: typeof SchedulingRoute
   SegmentsRoute: typeof SegmentsRoute
@@ -280,6 +293,13 @@ declare module '@tanstack/react-router' {
       path: '/reviews'
       fullPath: '/reviews'
       preLoaderRoute: typeof ReviewsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/recipes': {
+      id: '/recipes'
+      path: '/recipes'
+      fullPath: '/recipes'
+      preLoaderRoute: typeof RecipesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/product-mix': {
@@ -366,6 +386,7 @@ const rootRouteChildren: RootRouteChildren = {
   MarketingRoute: MarketingRoute,
   PnlRoute: PnlRoute,
   ProductMixRoute: ProductMixRoute,
+  RecipesRoute: RecipesRoute,
   ReviewsRoute: ReviewsRoute,
   SchedulingRoute: SchedulingRoute,
   SegmentsRoute: SegmentsRoute,

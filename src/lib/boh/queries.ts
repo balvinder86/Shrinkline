@@ -3,6 +3,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase/client";
 import { useLocationIds, useRestaurantIds } from "@/lib/supabase/scope";
 import { VENDOR_CATEGORIES, type VendorCategory } from "@/lib/boh/vendor-categories";
+import { fetchRecipeCostContext } from "@/lib/pos/queries";
+import { resolvePrepRecipeCostPerYieldUnit, wouldCreateCycle } from "@/lib/boh/recipeCost";
 
 // A user's dashboard today only ever shows one location — same
 // simplification as useCurrentRestaurantId, revisit when multi-location
@@ -903,64 +905,60 @@ export function useUpdatePar() {
 // (see pos/queries.ts's useProductMix: cost falls back to a manual
 // override until an item has recipe lines).
 // ------------------------------------------------------------
+// A line is either a raw ingredient OR a prep recipe (e.g. a house
+// sauce used across dishes) — never both, matching the DB check
+// constraint. Exactly one of the ingredient*/prepRecipe* groups below
+// is non-null on any given line.
 export type RecipeLine = {
   id: string;
-  ingredientId: string;
-  ingredientName: string;
-  ingredientUnit: string;
+  ingredientId: string | null;
+  ingredientName: string | null;
+  ingredientUnit: string | null;
   ingredientCostCents: number | null;
+  prepRecipeId: string | null;
+  prepRecipeName: string | null;
+  prepRecipeCostPerYieldUnitCents: number | null;
   quantity: number;
   unit: string;
 };
 
 export function useRecipeLinesForItem(menuItemPosId: string | undefined) {
   const locationId = useCurrentLocationId();
+  const { data: locationIds } = useLocationIds();
   return useQuery({
     queryKey: ["recipe-lines", locationId, menuItemPosId],
     enabled: !!locationId && !!menuItemPosId,
     queryFn: async (): Promise<RecipeLine[]> => {
-      const { data, error } = await supabase
-        .from("recipe_lines")
-        .select("id, quantity, unit, ingredients (id, name, unit, unit_cost_cents)")
-        .eq("location_id", locationId!)
-        .eq("menu_item_pos_id", menuItemPosId!);
-      if (error) throw error;
-      return (data ?? []).map((row: any) => ({
+      const [linesRes, ctx] = await Promise.all([
+        supabase
+          .from("recipe_lines")
+          .select(
+            "id, quantity, unit, ingredient_id, prep_recipe_id, ingredients (id, name, unit, unit_cost_cents), prep_recipes (id, name)",
+          )
+          .eq("location_id", locationId!)
+          .eq("menu_item_pos_id", menuItemPosId!),
+        fetchRecipeCostContext(locationIds ?? []),
+      ]);
+      if (linesRes.error) throw linesRes.error;
+      return (linesRes.data ?? []).map((row: any) => ({
         id: row.id,
-        ingredientId: row.ingredients.id,
-        ingredientName: row.ingredients.name,
-        ingredientUnit: row.ingredients.unit,
-        ingredientCostCents: row.ingredients.unit_cost_cents,
+        ingredientId: row.ingredient_id,
+        ingredientName: row.ingredients?.name ?? null,
+        ingredientUnit: row.ingredients?.unit ?? null,
+        ingredientCostCents: row.ingredients?.unit_cost_cents ?? null,
+        prepRecipeId: row.prep_recipe_id,
+        prepRecipeName: row.prep_recipes?.name ?? null,
+        prepRecipeCostPerYieldUnitCents: row.prep_recipe_id
+          ? resolvePrepRecipeCostPerYieldUnit(
+              row.prep_recipe_id,
+              ctx.prepRecipeLinesByPrepId,
+              ctx.prepRecipeYieldById,
+              ctx.ingredientCostById,
+            )
+          : null,
         quantity: Number(row.quantity),
         unit: row.unit,
       }));
-    },
-  });
-}
-
-// Bulk: total recipe cost (cents) per menu item across the whole
-// location, for the item table's cost column — one query instead of
-// one per item.
-export function useRecipeCostsByItem() {
-  const locationId = useCurrentLocationId();
-  return useQuery({
-    queryKey: ["recipe-costs-by-item", locationId],
-    enabled: !!locationId,
-    queryFn: async (): Promise<Map<string, number>> => {
-      const { data, error } = await supabase
-        .from("recipe_lines")
-        .select("menu_item_pos_id, quantity, ingredients (unit_cost_cents)")
-        .eq("location_id", locationId!);
-      if (error) throw error;
-
-      const costs = new Map<string, number>();
-      for (const row of (data ?? []) as any[]) {
-        const unitCost = row.ingredients?.unit_cost_cents;
-        if (unitCost == null) continue; // ingredient has no cost yet — can't total this item
-        const current = costs.get(row.menu_item_pos_id) ?? 0;
-        costs.set(row.menu_item_pos_id, current + Number(row.quantity) * unitCost);
-      }
-      return costs;
     },
   });
 }
@@ -970,18 +968,20 @@ export function useAddRecipeLine() {
   const locationId = useCurrentLocationId();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (input: {
-      menuItemPosId: string;
-      ingredientId: string;
-      quantity: number;
-      unit: string;
-    }) => {
+    mutationFn: async (
+      input: {
+        menuItemPosId: string;
+        quantity: number;
+        unit: string;
+      } & ({ ingredientId: string; prepRecipeId?: never } | { prepRecipeId: string; ingredientId?: never }),
+    ) => {
       if (!restaurantId || !locationId) throw new Error("no current restaurant/location");
       const { error } = await supabase.from("recipe_lines").insert({
         restaurant_id: restaurantId,
         location_id: locationId,
         menu_item_pos_id: input.menuItemPosId,
-        ingredient_id: input.ingredientId,
+        ingredient_id: input.ingredientId ?? null,
+        prep_recipe_id: input.prepRecipeId ?? null,
         quantity: input.quantity,
         unit: input.unit,
       });
@@ -989,7 +989,8 @@ export function useAddRecipeLine() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["recipe-lines"] });
-      queryClient.invalidateQueries({ queryKey: ["recipe-costs-by-item"] });
+      queryClient.invalidateQueries({ queryKey: ["product-mix"] });
+      queryClient.invalidateQueries({ queryKey: ["food-cost-summary"] });
     },
   });
 }
@@ -1003,7 +1004,232 @@ export function useDeleteRecipeLine() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["recipe-lines"] });
-      queryClient.invalidateQueries({ queryKey: ["recipe-costs-by-item"] });
+      queryClient.invalidateQueries({ queryKey: ["product-mix"] });
+      queryClient.invalidateQueries({ queryKey: ["food-cost-summary"] });
+    },
+  });
+}
+
+// ------------------------------------------------------------
+// Prep recipes — a recipe that isn't sold directly on the POS (e.g. a
+// house sauce), used as an ingredient-like component inside a menu
+// item's recipe OR inside another prep recipe. Cost rolls up
+// recursively via src/lib/boh/recipeCost.ts; cycles (a prep recipe
+// transitively containing itself) are rejected client-side before any
+// write, since the DB can't cleanly express "no transitive cycle."
+// ------------------------------------------------------------
+export type PrepRecipe = {
+  id: string;
+  name: string;
+  yieldQty: number;
+  yieldUnit: string;
+  costPerYieldUnitCents: number | null;
+};
+
+export function usePrepRecipes() {
+  const { data: locationIds } = useLocationIds();
+  return useQuery({
+    queryKey: ["prep-recipes", locationIds],
+    enabled: !!locationIds && locationIds.length > 0,
+    queryFn: async (): Promise<PrepRecipe[]> => {
+      const [prepRecipesRes, ctx] = await Promise.all([
+        supabase
+          .from("prep_recipes")
+          .select("id, name, yield_qty, yield_unit")
+          .in("location_id", locationIds!)
+          .order("name"),
+        fetchRecipeCostContext(locationIds!),
+      ]);
+      if (prepRecipesRes.error) throw prepRecipesRes.error;
+      return (prepRecipesRes.data ?? []).map((r) => ({
+        id: r.id,
+        name: r.name,
+        yieldQty: Number(r.yield_qty),
+        yieldUnit: r.yield_unit,
+        costPerYieldUnitCents: resolvePrepRecipeCostPerYieldUnit(
+          r.id,
+          ctx.prepRecipeLinesByPrepId,
+          ctx.prepRecipeYieldById,
+          ctx.ingredientCostById,
+        ),
+      }));
+    },
+  });
+}
+
+export type PrepRecipeInput = { name: string; yieldQty: number; yieldUnit: string };
+
+export function useCreatePrepRecipe() {
+  const restaurantId = useCurrentRestaurantId();
+  const locationId = useCurrentLocationId();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: PrepRecipeInput): Promise<string> => {
+      if (!restaurantId || !locationId) throw new Error("no current restaurant/location");
+      const { data, error } = await supabase
+        .from("prep_recipes")
+        .insert({
+          restaurant_id: restaurantId,
+          location_id: locationId,
+          name: input.name,
+          yield_qty: input.yieldQty,
+          yield_unit: input.yieldUnit,
+        })
+        .select("id")
+        .single();
+      if (error) throw error;
+      return data.id as string;
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["prep-recipes"] }),
+  });
+}
+
+export function useUpdatePrepRecipe() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, ...input }: PrepRecipeInput & { id: string }) => {
+      const { error } = await supabase
+        .from("prep_recipes")
+        .update({
+          name: input.name,
+          yield_qty: input.yieldQty,
+          yield_unit: input.yieldUnit,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: (_data, { id }) => {
+      queryClient.invalidateQueries({ queryKey: ["prep-recipes"] });
+      queryClient.invalidateQueries({ queryKey: ["prep-recipe-lines", id] });
+      queryClient.invalidateQueries({ queryKey: ["product-mix"] });
+      queryClient.invalidateQueries({ queryKey: ["food-cost-summary"] });
+    },
+  });
+}
+
+export function useDeletePrepRecipe() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      // FK is ON DELETE RESTRICT on both recipe_lines.prep_recipe_id
+      // and prep_recipe_lines.sub_prep_recipe_id — Postgres rejects
+      // this outright if the recipe is still used anywhere, rather
+      // than silently orphaning whatever referenced it.
+      const { error } = await supabase.from("prep_recipes").delete().eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["prep-recipes"] }),
+  });
+}
+
+export type PrepRecipeLine = {
+  id: string;
+  ingredientId: string | null;
+  ingredientName: string | null;
+  ingredientUnit: string | null;
+  ingredientCostCents: number | null;
+  subPrepRecipeId: string | null;
+  subPrepRecipeName: string | null;
+  subPrepRecipeCostPerYieldUnitCents: number | null;
+  quantity: number;
+  unit: string;
+};
+
+export function usePrepRecipeLinesFor(prepRecipeId: string | undefined) {
+  const { data: locationIds } = useLocationIds();
+  return useQuery({
+    queryKey: ["prep-recipe-lines", prepRecipeId],
+    enabled: !!prepRecipeId && !!locationIds && locationIds.length > 0,
+    queryFn: async (): Promise<PrepRecipeLine[]> => {
+      const [linesRes, ctx] = await Promise.all([
+        supabase
+          .from("prep_recipe_lines")
+          .select(
+            "id, quantity, unit, ingredient_id, sub_prep_recipe_id, ingredients (name, unit, unit_cost_cents), sub_recipe:prep_recipes!sub_prep_recipe_id (id, name)",
+          )
+          .eq("prep_recipe_id", prepRecipeId!),
+        fetchRecipeCostContext(locationIds!),
+      ]);
+      if (linesRes.error) throw linesRes.error;
+      return (linesRes.data ?? []).map((row: any) => ({
+        id: row.id,
+        ingredientId: row.ingredient_id,
+        ingredientName: row.ingredients?.name ?? null,
+        ingredientUnit: row.ingredients?.unit ?? null,
+        ingredientCostCents: row.ingredients?.unit_cost_cents ?? null,
+        subPrepRecipeId: row.sub_prep_recipe_id,
+        subPrepRecipeName: row.sub_recipe?.name ?? null,
+        subPrepRecipeCostPerYieldUnitCents: row.sub_prep_recipe_id
+          ? resolvePrepRecipeCostPerYieldUnit(
+              row.sub_prep_recipe_id,
+              ctx.prepRecipeLinesByPrepId,
+              ctx.prepRecipeYieldById,
+              ctx.ingredientCostById,
+            )
+          : null,
+        quantity: Number(row.quantity),
+        unit: row.unit,
+      }));
+    },
+  });
+}
+
+export function useAddPrepRecipeLine() {
+  const restaurantId = useCurrentRestaurantId();
+  const { data: locationIds } = useLocationIds();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (
+      input: {
+        prepRecipeId: string;
+        quantity: number;
+        unit: string;
+      } & ({ ingredientId: string; subPrepRecipeId?: never } | { subPrepRecipeId: string; ingredientId?: never }),
+    ) => {
+      if (!restaurantId) throw new Error("no current restaurant");
+      if (input.subPrepRecipeId) {
+        if (!locationIds || locationIds.length === 0) throw new Error("no current location");
+        const ctx = await fetchRecipeCostContext(locationIds);
+        if (wouldCreateCycle(input.prepRecipeId, input.subPrepRecipeId, ctx.prepRecipeLinesByPrepId)) {
+          throw new Error(
+            "That would create a circular recipe — a prep recipe can't contain itself, even indirectly.",
+          );
+        }
+      }
+      const { error } = await supabase.from("prep_recipe_lines").insert({
+        restaurant_id: restaurantId,
+        prep_recipe_id: input.prepRecipeId,
+        ingredient_id: input.ingredientId ?? null,
+        sub_prep_recipe_id: input.subPrepRecipeId ?? null,
+        quantity: input.quantity,
+        unit: input.unit,
+      });
+      if (error) throw error;
+    },
+    onSuccess: (_data, { prepRecipeId }) => {
+      queryClient.invalidateQueries({ queryKey: ["prep-recipe-lines", prepRecipeId] });
+      queryClient.invalidateQueries({ queryKey: ["prep-recipes"] });
+      queryClient.invalidateQueries({ queryKey: ["recipe-lines"] });
+      queryClient.invalidateQueries({ queryKey: ["product-mix"] });
+      queryClient.invalidateQueries({ queryKey: ["food-cost-summary"] });
+    },
+  });
+}
+
+export function useDeletePrepRecipeLine() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("prep_recipe_lines").delete().eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["prep-recipe-lines"] });
+      queryClient.invalidateQueries({ queryKey: ["prep-recipes"] });
+      queryClient.invalidateQueries({ queryKey: ["recipe-lines"] });
+      queryClient.invalidateQueries({ queryKey: ["product-mix"] });
+      queryClient.invalidateQueries({ queryKey: ["food-cost-summary"] });
     },
   });
 }
