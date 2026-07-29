@@ -995,6 +995,41 @@ export function useAddRecipeLine() {
   });
 }
 
+// A draft only — nothing here is ever written to the database by this
+// hook. Every line is reviewed and, if kept, committed individually via
+// the normal useAddRecipeLine/useAddPrepRecipeLine mutations, exactly
+// as if it had been typed in by hand.
+export type GeneratedRecipeLine = {
+  kind: "ingredient" | "prep_recipe" | "new_ingredient" | "new_prep_recipe";
+  ingredientId: string | null;
+  prepRecipeId: string | null;
+  quantity: number | null;
+  unit: string;
+  proposedName: string | null;
+  proposedSubIngredients: { name: string; quantity: number; unit: string }[] | null;
+  confidence: "high" | "medium" | "low";
+  notes: string | null;
+};
+export type GeneratedRecipe = { menuItemPosId: string; lines: GeneratedRecipeLine[] };
+
+export function useGenerateRecipe() {
+  const restaurantId = useCurrentRestaurantId();
+  return useMutation({
+    mutationFn: async (menuItemPosIds: string[]): Promise<GeneratedRecipe[]> => {
+      if (!restaurantId) throw new Error("no current restaurant");
+      const { data, error } = await supabase.functions.invoke("generate-recipe", {
+        body: { restaurant_id: restaurantId, menu_item_pos_ids: menuItemPosIds },
+      });
+      if (error || !(data as { ok?: boolean } | null)?.ok) {
+        throw new Error(
+          (data as { error?: string } | null)?.error ?? error?.message ?? "recipe generation failed",
+        );
+      }
+      return (data as { recipes: GeneratedRecipe[] }).recipes;
+    },
+  });
+}
+
 export function useDeleteRecipeLine() {
   const queryClient = useQueryClient();
   return useMutation({

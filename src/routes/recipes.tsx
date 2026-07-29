@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, Sparkles, Trash2 } from "lucide-react";
 
 import { Topbar } from "@/components/dashboard/Topbar";
 import { useDateRange } from "@/lib/date-range-context";
@@ -16,9 +16,12 @@ import {
   usePrepRecipeLinesFor,
   useAddPrepRecipeLine,
   useDeletePrepRecipeLine,
+  useGenerateRecipe,
   type RecipeLine,
   type PrepRecipe,
   type PrepRecipeLine,
+  type GeneratedRecipe,
+  type GeneratedRecipeLine,
 } from "@/lib/boh/queries";
 import { quadrant, QUAD_COLOR, formatItemPrice } from "@/lib/boh/menuEngineering";
 import { Card } from "@/components/ui/card";
@@ -59,6 +62,23 @@ function formatMoney(cents: number) {
   return `$${(cents / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+// Edge Function caps a single generate-recipe call at 25 menu items —
+// a larger "generate all unpriced items" selection is chunked into
+// sequential calls of this size client-side rather than the function
+// silently truncating.
+const GENERATE_BATCH_SIZE = 25;
+
+// A stable per-line key, generated once when a draft is received —
+// NOT the array index. Review rows carry their own local state (which
+// ingredient is picked, the quantity typed in), and once a line is
+// resolved and filtered out of the array, every later index shifts;
+// keying by index would make React reuse a row's DOM node (and its
+// stale local state) for a completely different line.
+type DraftLine = GeneratedRecipeLine & { _key: string };
+function tagDraftLines(lines: GeneratedRecipeLine[]): DraftLine[] {
+  return lines.map((line) => ({ ...line, _key: crypto.randomUUID() }));
+}
+
 function RecipesPage() {
   const { item: deepLinkItemId } = Route.useSearch();
   const { dateRange } = useDateRange();
@@ -66,6 +86,9 @@ function RecipesPage() {
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [selectedPrepId, setSelectedPrepId] = useState<string | null>(null);
   const [newPrepOpen, setNewPrepOpen] = useState(false);
+  const [batchSummary, setBatchSummary] = useState<GeneratedRecipe[] | null>(null);
+  const [pendingDrafts, setPendingDrafts] = useState<Record<string, DraftLine[]>>({});
+  const batchGenerate = useGenerateRecipe();
 
   // A deep link from Product Mix's "Edit recipe" button lands here
   // with the item pre-selected, regardless of which tab was last open.
@@ -78,6 +101,27 @@ function RecipesPage() {
 
   const { data: items = [], isLoading } = useProductMix(dateRange);
   const { data: prepRecipes = [], isLoading: isPrepLoading } = usePrepRecipes();
+  const unpricedItemIds = useMemo(() => items.filter((i) => !i.hasRecipe).map((i) => i.id), [items]);
+
+  async function runBatchGenerate() {
+    const results: GeneratedRecipe[] = [];
+    for (let i = 0; i < unpricedItemIds.length; i += GENERATE_BATCH_SIZE) {
+      const chunk = unpricedItemIds.slice(i, i + GENERATE_BATCH_SIZE);
+      const chunkResults = await batchGenerate.mutateAsync(chunk);
+      results.push(...chunkResults);
+    }
+    const drafts: Record<string, DraftLine[]> = {};
+    for (const r of results) drafts[r.menuItemPosId] = tagDraftLines(r.lines);
+    setPendingDrafts(drafts);
+    setBatchSummary(results);
+  }
+
+  function summarizeDraft(lines: GeneratedRecipeLine[]) {
+    const matched = lines.filter(
+      (l) => (l.kind === "ingredient" && l.ingredientId) || (l.kind === "prep_recipe" && l.prepRecipeId),
+    ).length;
+    return { matched, flagged: lines.length - matched };
+  }
 
   const popMedian = useMemo(() => {
     if (items.length === 0) return 0;
@@ -106,6 +150,23 @@ function RecipesPage() {
 
           <TabsContent value="items" className="mt-4">
             <Card className="overflow-hidden">
+              <div className="flex items-center justify-between border-b p-3">
+                <div className="text-sm text-muted-foreground">
+                  Real menu items — click one to view or edit its recipe.
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="gap-2"
+                  disabled={batchGenerate.isPending || unpricedItemIds.length === 0}
+                  onClick={runBatchGenerate}
+                >
+                  <Sparkles className="h-3.5 w-3.5" />
+                  {batchGenerate.isPending
+                    ? "Generating…"
+                    : `Generate recipes for unpriced items (${unpricedItemIds.length})`}
+                </Button>
+              </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
@@ -241,9 +302,48 @@ function RecipesPage() {
 
       <Sheet open={!!selectedItemId} onOpenChange={(o) => !o && setSelectedItemId(null)}>
         <SheetContent className="sm:max-w-lg overflow-y-auto">
-          {selectedItem && <MenuItemRecipeSheet item={selectedItem} />}
+          {selectedItem && (
+            <MenuItemRecipeSheet
+              key={selectedItem.id}
+              item={selectedItem}
+              initialDraftLines={pendingDrafts[selectedItem.id]}
+            />
+          )}
         </SheetContent>
       </Sheet>
+
+      <Dialog open={!!batchSummary} onOpenChange={(o) => !o && setBatchSummary(null)}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="font-serif text-2xl">AI-generated recipes</DialogTitle>
+            <DialogDescription>
+              Click an item to review its proposed lines before adding anything.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[60vh] space-y-1 overflow-y-auto">
+            {(batchSummary ?? []).map((r) => {
+              const item = items.find((i) => i.id === r.menuItemPosId);
+              const { matched, flagged } = summarizeDraft(r.lines);
+              return (
+                <button
+                  key={r.menuItemPosId}
+                  className="flex w-full items-center justify-between rounded-md border px-3 py-2 text-left text-sm hover:bg-muted/30"
+                  onClick={() => {
+                    setBatchSummary(null);
+                    setActiveTab("items");
+                    setSelectedItemId(r.menuItemPosId);
+                  }}
+                >
+                  <span className="font-medium">{item?.name ?? r.menuItemPosId}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {matched} matched{flagged > 0 && `, ${flagged} flagged`}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Sheet open={!!selectedPrepId} onOpenChange={(o) => !o && setSelectedPrepId(null)}>
         <SheetContent className="sm:max-w-lg overflow-y-auto">
@@ -348,12 +448,20 @@ function NewPrepRecipeDialog({
 
 // ---------- Menu item recipe editor ----------
 
-function MenuItemRecipeSheet({ item }: { item: RealMenuItem }) {
+function MenuItemRecipeSheet({
+  item,
+  initialDraftLines,
+}: {
+  item: RealMenuItem;
+  initialDraftLines?: DraftLine[];
+}) {
   const { data: lines = [], isLoading } = useRecipeLinesForItem(item.id);
   const { data: ingredients = [] } = useIngredients();
   const { data: prepRecipes = [] } = usePrepRecipes();
   const addLine = useAddRecipeLine();
   const deleteLine = useDeleteRecipeLine();
+  const generateRecipe = useGenerateRecipe();
+  const [draftLines, setDraftLines] = useState<DraftLine[] | null>(initialDraftLines ?? null);
 
   const totalCents = useMemo(() => {
     if (lines.length === 0) return null;
@@ -405,6 +513,55 @@ function MenuItemRecipeSheet({ item }: { item: RealMenuItem }) {
           deletePending={deleteLine.isPending}
         />
       </div>
+
+      {lines.length === 0 && draftLines == null && (
+        <div className="mt-3">
+          <Button
+            size="sm"
+            variant="outline"
+            className="gap-2"
+            disabled={generateRecipe.isPending}
+            onClick={() =>
+              generateRecipe.mutate([item.id], {
+                onSuccess: (recipes) => setDraftLines(tagDraftLines(recipes[0]?.lines ?? [])),
+              })
+            }
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            {generateRecipe.isPending ? "Generating…" : "Generate with AI"}
+          </Button>
+          {generateRecipe.error && (
+            <p className="mt-2 text-xs text-destructive">
+              {generateRecipe.error instanceof Error ? generateRecipe.error.message : "Generation failed"}
+            </p>
+          )}
+        </div>
+      )}
+
+      {draftLines != null && (
+        <div className="mt-4">
+          <div className="mb-2 flex items-center justify-between">
+            <div className="flex items-center gap-1.5 text-xs uppercase tracking-widest text-muted-foreground">
+              <Sparkles className="h-3.5 w-3.5" /> AI-generated — review before adding
+            </div>
+            <button
+              className="text-xs text-muted-foreground hover:underline"
+              onClick={() => setDraftLines(null)}
+            >
+              Dismiss
+            </button>
+          </div>
+          <GeneratedRecipeReview
+            menuItemPosId={item.id}
+            lines={draftLines}
+            ingredients={ingredients}
+            prepRecipes={prepRecipes}
+            onLineResolved={(key) =>
+              setDraftLines((cur) => (cur ? cur.filter((l) => l._key !== key) : cur))
+            }
+          />
+        </div>
+      )}
 
       <AddLineForm
         ingredients={ingredients}
@@ -669,6 +826,201 @@ function AddLineForm({
         </Button>
       </div>
       {error && <p className="text-xs text-destructive">{error}</p>}
+    </div>
+  );
+}
+
+// ---------- AI-generated recipe review ----------
+// A draft only — nothing here is a real recipe_lines row until the
+// owner hits "Add" on a specific line, which goes through the exact
+// same useAddRecipeLine mutation manual entry uses. Dismissing a line
+// (or the whole draft) just drops it from local React state.
+
+function GeneratedRecipeReview({
+  menuItemPosId,
+  lines,
+  ingredients,
+  prepRecipes,
+  onLineResolved,
+}: {
+  menuItemPosId: string;
+  lines: DraftLine[];
+  ingredients: { id: string; name: string; unit: string }[];
+  prepRecipes: PrepRecipe[];
+  onLineResolved: (key: string) => void;
+}) {
+  const addLine = useAddRecipeLine();
+
+  if (lines.length === 0) {
+    return <p className="text-sm text-muted-foreground">Claude didn't propose any lines for this item.</p>;
+  }
+
+  return (
+    <div className="space-y-2">
+      {lines.map((line) =>
+        line.kind === "new_prep_recipe" ? (
+          <NewPrepRecipeFlag key={line._key} line={line} onDismiss={() => onLineResolved(line._key)} />
+        ) : (
+          <GeneratedLineRow
+            key={line._key}
+            line={line}
+            ingredients={ingredients}
+            prepRecipes={prepRecipes}
+            pending={addLine.isPending}
+            onAdd={(target, quantity, unit) =>
+              addLine.mutate(
+                {
+                  menuItemPosId,
+                  quantity,
+                  unit,
+                  ...(target.kind === "ingredient"
+                    ? { ingredientId: target.id }
+                    : { prepRecipeId: target.id }),
+                } as Parameters<typeof addLine.mutate>[0],
+                { onSuccess: () => onLineResolved(line._key) },
+              )
+            }
+            onDismiss={() => onLineResolved(line._key)}
+          />
+        ),
+      )}
+    </div>
+  );
+}
+
+const CONFIDENCE_STYLE: Record<GeneratedRecipeLine["confidence"], string> = {
+  high: "border-green-600/40 text-green-700",
+  medium: "border-amber-600/40 text-amber-700",
+  low: "border-muted-foreground/40 text-muted-foreground",
+};
+
+function GeneratedLineRow({
+  line,
+  ingredients,
+  prepRecipes,
+  onAdd,
+  onDismiss,
+  pending,
+}: {
+  line: GeneratedRecipeLine;
+  ingredients: { id: string; name: string; unit: string }[];
+  prepRecipes: PrepRecipe[];
+  onAdd: (target: LineTarget, quantity: number, unit: string) => void;
+  onDismiss: () => void;
+  pending: boolean;
+}) {
+  const [mode, setMode] = useState<"ingredient" | "prep">(line.kind === "prep_recipe" ? "prep" : "ingredient");
+  const [targetId, setTargetId] = useState(
+    line.kind === "ingredient" ? (line.ingredientId ?? "") : line.kind === "prep_recipe" ? (line.prepRecipeId ?? "") : "",
+  );
+  const [quantity, setQuantity] = useState(line.quantity != null ? String(line.quantity) : "");
+
+  const selectedIngredient = ingredients.find((i) => i.id === targetId);
+  const selectedPrep = prepRecipes.find((p) => p.id === targetId);
+  // Unit is always re-derived from the selected row, never trusted from
+  // Claude's own output — same discipline AddLineForm already applies
+  // to manual entry.
+  const unit = mode === "ingredient" ? (selectedIngredient?.unit ?? "") : (selectedPrep?.yieldUnit ?? "");
+  const isMatched = (line.kind === "ingredient" || line.kind === "prep_recipe") && !!targetId;
+
+  return (
+    <div className="rounded-md border p-2.5 space-y-1.5">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-1.5 text-xs">
+          {!isMatched && line.proposedName && (
+            <span className="truncate text-muted-foreground">Proposed: {line.proposedName}</span>
+          )}
+          <Badge variant="outline" className={`shrink-0 text-[10px] font-normal ${CONFIDENCE_STYLE[line.confidence]}`}>
+            {line.confidence} confidence
+          </Badge>
+        </div>
+        <button className="shrink-0 text-xs text-muted-foreground hover:underline" onClick={onDismiss}>
+          Dismiss
+        </button>
+      </div>
+      {line.notes && <p className="text-xs text-muted-foreground">{line.notes}</p>}
+      <div className="flex gap-1 text-xs">
+        {(["ingredient", "prep"] as const).map((m) => (
+          <button
+            key={m}
+            onClick={() => {
+              setMode(m);
+              setTargetId("");
+            }}
+            className={`rounded-full border px-3 py-1 transition ${
+              mode === m
+                ? "border-foreground bg-foreground text-background"
+                : "border-border bg-card hover:border-foreground/30"
+            }`}
+          >
+            {m === "ingredient" ? "Ingredient" : "Prep recipe"}
+          </button>
+        ))}
+      </div>
+      <div className="flex items-center gap-2">
+        <Select value={targetId} onValueChange={setTargetId}>
+          <SelectTrigger className="h-8 flex-1">
+            <SelectValue placeholder={mode === "ingredient" ? "Pick ingredient…" : "Pick prep recipe…"} />
+          </SelectTrigger>
+          <SelectContent>
+            {(mode === "ingredient" ? ingredients : prepRecipes).map((opt) => (
+              <SelectItem key={opt.id} value={opt.id}>
+                {opt.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Input
+          type="number"
+          step="0.01"
+          min="0"
+          placeholder="qty"
+          value={quantity}
+          onChange={(e) => setQuantity(e.target.value)}
+          className="h-8 w-20"
+        />
+        <span className="w-12 text-xs text-muted-foreground">{unit}</span>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={!targetId || !quantity || pending}
+          onClick={() => {
+            const qty = parseFloat(quantity);
+            if (!Number.isFinite(qty) || qty <= 0 || !unit) return;
+            onAdd({ kind: mode === "ingredient" ? "ingredient" : "prep", id: targetId }, qty, unit);
+          }}
+        >
+          Add
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function NewPrepRecipeFlag({ line, onDismiss }: { line: GeneratedRecipeLine; onDismiss: () => void }) {
+  return (
+    <div className="space-y-1.5 rounded-md border border-dashed bg-muted/20 p-2.5">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs font-medium">
+          House-made — needs a prep recipe: {line.proposedName ?? "Untitled"}
+        </span>
+        <button className="shrink-0 text-xs text-muted-foreground hover:underline" onClick={onDismiss}>
+          Dismiss
+        </button>
+      </div>
+      {line.notes && <p className="text-xs text-muted-foreground">{line.notes}</p>}
+      {line.proposedSubIngredients && line.proposedSubIngredients.length > 0 && (
+        <ul className="list-disc pl-4 text-xs text-muted-foreground">
+          {line.proposedSubIngredients.map((s, i) => (
+            <li key={i}>
+              {s.name} — {s.quantity} {s.unit}
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="text-xs text-muted-foreground">
+        Build this on the Prep recipes tab, then come back and add it above.
+      </p>
     </div>
   );
 }
