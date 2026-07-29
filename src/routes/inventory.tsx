@@ -104,6 +104,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { CATEGORIES as SHARED_CATEGORIES } from "@/lib/boh/ingredient-categories";
 
 export const Route = createFileRoute("/inventory")({
   head: () => ({
@@ -121,11 +122,14 @@ export const Route = createFileRoute("/inventory")({
 
 // A fixed category list still constrains the "Add item" form dropdown
 // (see the dialog below), but the type itself is a plain string since
-// ingredients.category is free-text in the schema.
+// ingredients.category is free-text in the schema. The list itself
+// comes from ingredient-categories.ts — shared with recipes.tsx's
+// menu-category-to-bucket mapping so the two pages' filters never
+// drift apart.
 type Category = string;
 type Item = InventoryItem;
 
-const CATEGORIES: Category[] = ["Beverages", "Alcohol", "Food", "Dry Goods", "Miscellaneous"];
+const CATEGORIES: Category[] = [...SHARED_CATEGORIES];
 const ORDERS_PAGE_SIZE = 50;
 const ITEMS_PAGE_SIZE = 50;
 const VENDORS_PAGE_SIZE = 50;

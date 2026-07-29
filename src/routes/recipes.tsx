@@ -24,6 +24,7 @@ import {
   type GeneratedRecipeLine,
 } from "@/lib/boh/queries";
 import { quadrant, QUAD_COLOR, formatItemPrice } from "@/lib/boh/menuEngineering";
+import { classifyMenuItemCategory, CATEGORIES } from "@/lib/boh/menu-category";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -109,17 +110,10 @@ function RecipesPage() {
   const { data: prepRecipes = [], isLoading: isPrepLoading } = usePrepRecipes();
   const unpricedItemIds = useMemo(() => items.filter((i) => !i.hasRecipe).map((i) => i.id), [items]);
 
-  // Real Toast POS categories, not this app's own curated ingredient
-  // categories — derived from whatever's actually on the menu rather
-  // than a fixed list, since every tenant's POS category names differ.
-  const itemCategories = useMemo(
-    () => Array.from(new Set(items.map((i) => i.category.trim()))).sort((a, b) => a.localeCompare(b)),
-    [items],
-  );
   const filteredItems = useMemo(() => {
     const q = itemQuery.trim().toLowerCase();
     return items.filter((item) => {
-      if (categoryTab !== "All" && item.category.trim() !== categoryTab) return false;
+      if (categoryTab !== "All" && classifyMenuItemCategory(item.category, item.name) !== categoryTab) return false;
       if (unpricedOnly && item.hasRecipe) return false;
       if (q && !item.name.toLowerCase().includes(q)) return false;
       return true;
@@ -178,16 +172,18 @@ function RecipesPage() {
           </TabsList>
 
           <TabsContent value="items" className="mt-4 space-y-3">
-            <Tabs value={categoryTab} onValueChange={setCategoryTab}>
-              <TabsList className="h-auto flex-wrap justify-start gap-1 bg-[hsl(var(--cream))] border border-stone-200 p-1.5">
-                <TabsTrigger value="All">All</TabsTrigger>
-                {itemCategories.map((c) => (
-                  <TabsTrigger key={c} value={c}>
-                    {c}
-                  </TabsTrigger>
-                ))}
-              </TabsList>
-            </Tabs>
+            <div className="max-w-full overflow-x-auto">
+              <Tabs value={categoryTab} onValueChange={setCategoryTab}>
+                <TabsList className="bg-[hsl(var(--cream))] border border-stone-200">
+                  <TabsTrigger value="All">All</TabsTrigger>
+                  {CATEGORIES.map((c) => (
+                    <TabsTrigger key={c} value={c}>
+                      {c}
+                    </TabsTrigger>
+                  ))}
+                </TabsList>
+              </Tabs>
+            </div>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
               <div className="relative flex-1 min-w-0 sm:max-w-md">
                 <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-stone-400" />
