@@ -147,7 +147,13 @@ export async function getAttachmentBytes(accessToken: string, messageId: string,
 // tiny signature/logo images never reach OCR.
 // ------------------------------------------------------------
 export const MAX_ATTACHMENT_SIZE_BYTES = 25 * 1024 * 1024; // 25 MB
-export const MIN_ATTACHMENT_SIZE_BYTES = 20 * 1024; // 20 KB — below this is almost always a signature/logo image, not a document
+// Only meaningful for photos/scans — a real invoice needs enough
+// resolution to be legible, so a JPG/PNG this small is almost always
+// an accidental logo/signature image. A native, text-based PDF has no
+// such floor: a short invoice exported directly (not scanned) can
+// legitimately be a few KB. Applied to images only, never to PDFs —
+// see normalizedMimeType() at the call site in index.ts.
+export const MIN_IMAGE_ATTACHMENT_SIZE_BYTES = 20 * 1024; // 20 KB
 
 const ALLOWED_ATTACHMENT_MIME_TYPES = new Set(["application/pdf", "image/jpeg", "image/jpg", "image/png"]);
 

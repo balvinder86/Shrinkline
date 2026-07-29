@@ -7,7 +7,7 @@ import {
   isAllowedAttachmentType,
   normalizedMimeType,
   MAX_ATTACHMENT_SIZE_BYTES,
-  MIN_ATTACHMENT_SIZE_BYTES,
+  MIN_IMAGE_ATTACHMENT_SIZE_BYTES,
 } from "./gmail.js";
 import {
   getEmailCredentials,
@@ -125,7 +125,8 @@ async function syncCredential(cred: EmailCredential) {
           });
           continue;
         }
-        if (attachment.sizeBytes != null && attachment.sizeBytes < MIN_ATTACHMENT_SIZE_BYTES) {
+        const isPdfAttachment = normalizedMimeType(attachment) === "application/pdf";
+        if (!isPdfAttachment && attachment.sizeBytes != null && attachment.sizeBytes < MIN_IMAGE_ATTACHMENT_SIZE_BYTES) {
           await logIngestionEvent({
             restaurantId: cred.restaurant_id,
             messageId,
