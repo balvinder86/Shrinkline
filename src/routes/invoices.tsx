@@ -46,6 +46,15 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
@@ -645,9 +654,9 @@ function InvoicesPage() {
 
           {/* Invoices tab */}
           <TabsContent value="invoices" className="space-y-4">
-            <Card className="p-4">
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="relative flex-1 min-w-[220px]">
+            <Card className="space-y-3 p-4">
+              <div className="flex flex-col gap-2 md:flex-row md:flex-wrap md:items-center">
+                <div className="relative min-w-0 flex-1 md:min-w-[220px]">
                   <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                   <Input
                     placeholder="Search invoice # or vendor"
@@ -656,51 +665,53 @@ function InvoicesPage() {
                     className="h-9 pl-9"
                   />
                 </div>
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-1 overflow-x-auto">
                   {(["all", "pending_review", "approved"] as const).map((s) => (
                     <Button
                       key={s}
                       size="sm"
                       variant={statusFilter === s ? "default" : "ghost"}
                       onClick={() => setStatusFilter(s)}
-                      className="h-8 px-3 text-xs capitalize"
+                      className="h-8 shrink-0 px-3 text-xs capitalize"
                     >
                       {s === "pending_review" ? "Pending review" : s}
                     </Button>
                   ))}
                 </div>
-                <select
-                  value={vendorFilter}
-                  onChange={(e) => setVendorFilter(e.target.value)}
-                  className="h-9 rounded-md border border-input bg-background px-3 text-sm"
-                >
-                  <option value="all">All vendors</option>
-                  {VENDOR_CATEGORIES.map((c) => {
-                    const vendorsInCategory = realVendors.filter((v) => v.category === c.value);
-                    if (vendorsInCategory.length === 0) return null;
-                    return (
-                      <optgroup key={c.value} label={c.label}>
-                        {vendorsInCategory.map((v) => (
-                          <option key={v.id} value={v.name}>
-                            {v.name}
-                          </option>
-                        ))}
-                      </optgroup>
-                    );
-                  })}
-                </select>
-                <select
-                  value={categoryFilter}
-                  onChange={(e) => setCategoryFilter(e.target.value)}
-                  className="h-9 rounded-md border border-input bg-background px-3 text-sm"
-                >
-                  <option value="all">All expense categories</option>
-                  {VENDOR_CATEGORIES.map((c) => (
-                    <option key={c.value} value={c.value}>
-                      {c.label}
-                    </option>
-                  ))}
-                </select>
+                <Select value={vendorFilter} onValueChange={setVendorFilter}>
+                  <SelectTrigger className="h-9 w-full md:w-[200px]">
+                    <SelectValue placeholder="All vendors" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All vendors</SelectItem>
+                    {VENDOR_CATEGORIES.map((c) => {
+                      const vendorsInCategory = realVendors.filter((v) => v.category === c.value);
+                      if (vendorsInCategory.length === 0) return null;
+                      return (
+                        <SelectGroup key={c.value}>
+                          <SelectLabel>{c.label}</SelectLabel>
+                          {vendorsInCategory.map((v) => (
+                            <SelectItem key={v.id} value={v.name}>
+                              {v.name}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      );
+                    })}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="max-w-full overflow-x-auto">
+                <Tabs value={categoryFilter} onValueChange={setCategoryFilter}>
+                  <TabsList className="bg-[hsl(var(--cream))] border border-stone-200">
+                    <TabsTrigger value="all">All categories</TabsTrigger>
+                    {VENDOR_CATEGORIES.map((c) => (
+                      <TabsTrigger key={c.value} value={c.value}>
+                        {c.label}
+                      </TabsTrigger>
+                    ))}
+                  </TabsList>
+                </Tabs>
               </div>
             </Card>
 

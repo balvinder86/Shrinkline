@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { Plus, Sparkles, Trash2 } from "lucide-react";
+import { Plus, Search, Sparkles, Trash2 } from "lucide-react";
 
 import { Topbar } from "@/components/dashboard/Topbar";
 import { useDateRange } from "@/lib/date-range-context";
@@ -31,6 +31,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import {
   Dialog,
@@ -90,6 +91,11 @@ function RecipesPage() {
   const [pendingDrafts, setPendingDrafts] = useState<Record<string, DraftLine[]>>({});
   const batchGenerate = useGenerateRecipe();
 
+  const [categoryTab, setCategoryTab] = useState<string>("All");
+  const [itemQuery, setItemQuery] = useState("");
+  const [unpricedOnly, setUnpricedOnly] = useState(false);
+  const [prepQuery, setPrepQuery] = useState("");
+
   // A deep link from Product Mix's "Edit recipe" button lands here
   // with the item pre-selected, regardless of which tab was last open.
   useEffect(() => {
@@ -102,6 +108,29 @@ function RecipesPage() {
   const { data: items = [], isLoading } = useProductMix(dateRange);
   const { data: prepRecipes = [], isLoading: isPrepLoading } = usePrepRecipes();
   const unpricedItemIds = useMemo(() => items.filter((i) => !i.hasRecipe).map((i) => i.id), [items]);
+
+  // Real Toast POS categories, not this app's own curated ingredient
+  // categories — derived from whatever's actually on the menu rather
+  // than a fixed list, since every tenant's POS category names differ.
+  const itemCategories = useMemo(
+    () => Array.from(new Set(items.map((i) => i.category.trim()))).sort((a, b) => a.localeCompare(b)),
+    [items],
+  );
+  const filteredItems = useMemo(() => {
+    const q = itemQuery.trim().toLowerCase();
+    return items.filter((item) => {
+      if (categoryTab !== "All" && item.category.trim() !== categoryTab) return false;
+      if (unpricedOnly && item.hasRecipe) return false;
+      if (q && !item.name.toLowerCase().includes(q)) return false;
+      return true;
+    });
+  }, [items, categoryTab, unpricedOnly, itemQuery]);
+
+  const filteredPrepRecipes = useMemo(() => {
+    const q = prepQuery.trim().toLowerCase();
+    if (!q) return prepRecipes;
+    return prepRecipes.filter((p) => p.name.toLowerCase().includes(q));
+  }, [prepRecipes, prepQuery]);
 
   async function runBatchGenerate() {
     const results: GeneratedRecipe[] = [];
@@ -148,11 +177,45 @@ function RecipesPage() {
             <TabsTrigger value="prep">Prep recipes</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="items" className="mt-4">
+          <TabsContent value="items" className="mt-4 space-y-3">
+            <div className="flex flex-col gap-3 md:flex-row md:flex-wrap md:items-center">
+              <div className="max-w-full overflow-x-auto">
+                <Tabs value={categoryTab} onValueChange={setCategoryTab}>
+                  <TabsList className="bg-[hsl(var(--cream))] border border-stone-200">
+                    <TabsTrigger value="All">All</TabsTrigger>
+                    {itemCategories.map((c) => (
+                      <TabsTrigger key={c} value={c}>
+                        {c}
+                      </TabsTrigger>
+                    ))}
+                  </TabsList>
+                </Tabs>
+              </div>
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center md:flex-1">
+                <div className="relative flex-1 min-w-0 md:max-w-md">
+                  <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-stone-400" />
+                  <Input
+                    value={itemQuery}
+                    onChange={(e) => setItemQuery(e.target.value)}
+                    placeholder="Search items"
+                    className="pl-9 bg-white"
+                  />
+                </div>
+                <Button
+                  size="sm"
+                  variant={unpricedOnly ? "default" : "outline"}
+                  className="h-9 shrink-0"
+                  onClick={() => setUnpricedOnly((v) => !v)}
+                >
+                  Needs recipe {unpricedItemIds.length > 0 && `(${unpricedItemIds.length})`}
+                </Button>
+              </div>
+            </div>
+
             <Card className="overflow-hidden">
-              <div className="flex items-center justify-between border-b p-3">
+              <div className="flex flex-col gap-2 border-b p-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="text-sm text-muted-foreground">
-                  Real menu items — click one to view or edit its recipe.
+                  {filteredItems.length} of {items.length} items — tap one to view or edit its recipe.
                 </div>
                 <Button
                   size="sm"
@@ -167,27 +230,87 @@ function RecipesPage() {
                     : `Generate recipes for unpriced items (${unpricedItemIds.length})`}
                 </Button>
               </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b text-xs uppercase tracking-wider text-muted-foreground">
-                      <th className="px-3 py-2 text-left font-medium">Item</th>
-                      <th className="px-3 py-2 text-left font-medium">Category</th>
-                      <th className="px-3 py-2 text-right font-medium">Price</th>
-                      <th className="px-3 py-2 text-right font-medium">Cost</th>
-                      <th className="px-3 py-2 text-right font-medium">Margin</th>
-                      <th className="px-3 py-2 text-left font-medium">Quadrant</th>
-                    </tr>
-                  </thead>
-                  <tbody>
+
+              {/* Mobile: stacked cards, no horizontal scroll/tiny text.
+                  Desktop (md+): the full table. */}
+              <div className="divide-y md:hidden">
+                {isLoading ? (
+                  <div className="py-8 text-center text-sm text-muted-foreground">Loading real menu items…</div>
+                ) : filteredItems.length === 0 ? (
+                  <div className="py-8 text-center text-sm text-muted-foreground">No items match these filters.</div>
+                ) : (
+                  filteredItems.map((item) => {
+                    const margin =
+                      item.hasRecipe && item.cost != null && item.price > 0 ? item.price - item.cost : null;
+                    const marginPct = margin != null ? (margin / item.price) * 100 : null;
+                    const q = quadrant(item, popMedian, marginMedian);
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        className="flex w-full flex-col gap-1.5 p-3 text-left active:bg-muted/40"
+                        onClick={() => setSelectedItemId(item.id)}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <span className="font-medium">{item.name}</span>
+                          <Badge
+                            className="shrink-0 text-xs font-normal"
+                            style={{
+                              background: `${QUAD_COLOR[q]}22`,
+                              color: QUAD_COLOR[q],
+                              border: `1px solid ${QUAD_COLOR[q]}55`,
+                            }}
+                          >
+                            {q}
+                          </Badge>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline" className="font-normal">
+                            {item.category}
+                          </Badge>
+                        </div>
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="font-mono">{formatItemPrice(item)}</span>
+                          {margin != null ? (
+                            <span className="font-mono text-muted-foreground">
+                              ${margin.toFixed(2)} margin ({marginPct!.toFixed(0)}%)
+                            </span>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">Add recipe</span>
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+              <div className="hidden overflow-x-auto md:block">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Item</TableHead>
+                      <TableHead>Category</TableHead>
+                      <TableHead className="text-right">Price</TableHead>
+                      <TableHead className="text-right">Cost</TableHead>
+                      <TableHead className="text-right">Margin</TableHead>
+                      <TableHead>Quadrant</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
                     {isLoading ? (
-                      <tr>
-                        <td colSpan={6} className="py-8 text-center text-sm text-muted-foreground">
+                      <TableRow>
+                        <TableCell colSpan={6} className="py-8 text-center text-sm text-muted-foreground">
                           Loading real menu items…
-                        </td>
-                      </tr>
+                        </TableCell>
+                      </TableRow>
+                    ) : filteredItems.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={6} className="py-8 text-center text-sm text-muted-foreground">
+                          No items match these filters.
+                        </TableCell>
+                      </TableRow>
                     ) : (
-                      items.map((item) => {
+                      filteredItems.map((item) => {
                         const margin =
                           item.hasRecipe && item.cost != null && item.price > 0
                             ? item.price - item.cost
@@ -195,22 +318,22 @@ function RecipesPage() {
                         const marginPct = margin != null ? (margin / item.price) * 100 : null;
                         const q = quadrant(item, popMedian, marginMedian);
                         return (
-                          <tr
+                          <TableRow
                             key={item.id}
-                            className="cursor-pointer border-b last:border-0 hover:bg-muted/30"
+                            className="cursor-pointer"
                             onClick={() => setSelectedItemId(item.id)}
                           >
-                            <td className="px-3 py-3 font-medium">{item.name}</td>
-                            <td className="px-3 py-3">
+                            <TableCell className="font-medium">{item.name}</TableCell>
+                            <TableCell>
                               <Badge variant="outline" className="font-normal">
                                 {item.category}
                               </Badge>
-                            </td>
-                            <td className="px-3 py-3 text-right font-mono">{formatItemPrice(item)}</td>
-                            <td className="px-3 py-3 text-right font-mono text-muted-foreground">
+                            </TableCell>
+                            <TableCell className="text-right font-mono">{formatItemPrice(item)}</TableCell>
+                            <TableCell className="text-right font-mono text-muted-foreground">
                               {item.hasRecipe && item.cost != null ? `$${item.cost.toFixed(2)}` : "—"}
-                            </td>
-                            <td className="px-3 py-3 text-right">
+                            </TableCell>
+                            <TableCell className="text-right">
                               {margin != null ? (
                                 <>
                                   <div className="font-mono">${margin.toFixed(2)}</div>
@@ -219,8 +342,8 @@ function RecipesPage() {
                               ) : (
                                 <span className="text-xs text-muted-foreground">Add recipe</span>
                               )}
-                            </td>
-                            <td className="px-3 py-3">
+                            </TableCell>
+                            <TableCell>
                               <Badge
                                 className="text-xs font-normal"
                                 style={{
@@ -231,20 +354,30 @@ function RecipesPage() {
                               >
                                 {q}
                               </Badge>
-                            </td>
-                          </tr>
+                            </TableCell>
+                          </TableRow>
                         );
                       })
                     )}
-                  </tbody>
-                </table>
+                  </TableBody>
+                </Table>
               </div>
             </Card>
           </TabsContent>
 
-          <TabsContent value="prep" className="mt-4">
+          <TabsContent value="prep" className="mt-4 space-y-3">
+            <div className="relative md:max-w-md">
+              <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-stone-400" />
+              <Input
+                value={prepQuery}
+                onChange={(e) => setPrepQuery(e.target.value)}
+                placeholder="Search prep recipes"
+                className="pl-9 bg-white"
+              />
+            </div>
+
             <Card className="overflow-hidden">
-              <div className="flex items-center justify-between border-b p-3">
+              <div className="flex flex-col gap-2 border-b p-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="text-sm text-muted-foreground">
                   House-made components (sauces, dressings, batches) used across dishes — cost rolls up
                   automatically wherever they're used.
@@ -253,47 +386,86 @@ function RecipesPage() {
                   <Plus className="h-3.5 w-3.5" /> New prep recipe
                 </Button>
               </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b text-xs uppercase tracking-wider text-muted-foreground">
-                      <th className="px-3 py-2 text-left font-medium">Name</th>
-                      <th className="px-3 py-2 text-right font-medium">Yield</th>
-                      <th className="px-3 py-2 text-right font-medium">Cost / yield unit</th>
-                    </tr>
-                  </thead>
-                  <tbody>
+
+              <div className="divide-y md:hidden">
+                {isPrepLoading ? (
+                  <div className="py-8 text-center text-sm text-muted-foreground">Loading…</div>
+                ) : prepRecipes.length === 0 ? (
+                  <div className="py-8 text-center text-sm text-muted-foreground">
+                    No prep recipes yet — add one to reuse it across dishes.
+                  </div>
+                ) : filteredPrepRecipes.length === 0 ? (
+                  <div className="py-8 text-center text-sm text-muted-foreground">
+                    No prep recipes match "{prepQuery}".
+                  </div>
+                ) : (
+                  filteredPrepRecipes.map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      className="flex w-full items-center justify-between gap-2 p-3 text-left active:bg-muted/40"
+                      onClick={() => setSelectedPrepId(p.id)}
+                    >
+                      <span className="font-medium">{p.name}</span>
+                      <div className="text-right">
+                        <div className="font-mono text-sm">
+                          {p.costPerYieldUnitCents != null ? formatMoney(p.costPerYieldUnitCents) : "—"}
+                        </div>
+                        <div className="font-mono text-xs text-muted-foreground">
+                          {p.yieldQty} {p.yieldUnit}
+                        </div>
+                      </div>
+                    </button>
+                  ))
+                )}
+              </div>
+              <div className="hidden overflow-x-auto md:block">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Name</TableHead>
+                      <TableHead className="text-right">Yield</TableHead>
+                      <TableHead className="text-right">Cost / yield unit</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
                     {isPrepLoading ? (
-                      <tr>
-                        <td colSpan={3} className="py-8 text-center text-sm text-muted-foreground">
+                      <TableRow>
+                        <TableCell colSpan={3} className="py-8 text-center text-sm text-muted-foreground">
                           Loading…
-                        </td>
-                      </tr>
+                        </TableCell>
+                      </TableRow>
                     ) : prepRecipes.length === 0 ? (
-                      <tr>
-                        <td colSpan={3} className="py-8 text-center text-sm text-muted-foreground">
+                      <TableRow>
+                        <TableCell colSpan={3} className="py-8 text-center text-sm text-muted-foreground">
                           No prep recipes yet — add one to reuse it across dishes.
-                        </td>
-                      </tr>
+                        </TableCell>
+                      </TableRow>
+                    ) : filteredPrepRecipes.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={3} className="py-8 text-center text-sm text-muted-foreground">
+                          No prep recipes match "{prepQuery}".
+                        </TableCell>
+                      </TableRow>
                     ) : (
-                      prepRecipes.map((p) => (
-                        <tr
+                      filteredPrepRecipes.map((p) => (
+                        <TableRow
                           key={p.id}
-                          className="cursor-pointer border-b last:border-0 hover:bg-muted/30"
+                          className="cursor-pointer"
                           onClick={() => setSelectedPrepId(p.id)}
                         >
-                          <td className="px-3 py-3 font-medium">{p.name}</td>
-                          <td className="px-3 py-3 text-right font-mono text-muted-foreground">
+                          <TableCell className="font-medium">{p.name}</TableCell>
+                          <TableCell className="text-right font-mono text-muted-foreground">
                             {p.yieldQty} {p.yieldUnit}
-                          </td>
-                          <td className="px-3 py-3 text-right font-mono">
+                          </TableCell>
+                          <TableCell className="text-right font-mono">
                             {p.costPerYieldUnitCents != null ? formatMoney(p.costPerYieldUnitCents) : "—"}
-                          </td>
-                        </tr>
+                          </TableCell>
+                        </TableRow>
                       ))
                     )}
-                  </tbody>
-                </table>
+                  </TableBody>
+                </Table>
               </div>
             </Card>
           </TabsContent>
@@ -301,7 +473,7 @@ function RecipesPage() {
       </main>
 
       <Sheet open={!!selectedItemId} onOpenChange={(o) => !o && setSelectedItemId(null)}>
-        <SheetContent className="sm:max-w-lg overflow-y-auto">
+        <SheetContent className="w-full sm:max-w-lg overflow-y-auto">
           {selectedItem && (
             <MenuItemRecipeSheet
               key={selectedItem.id}
@@ -346,7 +518,7 @@ function RecipesPage() {
       </Dialog>
 
       <Sheet open={!!selectedPrepId} onOpenChange={(o) => !o && setSelectedPrepId(null)}>
-        <SheetContent className="sm:max-w-lg overflow-y-auto">
+        <SheetContent className="w-full sm:max-w-lg overflow-y-auto">
           {selectedPrepId && (
             <PrepRecipeSheet
               prepRecipeId={selectedPrepId}
