@@ -1180,6 +1180,7 @@ const FLAG_LABELS: Record<string, string> = {
   totals_mismatch: "Totals don't match",
   low_confidence: "Low confidence",
   duplicate: "Possible duplicate",
+  case_pricing_adjusted: "Case pricing auto-converted — please verify",
 };
 
 const SKIP_REASON_LABELS: Record<string, string> = {

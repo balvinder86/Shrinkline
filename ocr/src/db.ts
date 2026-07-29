@@ -267,6 +267,18 @@ export async function persistResult(invoice: Invoice, result: ReadyResult): Prom
   return { flags: flagsArray, documentType, vendorId };
 }
 
+export async function addInvoiceFlag(invoiceId: string, flag: string) {
+  const { data, error: fetchError } = await supabase
+    .from("invoices")
+    .select("flags")
+    .eq("id", invoiceId)
+    .single();
+  if (fetchError || !data) throw new Error(`fetch flags failed: ${fetchError?.message ?? invoiceId}`);
+  const flags = Array.from(new Set([...(data.flags ?? []), flag]));
+  const { error } = await supabase.from("invoices").update({ flags }).eq("id", invoiceId);
+  if (error) throw new Error(`update flags failed: ${error.message}`);
+}
+
 export async function insertInvoiceLine(
   invoice: Invoice,
   line: {

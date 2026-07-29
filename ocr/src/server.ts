@@ -20,11 +20,64 @@ import {
   setFailed,
   persistResult,
   insertInvoiceLine,
+  addInvoiceFlag,
   listStuckInvoices,
   listNeverEnqueuedInvoices,
   mimeTypeFromPath,
 } from "./db.js";
 import { enqueue, checkJob } from "./mindee.js";
+
+// Distributor invoices routinely print line items at CASE level
+// (quantity = number of cases, unit_price/total_price = case price)
+// with the real per-bottle/per-can count named separately — but
+// Mindee's line-item schema has no dedicated "pack size" field, so
+// that case count silently gets read as if it were a bottle count.
+// Real example that surfaced this: a Jameson line read as "3 (bottles)
+// @ $413.16" when it was really 3 CASES of 12 @ $413.16/case (~$34.43
+// a bottle) — inflated a recipe's cost by 12x.
+//
+// Rather than a per-vendor lookup table (ruled out — this app has to
+// keep working as new tenants bring their own vendors), this parses
+// the industry-standard pack-size notations distributors already
+// print in the line's own description text: a labeled count ("BPC:
+// 12"), a nested pack ("4/6/12 OZ" = 4 packs of 6 = 24), or a flat
+// pack ("24/12 OZ" = 24). Validated against two real, structurally
+// different distributor invoices (Southern Glazer's wine/spirits,
+// Columbia Distributing beer) — see project memory for the specific
+// test data. Confirmed NOT to apply to weight-based food distributors
+// (Sysco, Pacific Seafood print case weight, not a bottle-style pack
+// count) — those invoices simply won't match any pattern here and
+// fall through to the unchanged, pre-existing behavior, which is
+// already correct for them.
+//
+// Returns null (safe no-op) when no known pattern is found — the
+// caller keeps today's behavior rather than guessing.
+export function parsePackSize(description: string | null): number | null {
+  if (!description) return null;
+  const text = description.replace(/\n/g, " ");
+
+  let m = text.match(/\bBPC[:\s]+(\d+)\b/i);
+  if (m) return Number(m[1]);
+
+  // Nested pack — "4/6/12 OZ" (4 outer packs of 6 inner units, 12oz
+  // each). Checked before the flat pattern below since a 3-number
+  // match would otherwise also satisfy the 2-number one.
+  m = text.match(/\b(\d+)\s*\/\s*(\d+)\s*\/\s*[\d.]+\s*(OZ|ML|L|GAL|CT)\b/i);
+  if (m) return Number(m[1]) * Number(m[2]);
+
+  // Flat pack — "24/12 OZ" (24 units, 12oz each) or "1/24/12 OZ" (1
+  // case of 24) falling through from the nested check above.
+  m = text.match(/\b(\d+)\s*\/\s*[\d.]+\s*(OZ|ML|L|GAL|CT)\b/i);
+  if (m) return Number(m[1]);
+
+  m = text.match(/\bCASE\s+OF\s+(\d+)\b/i);
+  if (m) return Number(m[1]);
+
+  m = text.match(/\b(\d+)\s*(?:CT|PK|PACK)\b/i);
+  if (m) return Number(m[1]);
+
+  return null;
+}
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 8080;
 const SERVICE_TOKEN = process.env.OCR_SERVICE_TOKEN;
@@ -61,16 +114,43 @@ async function handleCheck(invoiceId: string) {
   const outcome = await persistResult(invoice, result);
 
   const insertedLines = [];
+  let casePricingAdjusted = false;
   for (const item of result.lineItems) {
     const description = item.description ?? "";
+    // A recognized pack-size notation means quantity/total_price on
+    // this line are case-level — convert to a real per-individual-unit
+    // quantity and cost. No pattern found (the common case for
+    // non-case-priced or weight-based food-vendor lines) keeps
+    // today's pre-existing behavior unchanged.
+    const packSize = parsePackSize(description);
+    const hasPackSize = packSize != null && packSize > 0 && item.quantity != null;
+    const totalUnits = hasPackSize ? item.quantity! * packSize! : null;
+
+    const quantity = hasPackSize ? totalUnits : item.quantity;
+    const unitCostCents =
+      hasPackSize && item.total_price != null
+        ? Math.round((item.total_price / totalUnits!) * 100)
+        : item.unit_price != null
+          ? Math.round(item.unit_price * 100)
+          : null;
+    if (hasPackSize) casePricingAdjusted = true;
+
     const { matched } = await insertInvoiceLine(invoice, {
       description,
-      quantity: item.quantity,
+      quantity,
       unit: item.unit_measure,
-      unitCostCents: item.unit_price != null ? Math.round(item.unit_price * 100) : null,
+      unitCostCents,
       totalCents: item.total_price != null ? Math.round(item.total_price * 100) : null,
     });
     insertedLines.push({ description, matched });
+  }
+
+  // Surfaced so a reviewer can spot-check the auto-conversion rather
+  // than it silently changing a line's numbers with no visible trace.
+  let flags = outcome.flags;
+  if (casePricingAdjusted && !flags.includes("case_pricing_adjusted")) {
+    await addInvoiceFlag(invoice.id, "case_pricing_adjusted");
+    flags = [...flags, "case_pricing_adjusted"];
   }
 
   return {
@@ -81,7 +161,7 @@ async function handleCheck(invoiceId: string) {
     totalAmount: result.totalAmount,
     lineItemsExtracted: insertedLines.length,
     lineItemsAutoMatched: insertedLines.filter((l) => l.matched).length,
-    flags: outcome.flags,
+    flags,
     documentType: outcome.documentType,
     vendorId: outcome.vendorId,
   };
