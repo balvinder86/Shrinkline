@@ -99,6 +99,7 @@ import {
   usePromoteSenderAndAssignVendor,
   useRealInvoiceLines,
   useRealInvoices,
+  useResolveCasePricing,
   useSavingsSummary,
   useSetInvoiceDiscount,
   useSetInvoiceVendor,
@@ -1181,6 +1182,7 @@ const FLAG_LABELS: Record<string, string> = {
   low_confidence: "Low confidence",
   duplicate: "Possible duplicate",
   case_pricing_adjusted: "Case pricing auto-converted — please verify",
+  case_pricing_needs_review: "Case or bottle? — resolve below",
 };
 
 const SKIP_REASON_LABELS: Record<string, string> = {
@@ -1491,6 +1493,7 @@ function InvoiceOcrSheet({
   const checkOcr = useCheckOcr();
   const approveInvoice = useApproveInvoice();
   const updateLineIngredient = useUpdateInvoiceLineIngredient();
+  const resolveCasePricing = useResolveCasePricing();
   const setInvoiceVendor = useSetInvoiceVendor();
   const setInvoiceDiscount = useSetInvoiceDiscount();
   const [discountInput, setDiscountInput] = useState("");
@@ -1801,6 +1804,7 @@ function InvoiceOcrSheet({
                     <TableHead>Extracted description</TableHead>
                     <TableHead>Qty</TableHead>
                     <TableHead className="text-right">Total</TableHead>
+                    <TableHead>Case or bottle?</TableHead>
                     <TableHead>Ingredient match</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -1815,6 +1819,59 @@ function InvoiceOcrSheet({
                       </TableCell>
                       <TableCell className="text-right font-medium">
                         {l.lineTotalCents != null ? formatMoney(l.lineTotalCents / 100) : "—"}
+                      </TableCell>
+                      <TableCell>
+                        {l.casePricingStatus === "needs_review" && invoice?.vendorId && l.productCode ? (
+                          <div className="flex flex-col gap-1">
+                            <span className="text-[11px] text-amber-700">
+                              Found a pack size of {l.detectedPackSize} — which was this?
+                            </span>
+                            <div className="flex gap-1.5">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-7 px-2 text-xs"
+                                disabled={resolveCasePricing.isPending}
+                                onClick={() =>
+                                  resolveCasePricing.mutate({
+                                    lineId: l.id,
+                                    vendorId: invoice.vendorId!,
+                                    productCode: l.productCode!,
+                                    quantity: l.quantity ?? 1,
+                                    lineTotalCents: l.lineTotalCents,
+                                    detectedPackSize: l.detectedPackSize,
+                                    orderUnit: "case",
+                                  })
+                                }
+                              >
+                                Case
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-7 px-2 text-xs"
+                                disabled={resolveCasePricing.isPending}
+                                onClick={() =>
+                                  resolveCasePricing.mutate({
+                                    lineId: l.id,
+                                    vendorId: invoice.vendorId!,
+                                    productCode: l.productCode!,
+                                    quantity: l.quantity ?? 1,
+                                    lineTotalCents: l.lineTotalCents,
+                                    detectedPackSize: l.detectedPackSize,
+                                    orderUnit: "bottle",
+                                  })
+                                }
+                              >
+                                Bottle
+                              </Button>
+                            </div>
+                          </div>
+                        ) : l.casePricingStatus === "auto" ? (
+                          <span className="text-[11px] text-muted-foreground">Remembered ✓</span>
+                        ) : (
+                          <span className="text-[11px] text-muted-foreground">—</span>
+                        )}
                       </TableCell>
                       <TableCell>
                         <select

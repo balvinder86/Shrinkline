@@ -287,6 +287,9 @@ export async function insertInvoiceLine(
     unit: string | null;
     unitCostCents: number | null;
     totalCents: number | null;
+    productCode: string | null;
+    detectedPackSize: number | null;
+    casePricingStatus: "auto" | "needs_review" | null;
   },
 ) {
   const { data: matchedIngredientId } = await supabase.rpc("match_ingredient", {
@@ -303,7 +306,31 @@ export async function insertInvoiceLine(
     unit: line.unit,
     unit_cost_cents: line.unitCostCents,
     line_total_cents: line.totalCents,
+    product_code: line.productCode,
+    detected_pack_size: line.detectedPackSize,
+    case_pricing_status: line.casePricingStatus,
   });
   if (error) throw new Error(`insert invoice_line failed: ${error.message}`);
   return { matched: matchedIngredientId != null };
+}
+
+// Per-tenant, per-vendor, per-SKU memory of whether a product is
+// ordered by the case or by the bottle from this vendor — see
+// db/phase2/48_case_bottle_resolution.sql for why this exists instead
+// of trying to get OCR to infer it fresh on every invoice.
+export async function getVendorProductPackInfo(
+  restaurantId: string,
+  vendorId: string,
+  productCode: string,
+): Promise<{ orderUnit: "case" | "bottle"; packSize: number | null } | null> {
+  const { data, error } = await supabase
+    .from("vendor_product_pack_info")
+    .select("order_unit, pack_size")
+    .eq("restaurant_id", restaurantId)
+    .eq("vendor_id", vendorId)
+    .eq("product_code", productCode)
+    .maybeSingle();
+  if (error) throw new Error(`fetch vendor_product_pack_info failed: ${error.message}`);
+  if (!data) return null;
+  return { orderUnit: data.order_unit, packSize: data.pack_size };
 }

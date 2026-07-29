@@ -21,6 +21,7 @@ import {
   persistResult,
   insertInvoiceLine,
   addInvoiceFlag,
+  getVendorProductPackInfo,
   listStuckInvoices,
   listNeverEnqueuedInvoices,
   mimeTypeFromPath,
@@ -29,29 +30,26 @@ import { enqueue, checkJob } from "./mindee.js";
 
 // Distributor invoices routinely print line items at CASE level
 // (quantity = number of cases, unit_price/total_price = case price)
-// with the real per-bottle/per-can count named separately — but
-// Mindee's line-item schema has no dedicated "pack size" field, so
-// that case count silently gets read as if it were a bottle count.
-// Real example that surfaced this: a Jameson line read as "3 (bottles)
-// @ $413.16" when it was really 3 CASES of 12 @ $413.16/case (~$34.43
-// a bottle) — inflated a recipe's cost by 12x.
+// with the real per-bottle/per-can pack size named separately — but a
+// product's pack size (e.g. "BPC: 12") is a static fact about the SKU,
+// printed the same way whether THIS order was for a whole case or a
+// single bottle off the shelf. It's therefore only a SUGGESTED value
+// for the case/bottle resolution flow below (getVendorProductPackInfo
+// / handleCheck) — never applied automatically on its own, since doing
+// that blindly is exactly what under/over-costed real lines earlier in
+// this project (see project memory, 2026-07-29).
 //
-// Rather than a per-vendor lookup table (ruled out — this app has to
-// keep working as new tenants bring their own vendors), this parses
-// the industry-standard pack-size notations distributors already
-// print in the line's own description text: a labeled count ("BPC:
+// Recognizes the industry-standard pack-size notations distributors
+// print in a line's own description text: a labeled count ("BPC:
 // 12"), a nested pack ("4/6/12 OZ" = 4 packs of 6 = 24), or a flat
-// pack ("24/12 OZ" = 24). Validated against two real, structurally
-// different distributor invoices (Southern Glazer's wine/spirits,
-// Columbia Distributing beer) — see project memory for the specific
-// test data. Confirmed NOT to apply to weight-based food distributors
-// (Sysco, Pacific Seafood print case weight, not a bottle-style pack
-// count) — those invoices simply won't match any pattern here and
-// fall through to the unchanged, pre-existing behavior, which is
-// already correct for them.
+// pack ("24/12 OZ" = 24). Validated against real Southern Glazer's
+// (wine/spirits) and Columbia Distributing (beer) invoices — see
+// project memory for the specific test data. Confirmed NOT to apply to
+// weight-based food distributors (Sysco, Pacific Seafood print case
+// weight, not a bottle-style pack count) — those invoices simply won't
+// match any pattern here.
 //
-// Returns null (safe no-op) when no known pattern is found — the
-// caller keeps today's behavior rather than guessing.
+// Returns null when no known pattern is found.
 export function parsePackSize(description: string | null): number | null {
   if (!description) return null;
   const text = description.replace(/\n/g, " ");
@@ -115,25 +113,49 @@ async function handleCheck(invoiceId: string) {
 
   const insertedLines = [];
   let casePricingAdjusted = false;
+  let casePricingNeedsReview = false;
   for (const item of result.lineItems) {
     const description = item.description ?? "";
-    // A recognized pack-size notation means quantity/total_price on
-    // this line are case-level — convert to a real per-individual-unit
-    // quantity and cost. No pattern found (the common case for
-    // non-case-priced or weight-based food-vendor lines) keeps
-    // today's pre-existing behavior unchanged.
-    const packSize = parsePackSize(description);
-    const hasPackSize = packSize != null && packSize > 0 && item.quantity != null;
-    const totalUnits = hasPackSize ? item.quantity! * packSize! : null;
+    const detectedPackSize = parsePackSize(description);
 
-    const quantity = hasPackSize ? totalUnits : item.quantity;
-    const unitCostCents =
-      hasPackSize && item.total_price != null
-        ? Math.round((item.total_price / totalUnits!) * 100)
-        : item.unit_price != null
-          ? Math.round(item.unit_price * 100)
-          : null;
-    if (hasPackSize) casePricingAdjusted = true;
+    // Only a real vendor + product_code lets us key a remembered
+    // resolution — without both, there's no way to look one up or to
+    // ask a reviewer to create one, so this line always falls back to
+    // today's pre-existing (unmultiplied) behavior.
+    const memory =
+      outcome.vendorId && item.product_code
+        ? await getVendorProductPackInfo(invoice.restaurant_id, outcome.vendorId, item.product_code)
+        : null;
+
+    let quantity = item.quantity;
+    let unitCostCents = item.unit_price != null ? Math.round(item.unit_price * 100) : null;
+    let casePricingStatus: "auto" | "needs_review" | null = null;
+
+    if (memory && item.quantity != null) {
+      // A human has already told us, for this exact vendor + product,
+      // whether the printed quantity means cases or bottles — trust
+      // that over re-parsing the description every time (which is
+      // also how a line stays correct even on invoices where Mindee
+      // fails to extract the pack-size text at all, e.g. the page 2
+      // extraction gap seen in testing).
+      const totalUnits =
+        memory.orderUnit === "case" && memory.packSize != null
+          ? item.quantity * memory.packSize
+          : item.quantity;
+      quantity = totalUnits;
+      unitCostCents = item.total_price != null ? Math.round((item.total_price / totalUnits) * 100) : unitCostCents;
+      casePricingStatus = "auto";
+      casePricingAdjusted = true;
+    } else if (detectedPackSize != null && detectedPackSize > 0 && item.product_code) {
+      // A pack size was found but we don't yet know whether this
+      // specific order was for a case or a bottle — that ambiguity
+      // can't be resolved from OCR alone (see parsePackSize's
+      // comment), so this line keeps today's raw numbers as a safe
+      // placeholder and waits for a one-click human resolution rather
+      // than guessing either way.
+      casePricingStatus = "needs_review";
+      casePricingNeedsReview = true;
+    }
 
     const { matched } = await insertInvoiceLine(invoice, {
       description,
@@ -141,16 +163,23 @@ async function handleCheck(invoiceId: string) {
       unit: item.unit_measure,
       unitCostCents,
       totalCents: item.total_price != null ? Math.round(item.total_price * 100) : null,
+      productCode: item.product_code,
+      detectedPackSize,
+      casePricingStatus,
     });
     insertedLines.push({ description, matched });
   }
 
-  // Surfaced so a reviewer can spot-check the auto-conversion rather
-  // than it silently changing a line's numbers with no visible trace.
+  // Surfaced so a reviewer can spot-check an auto-applied conversion,
+  // or resolve a pending one, rather than either happening invisibly.
   let flags = outcome.flags;
   if (casePricingAdjusted && !flags.includes("case_pricing_adjusted")) {
     await addInvoiceFlag(invoice.id, "case_pricing_adjusted");
     flags = [...flags, "case_pricing_adjusted"];
+  }
+  if (casePricingNeedsReview && !flags.includes("case_pricing_needs_review")) {
+    await addInvoiceFlag(invoice.id, "case_pricing_needs_review");
+    flags = [...flags, "case_pricing_needs_review"];
   }
 
   return {

@@ -2005,6 +2005,9 @@ export type RealInvoiceLine = {
   unit: string | null;
   unitCostCents: number | null;
   lineTotalCents: number | null;
+  productCode: string | null;
+  detectedPackSize: number | null;
+  casePricingStatus: "auto" | "needs_review" | null;
 };
 
 export function useRealInvoiceLines(invoiceId: string | undefined) {
@@ -2026,7 +2029,66 @@ export function useRealInvoiceLines(invoiceId: string | undefined) {
         unit: row.unit,
         unitCostCents: row.unit_cost_cents,
         lineTotalCents: row.line_total_cents,
+        productCode: row.product_code,
+        detectedPackSize: row.detected_pack_size,
+        casePricingStatus: row.case_pricing_status,
       }));
+    },
+  });
+}
+
+// Resolves a "was this line ordered by the case or the bottle?"
+// ambiguity once for a given vendor + product_code, remembers the
+// answer in vendor_product_pack_info, and recomputes this specific
+// line's quantity/unit_cost_cents from it — every future invoice line
+// for the same vendor + product_code then auto-resolves via that
+// memory instead of asking again. See db/phase2/48_case_bottle_resolution.sql
+// and ocr/src/server.ts for why OCR alone can't make this call.
+export function useResolveCasePricing() {
+  const queryClient = useQueryClient();
+  const restaurantId = useCurrentRestaurantId();
+
+  return useMutation({
+    mutationFn: async (input: {
+      lineId: string;
+      vendorId: string;
+      productCode: string;
+      quantity: number;
+      lineTotalCents: number | null;
+      detectedPackSize: number | null;
+      orderUnit: "case" | "bottle";
+    }) => {
+      const totalUnits =
+        input.orderUnit === "case" && input.detectedPackSize != null
+          ? input.quantity * input.detectedPackSize
+          : input.quantity;
+
+      const { error: upsertError } = await supabase.from("vendor_product_pack_info").upsert(
+        {
+          restaurant_id: restaurantId,
+          vendor_id: input.vendorId,
+          product_code: input.productCode,
+          order_unit: input.orderUnit,
+          pack_size: input.orderUnit === "case" ? input.detectedPackSize : null,
+        },
+        { onConflict: "restaurant_id,vendor_id,product_code" },
+      );
+      if (upsertError) throw upsertError;
+
+      const { error: updateError } = await supabase
+        .from("invoice_lines")
+        .update({
+          quantity: totalUnits,
+          unit_cost_cents:
+            input.lineTotalCents != null ? Math.round(input.lineTotalCents / totalUnits) : null,
+          case_pricing_status: "auto",
+        })
+        .eq("id", input.lineId);
+      if (updateError) throw updateError;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["real-invoice-lines"] });
+      queryClient.invalidateQueries({ queryKey: ["real-invoices"] });
     },
   });
 }
