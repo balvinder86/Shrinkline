@@ -2062,7 +2062,13 @@ export function useResolveCasePricing() {
         input.orderUnit === "case" && input.detectedPackSize != null
           ? input.quantity * input.detectedPackSize
           : input.quantity;
+      const unitCostCents =
+        input.lineTotalCents != null ? Math.round(input.lineTotalCents / totalUnits) : null;
 
+      // Seeds last_unit_cost_cents immediately — ocr/'s plausibility
+      // check (server.ts) needs a real baseline to compare future
+      // invoices against, not just whichever price happened to be on
+      // the invoice that triggered the very first resolution.
       const { error: upsertError } = await supabase.from("vendor_product_pack_info").upsert(
         {
           restaurant_id: restaurantId,
@@ -2070,6 +2076,7 @@ export function useResolveCasePricing() {
           product_code: input.productCode,
           order_unit: input.orderUnit,
           pack_size: input.orderUnit === "case" ? input.detectedPackSize : null,
+          last_unit_cost_cents: unitCostCents,
         },
         { onConflict: "restaurant_id,vendor_id,product_code" },
       );
@@ -2079,8 +2086,7 @@ export function useResolveCasePricing() {
         .from("invoice_lines")
         .update({
           quantity: totalUnits,
-          unit_cost_cents:
-            input.lineTotalCents != null ? Math.round(input.lineTotalCents / totalUnits) : null,
+          unit_cost_cents: unitCostCents,
           case_pricing_status: "auto",
         })
         .eq("id", input.lineId);

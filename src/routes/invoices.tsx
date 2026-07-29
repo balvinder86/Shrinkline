@@ -1497,6 +1497,11 @@ function InvoiceOcrSheet({
   const setInvoiceVendor = useSetInvoiceVendor();
   const setInvoiceDiscount = useSetInvoiceDiscount();
   const [discountInput, setDiscountInput] = useState("");
+  // Lines the reviewer has manually reopened for re-resolution (e.g.
+  // "we started buying this by the case now") — a purely local nudge
+  // to show the Case/Bottle buttons again on an already-"auto" line;
+  // nothing changes in the database until they actually pick one.
+  const [manualOverrideLineIds, setManualOverrideLineIds] = useState<Set<string>>(new Set());
 
   const open = invoiceId !== undefined;
 
@@ -1821,10 +1826,14 @@ function InvoiceOcrSheet({
                         {l.lineTotalCents != null ? formatMoney(l.lineTotalCents / 100) : "—"}
                       </TableCell>
                       <TableCell>
-                        {l.casePricingStatus === "needs_review" && invoice?.vendorId && l.productCode ? (
+                        {(l.casePricingStatus === "needs_review" || manualOverrideLineIds.has(l.id)) &&
+                        invoice?.vendorId &&
+                        l.productCode ? (
                           <div className="flex flex-col gap-1">
                             <span className="text-[11px] text-amber-700">
-                              Found a pack size of {l.detectedPackSize} — which was this?
+                              {l.detectedPackSize != null
+                                ? `Found a pack size of ${l.detectedPackSize} — which was this?`
+                                : "Case or bottle?"}
                             </span>
                             <div className="flex gap-1.5">
                               <Button
@@ -1832,7 +1841,7 @@ function InvoiceOcrSheet({
                                 variant="outline"
                                 className="h-7 px-2 text-xs"
                                 disabled={resolveCasePricing.isPending}
-                                onClick={() =>
+                                onClick={() => {
                                   resolveCasePricing.mutate({
                                     lineId: l.id,
                                     vendorId: invoice.vendorId!,
@@ -1841,8 +1850,13 @@ function InvoiceOcrSheet({
                                     lineTotalCents: l.lineTotalCents,
                                     detectedPackSize: l.detectedPackSize,
                                     orderUnit: "case",
-                                  })
-                                }
+                                  });
+                                  setManualOverrideLineIds((prev) => {
+                                    const next = new Set(prev);
+                                    next.delete(l.id);
+                                    return next;
+                                  });
+                                }}
                               >
                                 Case
                               </Button>
@@ -1851,7 +1865,7 @@ function InvoiceOcrSheet({
                                 variant="outline"
                                 className="h-7 px-2 text-xs"
                                 disabled={resolveCasePricing.isPending}
-                                onClick={() =>
+                                onClick={() => {
                                   resolveCasePricing.mutate({
                                     lineId: l.id,
                                     vendorId: invoice.vendorId!,
@@ -1860,15 +1874,29 @@ function InvoiceOcrSheet({
                                     lineTotalCents: l.lineTotalCents,
                                     detectedPackSize: l.detectedPackSize,
                                     orderUnit: "bottle",
-                                  })
-                                }
+                                  });
+                                  setManualOverrideLineIds((prev) => {
+                                    const next = new Set(prev);
+                                    next.delete(l.id);
+                                    return next;
+                                  });
+                                }}
                               >
                                 Bottle
                               </Button>
                             </div>
                           </div>
                         ) : l.casePricingStatus === "auto" ? (
-                          <span className="text-[11px] text-muted-foreground">Remembered ✓</span>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[11px] text-muted-foreground">Remembered ✓</span>
+                            <button
+                              type="button"
+                              className="text-[11px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                              onClick={() => setManualOverrideLineIds((prev) => new Set(prev).add(l.id))}
+                            >
+                              Change
+                            </button>
+                          </div>
                         ) : (
                           <span className="text-[11px] text-muted-foreground">—</span>
                         )}

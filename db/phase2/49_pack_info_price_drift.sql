@@ -1,0 +1,11 @@
+-- Tracks the last real per-unit price a resolved (vendor, product)
+-- mapping actually produced, so the resolution can be cross-checked
+-- against price reality on every future use instead of being trusted
+-- blindly forever. Needed because a resolved order_unit isn't a fixed
+-- fact — an owner buying more to hit a case discount can switch a
+-- product from bottle-ordering to case-ordering between invoices, and
+-- applying a stale "bottle" resolution to a new case-level line would
+-- silently produce a wrong price again (the exact failure mode this
+-- whole feature exists to prevent). See ocr/src/server.ts for the
+-- plausibility check that uses this column.
+alter table vendor_product_pack_info add column if not exists last_unit_cost_cents bigint;

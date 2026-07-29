@@ -322,15 +322,35 @@ export async function getVendorProductPackInfo(
   restaurantId: string,
   vendorId: string,
   productCode: string,
-): Promise<{ orderUnit: "case" | "bottle"; packSize: number | null } | null> {
+): Promise<{ orderUnit: "case" | "bottle"; packSize: number | null; lastUnitCostCents: number | null } | null> {
   const { data, error } = await supabase
     .from("vendor_product_pack_info")
-    .select("order_unit, pack_size")
+    .select("order_unit, pack_size, last_unit_cost_cents")
     .eq("restaurant_id", restaurantId)
     .eq("vendor_id", vendorId)
     .eq("product_code", productCode)
     .maybeSingle();
   if (error) throw new Error(`fetch vendor_product_pack_info failed: ${error.message}`);
   if (!data) return null;
-  return { orderUnit: data.order_unit, packSize: data.pack_size };
+  return { orderUnit: data.order_unit, packSize: data.pack_size, lastUnitCostCents: data.last_unit_cost_cents };
+}
+
+// Called after successfully applying a remembered case/bottle
+// resolution, so the next invoice's plausibility check (in
+// server.ts) has a real recent price to compare against — not the
+// price at the moment it was first resolved, which would otherwise
+// go stale and eventually flag ordinary price drift as suspicious.
+export async function updateVendorProductPackInfoPrice(
+  restaurantId: string,
+  vendorId: string,
+  productCode: string,
+  unitCostCents: number,
+) {
+  const { error } = await supabase
+    .from("vendor_product_pack_info")
+    .update({ last_unit_cost_cents: unitCostCents, updated_at: new Date().toISOString() })
+    .eq("restaurant_id", restaurantId)
+    .eq("vendor_id", vendorId)
+    .eq("product_code", productCode);
+  if (error) throw new Error(`update vendor_product_pack_info price failed: ${error.message}`);
 }

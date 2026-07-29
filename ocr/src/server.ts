@@ -22,6 +22,7 @@ import {
   insertInvoiceLine,
   addInvoiceFlag,
   getVendorProductPackInfo,
+  updateVendorProductPackInfoPrice,
   listStuckInvoices,
   listNeverEnqueuedInvoices,
   mimeTypeFromPath,
@@ -81,6 +82,16 @@ const PORT = process.env.PORT ? Number(process.env.PORT) : 8080;
 const SERVICE_TOKEN = process.env.OCR_SERVICE_TOKEN;
 if (!SERVICE_TOKEN) throw new Error("OCR_SERVICE_TOKEN must be set");
 
+// How far a remembered case/bottle resolution's implied price can
+// drift from its last known price before it's treated as suspicious
+// rather than trusted — see the comment where this is used in
+// handleCheck. A real case/bottle mismatch shows up as a jump of
+// roughly the pack size (6x-24x in every real example seen so far);
+// 3x is well below that while still generous for ordinary price
+// changes, which are typically well under 2x even during real
+// inflation.
+const PRICE_DRIFT_FACTOR = 3;
+
 async function readJsonBody(req: import("node:http").IncomingMessage): Promise<any> {
   const chunks: Buffer[] = [];
   for await (const chunk of req) chunks.push(chunk as Buffer);
@@ -116,7 +127,7 @@ async function handleCheck(invoiceId: string) {
   let casePricingNeedsReview = false;
   for (const item of result.lineItems) {
     const description = item.description ?? "";
-    const detectedPackSize = parsePackSize(description);
+    let detectedPackSize = parsePackSize(description);
 
     // Only a real vendor + product_code lets us key a remembered
     // resolution — without both, there's no way to look one up or to
@@ -142,10 +153,51 @@ async function handleCheck(invoiceId: string) {
         memory.orderUnit === "case" && memory.packSize != null
           ? item.quantity * memory.packSize
           : item.quantity;
-      quantity = totalUnits;
-      unitCostCents = item.total_price != null ? Math.round((item.total_price / totalUnits) * 100) : unitCostCents;
-      casePricingStatus = "auto";
-      casePricingAdjusted = true;
+      const impliedUnitCostCents =
+        item.total_price != null ? Math.round((item.total_price / totalUnits) * 100) : null;
+
+      // A resolved order type isn't a fixed fact about the product —
+      // an owner buying more to hit a case discount can switch it from
+      // bottle-ordering to case-ordering between invoices. Applying a
+      // stale resolution to that new line would silently reproduce the
+      // exact bug this feature exists to prevent. Cross-check the price
+      // this application implies against the last real price it
+      // produced: a genuine case/bottle mismatch shows up as a jump of
+      // roughly the pack size (6x-24x in every real example seen so
+      // far), far past anything normal price drift would ever cause —
+      // PRICE_DRIFT_FACTOR is set well below that so it only catches
+      // real mismatches, not ordinary price changes.
+      const isSuspicious =
+        memory.lastUnitCostCents != null &&
+        impliedUnitCostCents != null &&
+        (impliedUnitCostCents > memory.lastUnitCostCents * PRICE_DRIFT_FACTOR ||
+          impliedUnitCostCents < memory.lastUnitCostCents / PRICE_DRIFT_FACTOR);
+
+      if (!isSuspicious) {
+        quantity = totalUnits;
+        unitCostCents = impliedUnitCostCents ?? unitCostCents;
+        casePricingStatus = "auto";
+        casePricingAdjusted = true;
+        if (impliedUnitCostCents != null && outcome.vendorId && item.product_code) {
+          await updateVendorProductPackInfoPrice(
+            invoice.restaurant_id,
+            outcome.vendorId,
+            item.product_code,
+            impliedUnitCostCents,
+          );
+        }
+      } else {
+        // Looks like the order type may have changed since this was
+        // last resolved — don't apply a memory that now looks wrong.
+        // Falls through to the same safe, unmultiplied placeholder as
+        // a brand-new product. If this invoice's own description
+        // didn't yield a fresh pack size (e.g. the page 2 extraction
+        // gap), fall back to the remembered one so re-resolving is
+        // still a one-click suggestion, not a blank guess.
+        if (detectedPackSize == null) detectedPackSize = memory.packSize;
+        casePricingStatus = "needs_review";
+        casePricingNeedsReview = true;
+      }
     } else if (detectedPackSize != null && detectedPackSize > 0 && item.product_code) {
       // A pack size was found but we don't yet know whether this
       // specific order was for a case or a bottle — that ambiguity
