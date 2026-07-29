@@ -178,38 +178,34 @@ function RecipesPage() {
           </TabsList>
 
           <TabsContent value="items" className="mt-4 space-y-3">
-            <div className="flex flex-col gap-3 md:flex-row md:flex-wrap md:items-center">
-              <div className="max-w-full overflow-x-auto">
-                <Tabs value={categoryTab} onValueChange={setCategoryTab}>
-                  <TabsList className="bg-[hsl(var(--cream))] border border-stone-200">
-                    <TabsTrigger value="All">All</TabsTrigger>
-                    {itemCategories.map((c) => (
-                      <TabsTrigger key={c} value={c}>
-                        {c}
-                      </TabsTrigger>
-                    ))}
-                  </TabsList>
-                </Tabs>
+            <Tabs value={categoryTab} onValueChange={setCategoryTab}>
+              <TabsList className="h-auto flex-wrap justify-start gap-1 bg-[hsl(var(--cream))] border border-stone-200 p-1.5">
+                <TabsTrigger value="All">All</TabsTrigger>
+                {itemCategories.map((c) => (
+                  <TabsTrigger key={c} value={c}>
+                    {c}
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+            </Tabs>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <div className="relative flex-1 min-w-0 sm:max-w-md">
+                <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-stone-400" />
+                <Input
+                  value={itemQuery}
+                  onChange={(e) => setItemQuery(e.target.value)}
+                  placeholder="Search items"
+                  className="pl-9 bg-white"
+                />
               </div>
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center md:flex-1">
-                <div className="relative flex-1 min-w-0 md:max-w-md">
-                  <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-stone-400" />
-                  <Input
-                    value={itemQuery}
-                    onChange={(e) => setItemQuery(e.target.value)}
-                    placeholder="Search items"
-                    className="pl-9 bg-white"
-                  />
-                </div>
-                <Button
-                  size="sm"
-                  variant={unpricedOnly ? "default" : "outline"}
-                  className="h-9 shrink-0"
-                  onClick={() => setUnpricedOnly((v) => !v)}
-                >
-                  Needs recipe {unpricedItemIds.length > 0 && `(${unpricedItemIds.length})`}
-                </Button>
-              </div>
+              <Button
+                size="sm"
+                variant={unpricedOnly ? "default" : "outline"}
+                className="h-9 shrink-0"
+                onClick={() => setUnpricedOnly((v) => !v)}
+              >
+                Needs recipe {unpricedItemIds.length > 0 && `(${unpricedItemIds.length})`}
+              </Button>
             </div>
 
             <Card className="overflow-hidden">
