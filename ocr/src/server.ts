@@ -116,6 +116,24 @@ function isWeightVariable(quantity: number | null, unitPrice: number | null, tot
   return Math.abs(quantity * unitPrice - totalPrice) > 0.02;
 }
 
+// Case-pricing memory (vendor_product_pack_info) is keyed by product
+// code — but Mindee often doesn't extract one at all. Confirmed real
+// and widespread, not vendor-specific: 79% of Southern Glazer's real
+// lines, 100% of Columbia Distributing/Sysco/Pacific Seafood/Greco
+// lines had product_code null, silently making the whole resolve/
+// remember system inapplicable to most real lines across nearly every
+// vendor tested. Falls back to a normalized description when there's
+// no real code — less stable than a true SKU (OCR noise between
+// invoices could drift the key slightly), but far better than no key
+// at all, which meant zero protection. Prefixed so a real product
+// code can never coincidentally collide with a fallback key.
+function resolutionKey(productCode: string | null, description: string | null): string | null {
+  if (productCode) return productCode;
+  if (!description) return null;
+  const normalized = description.replace(/\n/g, " ").trim().toUpperCase().replace(/\s+/g, " ");
+  return normalized ? `desc:${normalized}` : null;
+}
+
 const PORT = process.env.PORT ? Number(process.env.PORT) : 8080;
 const SERVICE_TOKEN = process.env.OCR_SERVICE_TOKEN;
 if (!SERVICE_TOKEN) throw new Error("OCR_SERVICE_TOKEN must be set");
@@ -200,14 +218,14 @@ async function processReadyResult(invoice: Invoice, result: ReadyResult) {
   for (const item of result.lineItems) {
     const description = item.description ?? "";
     let detectedPackSize = parsePackSize(description);
+    const key = resolutionKey(item.product_code, item.description);
 
-    // Only a real vendor + product_code lets us key a remembered
-    // resolution — without both, there's no way to look one up or to
-    // ask a reviewer to create one, so this line always falls back to
-    // today's pre-existing (unmultiplied) behavior.
+    // Only a real vendor + resolution key lets us look up or create a
+    // remembered resolution — without both, this line always falls
+    // back to today's pre-existing (unmultiplied) behavior.
     const memory =
-      outcome.vendorId && item.product_code
-        ? await getVendorProductPackInfo(invoice.restaurant_id, outcome.vendorId, item.product_code)
+      outcome.vendorId && key
+        ? await getVendorProductPackInfo(invoice.restaurant_id, outcome.vendorId, key)
         : null;
 
     let quantity = item.quantity;
@@ -250,11 +268,11 @@ async function processReadyResult(invoice: Invoice, result: ReadyResult) {
         unitCostCents = impliedUnitCostCents ?? unitCostCents;
         casePricingStatus = "auto";
         casePricingAdjusted = true;
-        if (impliedUnitCostCents != null && outcome.vendorId && item.product_code) {
+        if (impliedUnitCostCents != null && outcome.vendorId && key) {
           await updateVendorProductPackInfoPrice(
             invoice.restaurant_id,
             outcome.vendorId,
-            item.product_code,
+            key,
             impliedUnitCostCents,
           );
         }
@@ -270,10 +288,7 @@ async function processReadyResult(invoice: Invoice, result: ReadyResult) {
         casePricingStatus = "needs_review";
         casePricingNeedsReview = true;
       }
-    } else if (
-      !isWeightVariable(item.quantity, item.unit_price, item.total_price) &&
-      item.product_code
-    ) {
+    } else if (!isWeightVariable(item.quantity, item.unit_price, item.total_price) && key) {
       // No memory yet for this vendor + product, and the line's own
       // arithmetic doesn't mark it as a naturally weight-variable item
       // (real proteins, produce) — meaning it might be case-packed
@@ -297,7 +312,7 @@ async function processReadyResult(invoice: Invoice, result: ReadyResult) {
       unit: item.unit_measure,
       unitCostCents,
       totalCents: item.total_price != null ? Math.round(item.total_price * 100) : null,
-      productCode: item.product_code,
+      productCode: key,
       detectedPackSize,
       casePricingStatus,
     });
