@@ -398,7 +398,10 @@ function RecipesPage() {
                       className="flex w-full items-center justify-between gap-2 p-3 text-left active:bg-muted/40"
                       onClick={() => setSelectedPrepId(p.id)}
                     >
-                      <span className="font-medium">{p.name}</span>
+                      <div>
+                        <div className="font-medium">{p.name}</div>
+                        <PrepUsageBadge prep={p} />
+                      </div>
                       <div className="text-right">
                         <div className="font-mono text-sm">
                           {p.costPerYieldUnitCents != null ? formatMoney(p.costPerYieldUnitCents) : "—"}
@@ -416,6 +419,7 @@ function RecipesPage() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Name</TableHead>
+                      <TableHead>Used in</TableHead>
                       <TableHead className="text-right">Yield</TableHead>
                       <TableHead className="text-right">Cost / yield unit</TableHead>
                     </TableRow>
@@ -423,19 +427,19 @@ function RecipesPage() {
                   <TableBody>
                     {isPrepLoading ? (
                       <TableRow>
-                        <TableCell colSpan={3} className="py-8 text-center text-sm text-muted-foreground">
+                        <TableCell colSpan={4} className="py-8 text-center text-sm text-muted-foreground">
                           Loading…
                         </TableCell>
                       </TableRow>
                     ) : prepRecipes.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={3} className="py-8 text-center text-sm text-muted-foreground">
+                        <TableCell colSpan={4} className="py-8 text-center text-sm text-muted-foreground">
                           No prep recipes yet — add one to reuse it across dishes.
                         </TableCell>
                       </TableRow>
                     ) : filteredPrepRecipes.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={3} className="py-8 text-center text-sm text-muted-foreground">
+                        <TableCell colSpan={4} className="py-8 text-center text-sm text-muted-foreground">
                           No prep recipes match "{prepQuery}".
                         </TableCell>
                       </TableRow>
@@ -447,6 +451,9 @@ function RecipesPage() {
                           onClick={() => setSelectedPrepId(p.id)}
                         >
                           <TableCell className="font-medium">{p.name}</TableCell>
+                          <TableCell>
+                            <PrepUsageBadge prep={p} />
+                          </TableCell>
                           <TableCell className="text-right font-mono text-muted-foreground">
                             {p.yieldQty} {p.yieldUnit}
                           </TableCell>
@@ -523,6 +530,27 @@ function RecipesPage() {
 
       <NewPrepRecipeDialog open={newPrepOpen} onOpenChange={setNewPrepOpen} />
     </>
+  );
+}
+
+// A prep recipe with real ingredients but zero real usage looks
+// identical to one actually rolled into a dish's cost unless
+// something calls that out directly — this is that callout.
+function PrepUsageBadge({ prep }: { prep: PrepRecipe }) {
+  const dishCount = prep.usedByMenuItemNames.length;
+  const prepCount = prep.usedByPrepRecipeNames.length;
+  const allNames = [...prep.usedByMenuItemNames, ...prep.usedByPrepRecipeNames];
+
+  if (dishCount === 0 && prepCount === 0) {
+    return <span className="text-[11px] text-amber-700">Not used yet</span>;
+  }
+  const parts: string[] = [];
+  if (dishCount > 0) parts.push(`${dishCount} dish${dishCount === 1 ? "" : "es"}`);
+  if (prepCount > 0) parts.push(`${prepCount} prep recipe${prepCount === 1 ? "" : "s"}`);
+  return (
+    <span className="text-[11px] text-muted-foreground" title={allNames.join(", ")}>
+      {parts.join(", ")}
+    </span>
   );
 }
 
@@ -806,6 +834,21 @@ function PrepRecipeSheet({
           </span>
         )}
       </div>
+
+      {prepRecipe && (
+        <div className="mt-3 text-sm">
+          {prepRecipe.usedByMenuItemNames.length === 0 && prepRecipe.usedByPrepRecipeNames.length === 0 ? (
+            <p className="text-amber-700">
+              Not used anywhere yet — its cost won't affect any dish's margin until it's added to one.
+            </p>
+          ) : (
+            <div className="text-muted-foreground">
+              <span className="font-medium text-foreground">Used in: </span>
+              {[...prepRecipe.usedByMenuItemNames, ...prepRecipe.usedByPrepRecipeNames].join(", ")}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="mt-4">
         <RecipeLineList

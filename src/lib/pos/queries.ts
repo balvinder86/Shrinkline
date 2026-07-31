@@ -94,7 +94,33 @@ export async function fetchRecipeCostContext(locationIds: string[]) {
     recipeLinesByMenuItem.set(row.menu_item_pos_id, list);
   }
 
-  return { recipeLinesByMenuItem, prepRecipeLinesByPrepId, prepRecipeYieldById, ingredientCostById };
+  // Reverse indexes — "which menu items / prep recipes actually use
+  // this prep recipe" — so the Prep recipes list can show real usage
+  // instead of leaving a created-but-unattached prep recipe looking
+  // identical to one that's actually rolled into real dishes.
+  const menuItemsUsingPrepRecipe = new Map<string, Set<string>>();
+  for (const row of recipeLinesData) {
+    if (!row.prep_recipe_id) continue;
+    const set = menuItemsUsingPrepRecipe.get(row.prep_recipe_id) ?? new Set<string>();
+    set.add(row.menu_item_pos_id);
+    menuItemsUsingPrepRecipe.set(row.prep_recipe_id, set);
+  }
+  const prepRecipesUsingPrepRecipe = new Map<string, Set<string>>();
+  for (const row of prepRecipeLinesData) {
+    if (!row.sub_prep_recipe_id) continue;
+    const set = prepRecipesUsingPrepRecipe.get(row.sub_prep_recipe_id) ?? new Set<string>();
+    set.add(row.prep_recipe_id);
+    prepRecipesUsingPrepRecipe.set(row.sub_prep_recipe_id, set);
+  }
+
+  return {
+    recipeLinesByMenuItem,
+    prepRecipeLinesByPrepId,
+    prepRecipeYieldById,
+    ingredientCostById,
+    menuItemsUsingPrepRecipe,
+    prepRecipesUsingPrepRecipe,
+  };
 }
 
 function resolveItemCostCents(

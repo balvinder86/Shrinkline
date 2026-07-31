@@ -1059,6 +1059,13 @@ export type PrepRecipe = {
   yieldQty: number;
   yieldUnit: string;
   costPerYieldUnitCents: number | null;
+  // What actually uses this prep recipe right now — a dish's own name
+  // (via recipe_lines) and/or another prep recipe's name (as a
+  // sub-recipe). Empty on both means it's created but not attached to
+  // anything real yet, which otherwise looks identical to one that's
+  // genuinely rolled into a dish's cost.
+  usedByMenuItemNames: string[];
+  usedByPrepRecipeNames: string[];
 };
 
 export function usePrepRecipes() {
@@ -1067,15 +1074,21 @@ export function usePrepRecipes() {
     queryKey: ["prep-recipes", locationIds],
     enabled: !!locationIds && locationIds.length > 0,
     queryFn: async (): Promise<PrepRecipe[]> => {
-      const [prepRecipesRes, ctx] = await Promise.all([
+      const [prepRecipesRes, menuItemsRes, ctx] = await Promise.all([
         supabase
           .from("prep_recipes")
           .select("id, name, yield_qty, yield_unit")
           .in("location_id", locationIds!)
           .order("name"),
+        supabase.from("menu_items").select("pos_id, name").in("location_id", locationIds!),
         fetchRecipeCostContext(locationIds!),
       ]);
       if (prepRecipesRes.error) throw prepRecipesRes.error;
+      if (menuItemsRes.error) throw menuItemsRes.error;
+
+      const menuItemNameById = new Map((menuItemsRes.data ?? []).map((m) => [m.pos_id, m.name]));
+      const prepRecipeNameById = new Map((prepRecipesRes.data ?? []).map((p) => [p.id, p.name]));
+
       return (prepRecipesRes.data ?? []).map((r) => ({
         id: r.id,
         name: r.name,
@@ -1087,6 +1100,14 @@ export function usePrepRecipes() {
           ctx.prepRecipeYieldById,
           ctx.ingredientCostById,
         ),
+        usedByMenuItemNames: Array.from(ctx.menuItemsUsingPrepRecipe.get(r.id) ?? [])
+          .map((posId) => menuItemNameById.get(posId))
+          .filter((name): name is string => !!name)
+          .sort(),
+        usedByPrepRecipeNames: Array.from(ctx.prepRecipesUsingPrepRecipe.get(r.id) ?? [])
+          .map((prepId) => prepRecipeNameById.get(prepId))
+          .filter((name): name is string => !!name)
+          .sort(),
       }));
     },
   });
