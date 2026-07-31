@@ -56,24 +56,20 @@ export function DateRangePicker({
       }}
     >
       <PopoverTrigger asChild>
-        <Button
-          variant="outline"
-          size="sm"
-          className="hidden h-9 gap-2 rounded-full sm:inline-flex"
-        >
+        <Button variant="outline" size="sm" className="h-9 gap-2 rounded-full">
           <CalendarIcon className="h-4 w-4" />
-          {formatDateRange(range)}
+          <span className="hidden sm:inline">{formatDateRange(range)}</span>
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-auto p-0">
-        <div className="flex">
-          <div className="flex flex-col gap-1 border-r border-border p-3">
+      <PopoverContent align="end" className="w-auto max-w-[calc(100vw-2rem)] p-0">
+        <div className="flex flex-col sm:flex-row">
+          <div className="flex gap-1 overflow-x-auto border-b border-border p-3 sm:flex-col sm:overflow-visible sm:border-b-0 sm:border-r">
             {presetsFor(new Date(), t).map((p) => (
               <Button
                 key={p.id}
                 variant="ghost"
                 size="sm"
-                className="justify-start rounded-md"
+                className="shrink-0 justify-start rounded-md"
                 onClick={() => apply(p.range)}
               >
                 {p.label}
