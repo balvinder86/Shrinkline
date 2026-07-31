@@ -84,7 +84,36 @@ export function parsePackSize(description: string | null): number | null {
   m = text.match(/\b(\d+)\s*(?:CT|PK|PACK)\b/i);
   if (m) return Number(m[1]);
 
+  // Food packaging notation — "6/#10 CAN" (6 cans, #10 size each) or
+  // "2/5#CS" (2 rolls, 5lb each, per case). Validated against real
+  // FSI line items, including that it does NOT false-positive on
+  // "14/16 GAS FLUSHE" (a real bacon slice-count spec, not a pack
+  // size) or "1/4"X1/2"" (a fry-cut fraction) — both lack the
+  // required trailing "#".
+  m = text.match(/\b(\d+)\s*\/\s*#\s*\d+\b/i);
+  if (m) return Number(m[1]);
+  m = text.match(/\b(\d+)\s*\/\s*(\d+)\s*#/);
+  if (m) return Number(m[1]);
+
   return null;
+}
+
+// A line whose case-level arithmetic doesn't hold — quantity ×
+// unit_price far from total_price — is priced by real, variable
+// weight (a natural protein cut, "$9.37/lb × the real delivered
+// weight") rather than a flat per-case/per-unit rate; trust it as
+// extracted, same conclusion already reached for Sysco/Pacific
+// Seafood. Deliberately arithmetic rather than reading the unit/size
+// text: Mindee doesn't reliably populate unit_measure for FSI
+// (confirmed null on every real line tested), and text alone can't
+// tell a genuinely weight-variable product ("13#AV") apart from a
+// merely large FIXED-weight case ("15#") that's actually still a
+// stable, flat-priced unit — arithmetic tells the two apart directly
+// (verified against 4 real weight-variable FSI lines, each off by
+// 10x-38x, versus every stable line matching exactly).
+function isWeightVariable(quantity: number | null, unitPrice: number | null, totalPrice: number | null): boolean {
+  if (quantity == null || unitPrice == null || totalPrice == null) return false;
+  return Math.abs(quantity * unitPrice - totalPrice) > 0.02;
 }
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 8080;
@@ -241,13 +270,23 @@ async function processReadyResult(invoice: Invoice, result: ReadyResult) {
         casePricingStatus = "needs_review";
         casePricingNeedsReview = true;
       }
-    } else if (detectedPackSize != null && detectedPackSize > 0 && item.product_code) {
-      // A pack size was found but we don't yet know whether this
-      // specific order was for a case or a bottle — that ambiguity
-      // can't be resolved from OCR alone (see parsePackSize's
-      // comment), so this line keeps today's raw numbers as a safe
-      // placeholder and waits for a one-click human resolution rather
-      // than guessing either way.
+    } else if (
+      !isWeightVariable(item.quantity, item.unit_price, item.total_price) &&
+      item.product_code
+    ) {
+      // No memory yet for this vendor + product, and the line's own
+      // arithmetic doesn't mark it as a naturally weight-variable item
+      // (real proteins, produce) — meaning it might be case-packed
+      // with no way to tell from this line alone, whether or not a
+      // pack size could actually be parsed out of the description.
+      // Most real food-vendor case-packed items print their pack size
+      // (e.g. "10 gloves per case") only in a printed column Mindee
+      // doesn't reliably extract, not in the item's own name the way
+      // most beverages do — flag every one of these once per vendor +
+      // product rather than only the minority parsePackSize can find a
+      // number for, or most food case-pricing errors would never
+      // surface at all. Never guesses either way; the UI asks for a
+      // real number when there's nothing to suggest.
       casePricingStatus = "needs_review";
       casePricingNeedsReview = true;
     }

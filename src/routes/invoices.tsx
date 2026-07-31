@@ -1513,6 +1513,11 @@ function InvoiceOcrSheet({
   // to show the Case/Bottle buttons again on an already-"auto" line;
   // nothing changes in the database until they actually pick one.
   const [manualOverrideLineIds, setManualOverrideLineIds] = useState<Set<string>>(new Set());
+  // Typed-in "how many individual units per case?" per line — most
+  // food-vendor case sizes aren't printed anywhere OCR can read, so
+  // there's often no detectedPackSize to just confirm; a real number
+  // is required before "Case" can be submitted for those.
+  const [manualPackSizeInputs, setManualPackSizeInputs] = useState<Record<string, string>>({});
 
   const open = invoiceId !== undefined;
 
@@ -1820,12 +1825,37 @@ function InvoiceOcrSheet({
                     <TableHead>Extracted description</TableHead>
                     <TableHead>Qty</TableHead>
                     <TableHead className="text-right">Total</TableHead>
-                    <TableHead>Case or bottle?</TableHead>
+                    <TableHead>Case or individual unit?</TableHead>
                     <TableHead>Ingredient match</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {lines.map((l) => (
+                  {lines.map((l) => {
+                    const manualPackSize = manualPackSizeInputs[l.id] ?? "";
+                    const manualPackSizeNumber = Number(manualPackSize);
+                    const hasValidManualPackSize = manualPackSize.trim() !== "" && manualPackSizeNumber > 0;
+                    const resolveWith = (orderUnit: "case" | "bottle", packSize: number | null) => {
+                      resolveCasePricing.mutate({
+                        lineId: l.id,
+                        vendorId: invoice!.vendorId!,
+                        productCode: l.productCode!,
+                        quantity: l.quantity ?? 1,
+                        lineTotalCents: l.lineTotalCents,
+                        detectedPackSize: packSize,
+                        orderUnit,
+                      });
+                      setManualOverrideLineIds((prev) => {
+                        const next = new Set(prev);
+                        next.delete(l.id);
+                        return next;
+                      });
+                      setManualPackSizeInputs((prev) => {
+                        const next = { ...prev };
+                        delete next[l.id];
+                        return next;
+                      });
+                    };
+                    return (
                     <TableRow key={l.id}>
                       <TableCell>
                         <div className="font-medium">{l.rawDescription || "—"}</div>
@@ -1844,56 +1874,51 @@ function InvoiceOcrSheet({
                             <span className="text-[11px] text-amber-700">
                               {l.detectedPackSize != null
                                 ? `Found a pack size of ${l.detectedPackSize} — which was this?`
-                                : "Case or bottle?"}
+                                : "Case or individual unit?"}
                             </span>
-                            <div className="flex gap-1.5">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              {l.detectedPackSize != null ? (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-7 px-2 text-xs"
+                                  disabled={resolveCasePricing.isPending}
+                                  onClick={() => resolveWith("case", l.detectedPackSize)}
+                                >
+                                  Case
+                                </Button>
+                              ) : (
+                                <div className="flex items-center gap-1">
+                                  <span className="text-[11px] text-muted-foreground">Case of</span>
+                                  <Input
+                                    type="number"
+                                    min={1}
+                                    value={manualPackSize}
+                                    onChange={(e) =>
+                                      setManualPackSizeInputs((prev) => ({ ...prev, [l.id]: e.target.value }))
+                                    }
+                                    placeholder="units"
+                                    className="h-7 w-16 px-1.5 text-xs"
+                                  />
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-7 px-2 text-xs"
+                                    disabled={resolveCasePricing.isPending || !hasValidManualPackSize}
+                                    onClick={() => resolveWith("case", manualPackSizeNumber)}
+                                  >
+                                    Confirm
+                                  </Button>
+                                </div>
+                              )}
                               <Button
                                 size="sm"
                                 variant="outline"
                                 className="h-7 px-2 text-xs"
                                 disabled={resolveCasePricing.isPending}
-                                onClick={() => {
-                                  resolveCasePricing.mutate({
-                                    lineId: l.id,
-                                    vendorId: invoice.vendorId!,
-                                    productCode: l.productCode!,
-                                    quantity: l.quantity ?? 1,
-                                    lineTotalCents: l.lineTotalCents,
-                                    detectedPackSize: l.detectedPackSize,
-                                    orderUnit: "case",
-                                  });
-                                  setManualOverrideLineIds((prev) => {
-                                    const next = new Set(prev);
-                                    next.delete(l.id);
-                                    return next;
-                                  });
-                                }}
+                                onClick={() => resolveWith("bottle", null)}
                               >
-                                Case
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="h-7 px-2 text-xs"
-                                disabled={resolveCasePricing.isPending}
-                                onClick={() => {
-                                  resolveCasePricing.mutate({
-                                    lineId: l.id,
-                                    vendorId: invoice.vendorId!,
-                                    productCode: l.productCode!,
-                                    quantity: l.quantity ?? 1,
-                                    lineTotalCents: l.lineTotalCents,
-                                    detectedPackSize: l.detectedPackSize,
-                                    orderUnit: "bottle",
-                                  });
-                                  setManualOverrideLineIds((prev) => {
-                                    const next = new Set(prev);
-                                    next.delete(l.id);
-                                    return next;
-                                  });
-                                }}
-                              >
-                                Bottle
+                                Individual unit
                               </Button>
                             </div>
                           </div>
@@ -1932,7 +1957,8 @@ function InvoiceOcrSheet({
                         </select>
                       </TableCell>
                     </TableRow>
-                  ))}
+                    );
+                  })}
                 </TableBody>
               </Table>
               </div>
