@@ -11,6 +11,7 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  useSidebar,
 } from "@/components/ui/sidebar";
 import {
   DropdownMenu,
@@ -40,6 +41,7 @@ export function AppSidebar() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const isActive = (url: string) => (url === "/" ? pathname === "/" : pathname.startsWith(url));
   const membership = useCurrentMembership();
+  const { setOpenMobile } = useSidebar();
   const { signOut } = useAuth();
   const { language, setLanguage, t } = useLanguage();
   const { restaurants, currentRestaurantId, currentRestaurant, setCurrentRestaurantId } =
@@ -65,7 +67,11 @@ export function AppSidebar() {
                   isActive={isActive(item.url)}
                   className="h-10 rounded-lg data-[active=true]:bg-primary/10 data-[active=true]:text-primary data-[active=true]:font-medium"
                 >
-                  <Link to={item.url} className="flex items-center gap-3">
+                  <Link
+                    to={item.url}
+                    onClick={() => setOpenMobile(false)}
+                    className="flex items-center gap-3"
+                  >
                     <item.icon className="h-[18px] w-[18px]" />
                     <span className="text-sm">{t.nav[item.titleKey]}</span>
                   </Link>
@@ -81,7 +87,7 @@ export function AppSidebar() {
   return (
     <Sidebar collapsible="icon" className="border-r border-sidebar-border">
       <SidebarHeader className="border-b border-sidebar-border px-4 py-5">
-        <Link to="/" className="flex items-center gap-3">
+        <Link to="/" onClick={() => setOpenMobile(false)} className="flex items-center gap-3">
           <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-primary text-primary-foreground shadow-soft">
             <UtensilsCrossed className="h-5 w-5" />
           </div>
