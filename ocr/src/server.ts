@@ -13,19 +13,28 @@
 // browser.
 
 import { createServer } from "node:http";
+import { fileURLToPath } from "node:url";
+import { PDFDocument } from "pdf-lib";
 import {
   getInvoice,
   downloadInvoiceFile,
   setEnqueued,
+  setEnqueuedMultiPage,
   setFailed,
   persistResult,
   insertInvoiceLine,
   addInvoiceFlag,
   getVendorProductPackInfo,
   updateVendorProductPackInfoPrice,
+  insertInvoicePageJobs,
+  getInvoicePageJobs,
+  savePageJobResult,
+  createInvoiceRowFromTemplate,
   listStuckInvoices,
   listNeverEnqueuedInvoices,
   mimeTypeFromPath,
+  type Invoice,
+  type ReadyResult,
 } from "./db.js";
 import { enqueue, checkJob } from "./mindee.js";
 
@@ -99,27 +108,61 @@ async function readJsonBody(req: import("node:http").IncomingMessage): Promise<a
   return raw ? JSON.parse(raw) : {};
 }
 
-async function handleEnqueue(invoiceId: string) {
+async function getPdfPageCount(buffer: Buffer): Promise<number> {
+  const doc = await PDFDocument.load(buffer, { ignoreEncryption: true });
+  return doc.getPageCount();
+}
+
+async function splitPdfPages(buffer: Buffer): Promise<Buffer[]> {
+  const src = await PDFDocument.load(buffer, { ignoreEncryption: true });
+  const pages: Buffer[] = [];
+  for (let i = 0; i < src.getPageCount(); i++) {
+    const doc = await PDFDocument.create();
+    const [page] = await doc.copyPages(src, [i]);
+    doc.addPage(page);
+    pages.push(Buffer.from(await doc.save()));
+  }
+  return pages;
+}
+
+export async function handleEnqueue(invoiceId: string) {
   const invoice = await getInvoice(invoiceId);
   if (!invoice.source_file_url) throw new Error("invoice has no source_file_url");
   const fileBuffer = await downloadInvoiceFile(invoice.source_file_url);
   const filename = invoice.source_file_url.split("/").pop() ?? "invoice.pdf";
-  const { jobId } = await enqueue(fileBuffer, filename, mimeTypeFromPath(invoice.source_file_url));
+  const mimeType = mimeTypeFromPath(invoice.source_file_url);
+
+  // A vendor sometimes batches multiple separate real invoices into
+  // one emailed PDF attachment (confirmed real on an FSI invoice —
+  // see project memory, 2026-07-31) — Mindee gives no page/location
+  // metadata back for this custom model, so there's no way to tell
+  // from a single whole-document job where one invoice ends and the
+  // next begins. Each page gets its own real job instead; the
+  // invoice_number each page's job finds is what actually detects the
+  // boundaries, in handleCheckMultiPage below. Single-page files (the
+  // vast majority) are completely unaffected — still exactly one
+  // Mindee call, same as always.
+  if (mimeType === "application/pdf") {
+    const pageCount = await getPdfPageCount(fileBuffer);
+    if (pageCount > 1) {
+      const pages = await splitPdfPages(fileBuffer);
+      const jobs: { pageNumber: number; mindeeJobId: string }[] = [];
+      for (let i = 0; i < pages.length; i++) {
+        const { jobId } = await enqueue(pages[i], `${filename}-page${i + 1}.pdf`, mimeType);
+        jobs.push({ pageNumber: i + 1, mindeeJobId: jobId });
+      }
+      await insertInvoicePageJobs(invoice.restaurant_id, invoiceId, jobs);
+      await setEnqueuedMultiPage(invoiceId);
+      return { jobId: null, pageCount };
+    }
+  }
+
+  const { jobId } = await enqueue(fileBuffer, filename, mimeType);
   await setEnqueued(invoiceId, jobId);
   return { jobId };
 }
 
-async function handleCheck(invoiceId: string) {
-  const invoice = await getInvoice(invoiceId);
-  if (!invoice.mindee_job_id) throw new Error("no OCR job has been enqueued for this invoice yet");
-
-  const result = await checkJob(invoice.mindee_job_id);
-  if (result.status === "processing") return { status: "processing" };
-  if (result.status === "failed") {
-    await setFailed(invoiceId);
-    return { status: "failed", error: result.error };
-  }
-
+async function processReadyResult(invoice: Invoice, result: ReadyResult) {
   const outcome = await persistResult(invoice, result);
 
   const insertedLines = [];
@@ -235,7 +278,8 @@ async function handleCheck(invoiceId: string) {
   }
 
   return {
-    status: "ready",
+    status: "ready" as const,
+    invoiceId: invoice.id,
     supplierName: result.supplierName,
     invoiceNumber: result.invoiceNumber,
     date: result.date,
@@ -246,6 +290,124 @@ async function handleCheck(invoiceId: string) {
     documentType: outcome.documentType,
     vendorId: outcome.vendorId,
   };
+}
+
+type PageJobResult = { pageNumber: number; result: ReadyResult };
+
+// Groups a multi-page document's per-page Mindee results back into
+// its real, separate invoices — a page continues the invoice already
+// in progress unless it carries its OWN, DIFFERENT invoice number. A
+// page with no number at all (e.g. a continuation page that didn't
+// visually repeat it) is assumed to belong to the invoice already
+// under way rather than starting a new, numberless one. Verified
+// against a real 7-page FSI document containing 4 real invoices —
+// grouped correctly (1/2/3/1 pages respectively) matching a manual
+// read of the source PDF exactly.
+function groupPagesByInvoice(pageResults: PageJobResult[]): ReadyResult[] {
+  const groups: PageJobResult[][] = [];
+  for (const pr of pageResults) {
+    const currentGroup = groups[groups.length - 1];
+    const currentInvoiceNumber = currentGroup?.[currentGroup.length - 1]?.result.invoiceNumber;
+    if (currentGroup && (pr.result.invoiceNumber == null || pr.result.invoiceNumber === currentInvoiceNumber)) {
+      currentGroup.push(pr);
+    } else {
+      groups.push([pr]);
+    }
+  }
+
+  return groups.map((group) => {
+    const invoiceNumber = group.map((g) => g.result.invoiceNumber).find((v) => v != null) ?? null;
+    const date = group.map((g) => g.result.date).find((v) => v != null) ?? null;
+    const supplierName = group.map((g) => g.result.supplierName).find((v) => v != null) ?? null;
+    // Totals commonly print on the invoice's final page, not its
+    // first — prefer the last non-null value in the group, not the
+    // first.
+    const totalAmount =
+      [...group].reverse().map((g) => g.result.totalAmount).find((v) => v != null) ?? null;
+    const lineItems = group.flatMap((g) => g.result.lineItems);
+    const confidences = group.map((g) => g.result.confidence).filter((c): c is number => c != null);
+    const confidence =
+      confidences.length > 0 ? confidences.reduce((a, b) => a + b, 0) / confidences.length : null;
+    return { status: "ready" as const, supplierName, invoiceNumber, date, totalAmount, lineItems, confidence };
+  });
+}
+
+async function handleCheckMultiPage(
+  invoice: Invoice,
+  pageJobs: { id: string; pageNumber: number; mindeeJobId: string; result: ReadyResult | null }[],
+) {
+  // Idempotency — once this row has already been through
+  // processReadyResult (document_type gets set there), grouping and
+  // per-invoice row creation must never run a second time, or a
+  // repeat /check call (a human reopening the review Sheet, the
+  // background sweep re-polling) would create duplicate invoice rows
+  // and duplicate lines on every re-check.
+  if (invoice.document_type) return { status: "ready" as const, alreadyProcessed: true };
+
+  // Checks every page each call rather than stopping at the first
+  // still-processing one — pages that happen to finish out of order
+  // (confirmed real: page 6 was the last of 7 to finish) still get
+  // read and cached in the same round instead of waiting an extra
+  // poll cycle for each.
+  const pageResults: PageJobResult[] = [];
+  let anyStillProcessing = false;
+  for (const { id: pageJobId, pageNumber, mindeeJobId, result: cachedResult } of pageJobs) {
+    // A page's result may already have been read and cached on an
+    // earlier /check call (see savePageJobResult) — a completed
+    // Mindee job is effectively one-time/ephemeral, so a page that's
+    // already been successfully read must never be re-fetched while
+    // waiting on a slower sibling page to finish.
+    if (cachedResult) {
+      pageResults.push({ pageNumber, result: cachedResult });
+      continue;
+    }
+    const result = await checkJob(mindeeJobId);
+    if (result.status === "processing") {
+      anyStillProcessing = true;
+      continue;
+    }
+    if (result.status === "failed") {
+      // One bad page shouldn't sink the whole batched upload — the
+      // rest still get processed into real invoices; the missing
+      // page's data is just absent from whichever invoice it would
+      // have belonged to.
+      console.error(`[multi-page] ${invoice.id} page ${pageNumber} job ${mindeeJobId} failed:`, result.error);
+      continue;
+    }
+    await savePageJobResult(pageJobId, result);
+    pageResults.push({ pageNumber, result });
+  }
+
+  if (anyStillProcessing) return { status: "processing" as const };
+
+  if (pageResults.length === 0) {
+    await setFailed(invoice.id);
+    return { status: "failed" as const, error: "all pages failed" };
+  }
+
+  const groups = groupPagesByInvoice(pageResults);
+  const outcomes = [];
+  for (let i = 0; i < groups.length; i++) {
+    const targetInvoice = i === 0 ? invoice : await createInvoiceRowFromTemplate(invoice);
+    outcomes.push(await processReadyResult(targetInvoice, groups[i]));
+  }
+
+  return { status: "ready" as const, multiInvoice: true, invoiceCount: groups.length, results: outcomes };
+}
+
+export async function handleCheck(invoiceId: string) {
+  const invoice = await getInvoice(invoiceId);
+  const pageJobs = await getInvoicePageJobs(invoiceId);
+  if (pageJobs.length > 0) return await handleCheckMultiPage(invoice, pageJobs);
+
+  if (!invoice.mindee_job_id) throw new Error("no OCR job has been enqueued for this invoice yet");
+  const result = await checkJob(invoice.mindee_job_id);
+  if (result.status === "processing") return { status: "processing" };
+  if (result.status === "failed") {
+    await setFailed(invoiceId);
+    return { status: "failed", error: result.error };
+  }
+  return await processReadyResult(invoice, result);
 }
 
 const server = createServer(async (req, res) => {
@@ -281,7 +443,15 @@ const server = createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, () => console.log(`invoice-ocr service listening on :${PORT}`));
+// Guarded so this file can be imported (e.g. by a test script driving
+// handleEnqueue/handleCheck directly against a real Mindee job) without
+// also starting the HTTP listener and background sweep as a side
+// effect — the standard ESM equivalent of `require.main === module`.
+const isMainModule = process.argv[1] != null && fileURLToPath(import.meta.url) === process.argv[1];
+
+if (isMainModule) {
+  server.listen(PORT, () => console.log(`invoice-ocr service listening on :${PORT}`));
+}
 
 // Background sweep — this service runs continuously (unlike the sync
 // jobs, which are one-shot Railway crons), so it can just re-check its
@@ -329,5 +499,7 @@ async function recheckStuckInvoices() {
   }
 }
 
-setInterval(recheckStuckInvoices, RECHECK_INTERVAL_MS);
-recheckStuckInvoices();
+if (isMainModule) {
+  setInterval(recheckStuckInvoices, RECHECK_INTERVAL_MS);
+  recheckStuckInvoices();
+}

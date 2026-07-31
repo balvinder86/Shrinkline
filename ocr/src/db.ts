@@ -31,6 +31,89 @@ export async function getInvoice(invoiceId: string): Promise<Invoice> {
   return { ...data, flags: data.flags ?? [] };
 }
 
+// Sentinel instead of leaving mindee_job_id null for a multi-page
+// upload — satisfies listStuckInvoices'/listNeverEnqueuedInvoices'
+// existing "not null" checks with zero changes to those queries. The
+// real per-page job ids live in invoice_page_jobs.
+export async function setEnqueuedMultiPage(invoiceId: string) {
+  const { error } = await supabase
+    .from("invoices")
+    .update({ mindee_job_id: "multi-page", ocr_status: "processing" })
+    .eq("id", invoiceId);
+  if (error) throw new Error(`update failed: ${error.message}`);
+}
+
+export async function insertInvoicePageJobs(
+  restaurantId: string,
+  invoiceId: string,
+  jobs: { pageNumber: number; mindeeJobId: string }[],
+) {
+  const { error } = await supabase.from("invoice_page_jobs").insert(
+    jobs.map((j) => ({
+      restaurant_id: restaurantId,
+      invoice_id: invoiceId,
+      page_number: j.pageNumber,
+      mindee_job_id: j.mindeeJobId,
+    })),
+  );
+  if (error) throw new Error(`insert invoice_page_jobs failed: ${error.message}`);
+}
+
+export async function getInvoicePageJobs(
+  invoiceId: string,
+): Promise<{ id: string; pageNumber: number; mindeeJobId: string; result: ReadyResult | null }[]> {
+  const { data, error } = await supabase
+    .from("invoice_page_jobs")
+    .select("id, page_number, mindee_job_id, result")
+    .eq("invoice_id", invoiceId)
+    .order("page_number");
+  if (error) throw new Error(`fetch invoice_page_jobs failed: ${error.message}`);
+  return (data ?? []).map((r) => ({
+    id: r.id,
+    pageNumber: r.page_number,
+    mindeeJobId: r.mindee_job_id,
+    result: r.result,
+  }));
+}
+
+// A completed Mindee job's result is effectively one-time/ephemeral —
+// re-fetching an already-successfully-read job on a later /check call
+// (waiting on a slower sibling page) silently reverts it to
+// "processing" instead of returning the same result again (confirmed
+// live, see db/phase2/51_page_job_result_cache.sql). Each page's
+// result gets cached here the first time it's read and is never
+// re-requested from Mindee after that.
+export async function savePageJobResult(pageJobId: string, result: ReadyResult) {
+  const { error } = await supabase.from("invoice_page_jobs").update({ result }).eq("id", pageJobId);
+  if (error) throw new Error(`save page job result failed: ${error.message}`);
+}
+
+// Creates a fresh invoice row for the 2nd+ real invoice detected
+// inside one uploaded multi-invoice PDF — copies tenant/vendor/source
+// context from the original row created at upload time, since they
+// share the same file and sender/vendor. All resulting rows share the
+// same source_file_url (the whole original multi-page file) rather
+// than each getting its own split-out sub-PDF uploaded to storage —
+// a deliberate simplification; a reviewer opening any of them can
+// still see the real page inside the original file, just not scrolled
+// straight to it.
+export async function createInvoiceRowFromTemplate(original: Invoice): Promise<Invoice> {
+  const { data, error } = await supabase
+    .from("invoices")
+    .insert({
+      restaurant_id: original.restaurant_id,
+      location_id: original.location_id,
+      vendor_id: original.vendor_id,
+      source_file_url: original.source_file_url,
+      status: "pending_review",
+      split_from_invoice_id: original.id,
+    })
+    .select("id, restaurant_id, location_id, vendor_id, source_file_url, mindee_job_id, document_type, flags")
+    .single();
+  if (error || !data) throw new Error(`create invoice row failed: ${error?.message}`);
+  return { ...data, flags: data.flags ?? [] };
+}
+
 export async function downloadInvoiceFile(path: string): Promise<Buffer> {
   const { data, error } = await supabase.storage.from("invoice-uploads").download(path);
   if (error || !data) throw new Error(`download failed: ${error?.message ?? "no file"}`);
@@ -154,7 +237,7 @@ async function findDuplicateInvoice(
   return data ?? null;
 }
 
-type ReadyResult = Extract<JobCheckResult, { status: "ready" }>;
+export type ReadyResult = Extract<JobCheckResult, { status: "ready" }>;
 
 export type PersistOutcome = { flags: string[]; documentType: string | null; vendorId: string | null };
 
