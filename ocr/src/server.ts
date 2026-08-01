@@ -33,10 +33,16 @@ import {
   listStuckInvoices,
   listNeverEnqueuedInvoices,
   mimeTypeFromPath,
+  getRecipeImport,
+  setRecipeImportProcessing,
+  setRecipeImportFailed,
+  listStuckRecipeImports,
+  listNeverStartedRecipeImports,
   type Invoice,
   type ReadyResult,
 } from "./db.js";
 import { enqueue, checkJob } from "./mindee.js";
+import { processRecipeImport } from "./recipeImport.js";
 
 // Distributor invoices routinely print line items at CASE level
 // (quantity = number of cases, unit_price/total_price = case price)
@@ -464,6 +470,31 @@ export async function handleCheck(invoiceId: string) {
   return await processReadyResult(invoice, result);
 }
 
+// Unlike Mindee's own job queue, a single Claude call for one document
+// is synchronous end to end — there's no external job id to poll. The
+// enqueue/check split is kept anyway (see recipeImport.ts's own header
+// comment): enqueue flips the row to "processing" and kicks off
+// processRecipeImport WITHOUT awaiting it, so the HTTP response (and
+// the Edge Function call in front of it) never blocks on however long
+// a real Claude call over a big document takes; check is then just a
+// cheap read of whatever processRecipeImport has written so far.
+export async function handleRecipeImportEnqueue(recipeImportId: string) {
+  await getRecipeImport(recipeImportId); // 404s here, not silently inside the background call
+  await setRecipeImportProcessing(recipeImportId);
+  processRecipeImport(recipeImportId).catch((e) => {
+    console.error(`[recipe-import] ${recipeImportId} background processing failed:`, e);
+    setRecipeImportFailed(recipeImportId, String(e)).catch((e2) =>
+      console.error(`[recipe-import] ${recipeImportId} failed to record failure:`, e2),
+    );
+  });
+  return { status: "processing" };
+}
+
+export async function handleRecipeImportCheck(recipeImportId: string) {
+  const row = await getRecipeImport(recipeImportId);
+  return { status: row.status, result: row.result, error: row.error_detail };
+}
+
 const server = createServer(async (req, res) => {
   const respond = (status: number, body: unknown) => {
     res.writeHead(status, { "Content-Type": "application/json" });
@@ -477,18 +508,29 @@ const server = createServer(async (req, res) => {
 
   try {
     const body = await readJsonBody(req);
-    const invoiceId = body.invoice_id;
-    if (!invoiceId) {
-      respond(400, { ok: false, error: "invoice_id is required" });
-      return;
-    }
 
     if (req.url === "/enqueue" && req.method === "POST") {
+      const invoiceId = body.invoice_id;
+      if (!invoiceId) return respond(400, { ok: false, error: "invoice_id is required" });
       respond(200, { ok: true, ...(await handleEnqueue(invoiceId)) });
       return;
     }
     if (req.url === "/check" && req.method === "POST") {
+      const invoiceId = body.invoice_id;
+      if (!invoiceId) return respond(400, { ok: false, error: "invoice_id is required" });
       respond(200, { ok: true, ...(await handleCheck(invoiceId)) });
+      return;
+    }
+    if (req.url === "/recipe-import/enqueue" && req.method === "POST") {
+      const recipeImportId = body.recipe_import_id;
+      if (!recipeImportId) return respond(400, { ok: false, error: "recipe_import_id is required" });
+      respond(200, { ok: true, ...(await handleRecipeImportEnqueue(recipeImportId)) });
+      return;
+    }
+    if (req.url === "/recipe-import/check" && req.method === "POST") {
+      const recipeImportId = body.recipe_import_id;
+      if (!recipeImportId) return respond(400, { ok: false, error: "recipe_import_id is required" });
+      respond(200, { ok: true, ...(await handleRecipeImportCheck(recipeImportId)) });
       return;
     }
     respond(404, { ok: false, error: "not found" });
@@ -553,7 +595,39 @@ async function recheckStuckInvoices() {
   }
 }
 
+// Same safety net as recheckStuckInvoices, for recipe_imports — but
+// simpler: since nothing here is ever committed until the owner
+// reviews it (see recipeImport.ts header), a stuck or never-started
+// row is always safe to just retry from scratch via handleEnqueue,
+// no idempotency guard needed.
+async function recheckStuckRecipeImports() {
+  let stuck: { id: string }[];
+  try {
+    stuck = await listStuckRecipeImports();
+  } catch (e) {
+    console.error("[background-recheck] failed to list stuck recipe imports:", e);
+    return;
+  }
+  let neverStarted: { id: string }[];
+  try {
+    neverStarted = await listNeverStartedRecipeImports();
+  } catch (e) {
+    console.error("[background-recheck] failed to list never-started recipe imports:", e);
+    return;
+  }
+  for (const { id } of [...stuck, ...neverStarted]) {
+    try {
+      await handleRecipeImportEnqueue(id);
+      console.log(`[background-recheck] recipe import ${id}: re-enqueued`);
+    } catch (e) {
+      console.error(`[background-recheck] recipe import ${id} retry failed:`, e);
+    }
+  }
+}
+
 if (isMainModule) {
   setInterval(recheckStuckInvoices, RECHECK_INTERVAL_MS);
   recheckStuckInvoices();
+  setInterval(recheckStuckRecipeImports, RECHECK_INTERVAL_MS);
+  recheckStuckRecipeImports();
 }

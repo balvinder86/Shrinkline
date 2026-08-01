@@ -437,3 +437,88 @@ export async function updateVendorProductPackInfoPrice(
     .eq("product_code", productCode);
   if (error) throw new Error(`update vendor_product_pack_info price failed: ${error.message}`);
 }
+
+// ------------------------------------------------------------
+// Bulk recipe import from uploaded Word/PDF documents.
+// Unlike invoices, nothing here is ever written to recipe_lines/
+// prep_recipe_lines directly — `result` is just a cached draft the
+// frontend reviews and commits line-by-line through the exact same
+// mutations manual recipe entry uses. That means, unlike invoice OCR,
+// retrying a stuck/failed row is always safe to just redo from
+// scratch — there's no risk of double-inserting anything real.
+// ------------------------------------------------------------
+
+export type RecipeImport = {
+  id: string;
+  restaurant_id: string;
+  location_id: string;
+  file_name: string;
+  source_file_url: string;
+  status: "pending" | "processing" | "ready" | "failed";
+  result: unknown;
+  error_detail: string | null;
+};
+
+export async function getRecipeImport(id: string): Promise<RecipeImport> {
+  const { data, error } = await supabase
+    .from("recipe_imports")
+    .select("id, restaurant_id, location_id, file_name, source_file_url, status, result, error_detail")
+    .eq("id", id)
+    .single();
+  if (error || !data) throw new Error(`recipe import not found: ${error?.message ?? id}`);
+  return data;
+}
+
+export async function downloadRecipeDocFile(path: string): Promise<Buffer> {
+  const { data, error } = await supabase.storage.from("recipe-doc-uploads").download(path);
+  if (error || !data) throw new Error(`download failed: ${error?.message ?? "no file"}`);
+  const arrayBuffer = await data.arrayBuffer();
+  return Buffer.from(arrayBuffer);
+}
+
+export async function setRecipeImportProcessing(id: string) {
+  const { error } = await supabase.from("recipe_imports").update({ status: "processing" }).eq("id", id);
+  if (error) throw new Error(`update failed: ${error.message}`);
+}
+
+export async function setRecipeImportReady(id: string, result: unknown) {
+  const { error } = await supabase
+    .from("recipe_imports")
+    .update({ status: "ready", result, error_detail: null })
+    .eq("id", id);
+  if (error) throw new Error(`update failed: ${error.message}`);
+}
+
+export async function setRecipeImportFailed(id: string, errorDetail: string) {
+  await supabase.from("recipe_imports").update({ status: "failed", error_detail: errorDetail }).eq("id", id);
+}
+
+// A row stuck in "processing" for this long means the Node process
+// almost certainly died/restarted mid-flight (a real Claude call for
+// one document, PDF or DOCX, normally finishes in well under a
+// minute) — safe to just redo the whole thing, see file header.
+export async function listStuckRecipeImports(): Promise<{ id: string }[]> {
+  const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  const { data, error } = await supabase
+    .from("recipe_imports")
+    .select("id")
+    .eq("status", "processing")
+    .lt("created_at", tenMinutesAgo);
+  if (error) throw new Error(`list stuck recipe imports failed: ${error.message}`);
+  return data ?? [];
+}
+
+// Rows whose enqueue call never happened at all (e.g. the browser tab
+// closed between upload and enqueue) — same 2-minute age floor as
+// listNeverEnqueuedInvoices, to avoid racing a legitimate first
+// attempt that just hasn't happened yet.
+export async function listNeverStartedRecipeImports(): Promise<{ id: string }[]> {
+  const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+  const { data, error } = await supabase
+    .from("recipe_imports")
+    .select("id")
+    .eq("status", "pending")
+    .lt("created_at", twoMinutesAgo);
+  if (error) throw new Error(`list never-started recipe imports failed: ${error.message}`);
+  return data ?? [];
+}

@@ -975,7 +975,10 @@ export function useAddRecipeLine() {
         menuItemPosId: string;
         quantity: number;
         unit: string;
-      } & ({ ingredientId: string; prepRecipeId?: never } | { prepRecipeId: string; ingredientId?: never }),
+      } & (
+        | { ingredientId: string; prepRecipeId?: never }
+        | { prepRecipeId: string; ingredientId?: never }
+      ),
     ) => {
       if (!restaurantId || !locationId) throw new Error("no current restaurant/location");
       const { error } = await supabase.from("recipe_lines").insert({
@@ -1024,10 +1027,89 @@ export function useGenerateRecipe() {
       });
       if (error || !(data as { ok?: boolean } | null)?.ok) {
         throw new Error(
-          (data as { error?: string } | null)?.error ?? error?.message ?? "recipe generation failed",
+          (data as { error?: string } | null)?.error ??
+            error?.message ??
+            "recipe generation failed",
         );
       }
       return (data as { recipes: GeneratedRecipe[] }).recipes;
+    },
+  });
+}
+
+// ---------- Bulk recipe import from Word/PDF ----------
+// Mirrors useUploadInvoice/useEnqueueOcr/useCheckOcr exactly — same
+// upload-then-enqueue-then-poll shape, just against the recipe-doc-
+// uploads bucket / recipe_imports table / recipe-doc-import function
+// instead of their invoice equivalents. `lines` on each draft recipe
+// reuses GeneratedRecipeLine — same shape the AI generator's own
+// review UI (GeneratedRecipeReview) already renders, so importing a
+// doc needs zero new line-review code, only a "which real menu item
+// (or new prep recipe) is this?" step in front of it.
+export type RecipeImportDraft = {
+  proposedName: string;
+  targetKind: "menu_item" | "prep_recipe";
+  matchedMenuItemPosId: string | null;
+  matchConfidence: "high" | "medium" | "low" | "none";
+  lines: GeneratedRecipeLine[];
+};
+export type RecipeImportCheckResult = {
+  status: "pending" | "processing" | "ready" | "failed";
+  result?: { recipes: RecipeImportDraft[] } | null;
+  error?: string | null;
+};
+
+export function useUploadRecipeDoc() {
+  const restaurantId = useCurrentRestaurantId();
+  const locationId = useCurrentLocationId();
+  return useMutation({
+    mutationFn: async (file: File): Promise<string> => {
+      if (!restaurantId || !locationId) throw new Error("no current restaurant/location");
+      const path = `${restaurantId}/${crypto.randomUUID()}-${file.name}`;
+      const { error: uploadErr } = await supabase.storage
+        .from("recipe-doc-uploads")
+        .upload(path, file);
+      if (uploadErr) throw uploadErr;
+
+      const { data, error: insertErr } = await supabase
+        .from("recipe_imports")
+        .insert({
+          restaurant_id: restaurantId,
+          location_id: locationId,
+          file_name: file.name,
+          source_file_url: path,
+          status: "pending",
+        })
+        .select("id")
+        .single();
+      if (insertErr) throw insertErr;
+      return data.id as string;
+    },
+  });
+}
+
+export function useEnqueueRecipeImport() {
+  return useMutation({
+    mutationFn: async (recipeImportId: string) => {
+      const { data, error } = await supabase.functions.invoke("recipe-doc-import", {
+        body: { recipe_import_id: recipeImportId, action: "enqueue" },
+      });
+      if (error) throw error;
+      if (!data?.ok) throw new Error(data?.error ?? "enqueue failed");
+      return data;
+    },
+  });
+}
+
+export function useCheckRecipeImport() {
+  return useMutation({
+    mutationFn: async (recipeImportId: string): Promise<RecipeImportCheckResult> => {
+      const { data, error } = await supabase.functions.invoke("recipe-doc-import", {
+        body: { recipe_import_id: recipeImportId, action: "check" },
+      });
+      if (error) throw error;
+      if (!data?.ok) throw new Error(data?.error ?? "check failed");
+      return data as RecipeImportCheckResult;
     },
   });
 }
@@ -1243,13 +1325,18 @@ export function useAddPrepRecipeLine() {
         prepRecipeId: string;
         quantity: number;
         unit: string;
-      } & ({ ingredientId: string; subPrepRecipeId?: never } | { subPrepRecipeId: string; ingredientId?: never }),
+      } & (
+        | { ingredientId: string; subPrepRecipeId?: never }
+        | { subPrepRecipeId: string; ingredientId?: never }
+      ),
     ) => {
       if (!restaurantId) throw new Error("no current restaurant");
       if (input.subPrepRecipeId) {
         if (!locationIds || locationIds.length === 0) throw new Error("no current location");
         const ctx = await fetchRecipeCostContext(locationIds);
-        if (wouldCreateCycle(input.prepRecipeId, input.subPrepRecipeId, ctx.prepRecipeLinesByPrepId)) {
+        if (
+          wouldCreateCycle(input.prepRecipeId, input.subPrepRecipeId, ctx.prepRecipeLinesByPrepId)
+        ) {
           throw new Error(
             "That would create a circular recipe — a prep recipe can't contain itself, even indirectly.",
           );
@@ -1665,11 +1752,15 @@ export function useExpenseCategorySpend(dateRange?: DateRange) {
       if (invoicesRes.error) throw invoicesRes.error;
 
       const categoryByVendorId = new Map<string, VendorCategory>(
-        (vendorsRes.data ?? []).map((v) => [v.id, (v.category as VendorCategory) ?? "food_beverage"]),
+        (vendorsRes.data ?? []).map((v) => [
+          v.id,
+          (v.category as VendorCategory) ?? "food_beverage",
+        ]),
       );
 
       const byCategory = new Map<VendorCategory, { spendCents: number; invoiceCount: number }>();
-      for (const c of VENDOR_CATEGORIES) byCategory.set(c.value, { spendCents: 0, invoiceCount: 0 });
+      for (const c of VENDOR_CATEGORIES)
+        byCategory.set(c.value, { spendCents: 0, invoiceCount: 0 });
 
       for (const inv of invoicesRes.data ?? []) {
         if (!inv.vendor_id) continue;

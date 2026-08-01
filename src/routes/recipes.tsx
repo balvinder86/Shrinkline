@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { Pencil, Plus, Search, Sparkles, Trash2, Zap } from "lucide-react";
+import { FileUp, Pencil, Plus, Search, Sparkles, Trash2, Zap } from "lucide-react";
 
 import { Topbar } from "@/components/dashboard/Topbar";
 import { useDateRange } from "@/lib/date-range-context";
@@ -23,11 +23,15 @@ import {
   useAddPrepRecipeLine,
   useDeletePrepRecipeLine,
   useGenerateRecipe,
+  useUploadRecipeDoc,
+  useEnqueueRecipeImport,
+  useCheckRecipeImport,
   type RecipeLine,
   type PrepRecipe,
   type PrepRecipeLine,
   type GeneratedRecipe,
   type GeneratedRecipeLine,
+  type RecipeImportDraft,
 } from "@/lib/boh/queries";
 import { quadrant, QUAD_COLOR, formatItemPrice } from "@/lib/boh/menuEngineering";
 import { classifyMenuItemCategory, CATEGORIES } from "@/lib/boh/menu-category";
@@ -107,6 +111,29 @@ function tagDraftLines(lines: GeneratedRecipeLine[]): DraftLine[] {
   return lines.map((line) => ({ ...line, _key: crypto.randomUUID() }));
 }
 
+// Same "stable key, not array index" reasoning as DraftLine above,
+// one level up — a whole recipe found in an imported doc gets removed
+// from this list as it's resolved (attached to a real item, created
+// as a new prep recipe, or skipped).
+type ImportRecipeDraft = RecipeImportDraft & { _key: string };
+function tagImportRecipes(recipes: RecipeImportDraft[]): ImportRecipeDraft[] {
+  return recipes.map((r) => ({ ...r, _key: crypto.randomUUID() }));
+}
+
+type InFlightImport = {
+  id: string;
+  fileName: string;
+  status: "pending" | "processing" | "ready" | "failed";
+  // Mutated in place as recipes get resolved/skipped, so reopening
+  // "Review" on the same import later shows only what's left — the
+  // source data itself is never re-fetched or re-processed.
+  recipes: ImportRecipeDraft[] | null;
+  error: string | null;
+};
+
+const NEW_PREP_RECIPE_TARGET = "__new_prep_recipe__";
+const SKIP_TARGET = "__skip__";
+
 function RecipesPage() {
   const { item: deepLinkItemId } = Route.useSearch();
   const { dateRange } = useDateRange();
@@ -126,6 +153,115 @@ function RecipesPage() {
   const [itemQuery, setItemQuery] = useState("");
   const [unpricedOnly, setUnpricedOnly] = useState(false);
   const [prepQuery, setPrepQuery] = useState("");
+
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [inFlightImports, setInFlightImports] = useState<InFlightImport[]>([]);
+  const [reviewingImportId, setReviewingImportId] = useState<string | null>(null);
+  const uploadRecipeDoc = useUploadRecipeDoc();
+  const enqueueRecipeImport = useEnqueueRecipeImport();
+  const checkRecipeImport = useCheckRecipeImport();
+  const createPrepRecipeForImport = useCreatePrepRecipe();
+  const reviewingImport = inFlightImports.find((i) => i.id === reviewingImportId) ?? null;
+
+  // Same self-rescheduling setTimeout poll already proven for invoice
+  // OCR (src/routes/invoices.tsx) — re-arms on every state change as
+  // long as something is still pending/processing, stops the instant
+  // every in-flight import has settled.
+  useEffect(() => {
+    const active = inFlightImports.filter(
+      (i) => i.status === "pending" || i.status === "processing",
+    );
+    if (active.length === 0) return;
+    let cancelled = false;
+    const t = setTimeout(async () => {
+      const results = await Promise.all(
+        active.map((i) =>
+          checkRecipeImport
+            .mutateAsync(i.id)
+            .then((r) => ({ id: i.id, r }))
+            .catch(() => ({ id: i.id, r: null })),
+        ),
+      );
+      if (cancelled) return;
+      setInFlightImports((prev) =>
+        prev.map((i) => {
+          const found = results.find((x) => x.id === i.id);
+          if (!found?.r) return i;
+          const recipes = found.r.result?.recipes
+            ? tagImportRecipes(found.r.result.recipes)
+            : i.recipes;
+          return { ...i, status: found.r.status, recipes, error: found.r.error ?? null };
+        }),
+      );
+    }, 3000);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inFlightImports]);
+
+  async function handleImportFiles(files: FileList) {
+    for (const file of Array.from(files)) {
+      try {
+        const id = await uploadRecipeDoc.mutateAsync(file);
+        setInFlightImports((prev) => [
+          ...prev,
+          { id, fileName: file.name, status: "pending", recipes: null, error: null },
+        ]);
+        await enqueueRecipeImport.mutateAsync(id);
+        setInFlightImports((prev) =>
+          prev.map((i) => (i.id === id ? { ...i, status: "processing" } : i)),
+        );
+      } catch (e) {
+        setInFlightImports((prev) => [
+          ...prev,
+          {
+            id: crypto.randomUUID(),
+            fileName: file.name,
+            status: "failed",
+            recipes: null,
+            error: e instanceof Error ? e.message : "Upload failed",
+          },
+        ]);
+      }
+    }
+  }
+
+  function removeResolvedImportRecipe(importId: string, key: string) {
+    setInFlightImports((prev) =>
+      prev.map((i) =>
+        i.id === importId ? { ...i, recipes: (i.recipes ?? []).filter((r) => r._key !== key) } : i,
+      ),
+    );
+  }
+
+  function resolveImportRecipeToMenuItem(
+    importId: string,
+    recipe: ImportRecipeDraft,
+    posId: string,
+  ) {
+    setPendingDrafts((prev) => ({ ...prev, [posId]: tagDraftLines(recipe.lines) }));
+    removeResolvedImportRecipe(importId, recipe._key);
+    setReviewingImportId(null);
+    setActiveTab("items");
+    setSelectedItemId(posId);
+  }
+
+  async function resolveImportRecipeToNewPrepRecipe(
+    importId: string,
+    recipe: ImportRecipeDraft,
+    name: string,
+    yieldQty: number,
+    yieldUnit: string,
+  ) {
+    const newId = await createPrepRecipeForImport.mutateAsync({ name, yieldQty, yieldUnit });
+    setPendingDrafts((prev) => ({ ...prev, [newId]: tagDraftLines(recipe.lines) }));
+    removeResolvedImportRecipe(importId, recipe._key);
+    setReviewingImportId(null);
+    setActiveTab("prep");
+    setSelectedPrepId(newId);
+  }
 
   // A deep link from Product Mix's "Edit recipe" button lands here
   // with the item pre-selected, regardless of which tab was last open.
@@ -313,6 +449,15 @@ function RecipesPage() {
                     {batchGenerate.isPending
                       ? "Generating…"
                       : `Generate recipes for unpriced items (${unpricedItemIds.length})`}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-2"
+                    onClick={() => setImportDialogOpen(true)}
+                  >
+                    <FileUp className="h-3.5 w-3.5" />
+                    Import from Word/PDF
                   </Button>
                 </div>
               </div>
@@ -652,6 +797,113 @@ function RecipesPage() {
         </DialogContent>
       </Dialog>
 
+      <Dialog
+        open={importDialogOpen}
+        onOpenChange={(o) => {
+          setImportDialogOpen(o);
+        }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="font-serif text-2xl">Import from Word/PDF</DialogTitle>
+            <DialogDescription>
+              Upload recipe docs (.pdf, .docx up to 20 pages) — Claude finds every recipe in each
+              one and matches it to a real menu item or prep recipe. Nothing is added anywhere until
+              you review it.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <Input
+              type="file"
+              accept=".pdf,.docx"
+              multiple
+              onChange={(e) => {
+                if (e.target.files && e.target.files.length > 0) {
+                  handleImportFiles(e.target.files);
+                  e.target.value = "";
+                }
+              }}
+            />
+            {inFlightImports.length > 0 && (
+              <div className="max-h-[40vh] space-y-1 overflow-y-auto">
+                {inFlightImports.map((imp) => (
+                  <div
+                    key={imp.id}
+                    className="flex items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm"
+                  >
+                    <span className="min-w-0 truncate">{imp.fileName}</span>
+                    {imp.status === "ready" ? (
+                      (imp.recipes?.length ?? 0) === 0 ? (
+                        <span className="shrink-0 text-xs text-muted-foreground">All reviewed</span>
+                      ) : (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="shrink-0"
+                          onClick={() => {
+                            setImportDialogOpen(false);
+                            setReviewingImportId(imp.id);
+                          }}
+                        >
+                          Review ({imp.recipes?.length ?? 0})
+                        </Button>
+                      )
+                    ) : imp.status === "failed" ? (
+                      <span className="shrink-0 text-xs text-destructive" title={imp.error ?? ""}>
+                        Failed
+                      </span>
+                    ) : (
+                      <span className="shrink-0 text-xs text-muted-foreground">Processing…</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!reviewingImport} onOpenChange={(o) => !o && setReviewingImportId(null)}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="font-serif text-2xl">Review imported recipes</DialogTitle>
+            <DialogDescription>
+              {reviewingImport?.fileName} — pick where each recipe goes, or skip it. Its lines still
+              need their own review once you get there.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[60vh] space-y-2 overflow-y-auto">
+            {(reviewingImport?.recipes ?? []).length === 0 ? (
+              <p className="py-6 text-center text-sm text-muted-foreground">
+                All recipes from this file have been reviewed.
+              </p>
+            ) : (
+              (reviewingImport?.recipes ?? []).map((r) => (
+                <ImportRecipeRow
+                  key={r._key}
+                  recipe={r}
+                  items={items}
+                  creating={createPrepRecipeForImport.isPending}
+                  onResolveToMenuItem={(posId) =>
+                    resolveImportRecipeToMenuItem(reviewingImport!.id, r, posId)
+                  }
+                  onResolveToNewPrepRecipe={(name, yieldQty, yieldUnit) =>
+                    resolveImportRecipeToNewPrepRecipe(
+                      reviewingImport!.id,
+                      r,
+                      name,
+                      yieldQty,
+                      yieldUnit,
+                    )
+                  }
+                  onSkip={() => removeResolvedImportRecipe(reviewingImport!.id, r._key)}
+                />
+              ))
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <Sheet open={!!selectedPrepId} onOpenChange={(o) => !o && setSelectedPrepId(null)}>
         <SheetContent className="w-full sm:max-w-lg overflow-y-auto">
           {selectedPrepId && (
@@ -659,6 +911,7 @@ function RecipesPage() {
               key={selectedPrepId}
               prepRecipeId={selectedPrepId}
               prepRecipe={prepRecipes.find((p) => p.id === selectedPrepId) ?? null}
+              initialDraftLines={pendingDrafts[selectedPrepId]}
               onDeleted={() => setSelectedPrepId(null)}
             />
           )}
@@ -821,6 +1074,144 @@ function NewPrepRecipeDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// ---------- Bulk recipe import review ----------
+// One row per recipe Claude found in an uploaded doc. Resolving it
+// (attach to a real item, create as a new prep recipe, or skip) just
+// hands the raw lines back up to RecipesPage, which seeds them into
+// the same pendingDrafts state the AI generator/quick-match already
+// use — the actual line-by-line review happens in the familiar
+// MenuItemRecipeSheet/PrepRecipeSheet flow, not here.
+function ImportRecipeRow({
+  recipe,
+  items,
+  creating,
+  onResolveToMenuItem,
+  onResolveToNewPrepRecipe,
+  onSkip,
+}: {
+  recipe: ImportRecipeDraft;
+  items: RealMenuItem[];
+  creating: boolean;
+  onResolveToMenuItem: (posId: string) => void;
+  onResolveToNewPrepRecipe: (name: string, yieldQty: number, yieldUnit: string) => void;
+  onSkip: () => void;
+}) {
+  const defaultChoice =
+    recipe.targetKind === "menu_item" && recipe.matchedMenuItemPosId
+      ? recipe.matchedMenuItemPosId
+      : recipe.targetKind === "prep_recipe"
+        ? NEW_PREP_RECIPE_TARGET
+        : SKIP_TARGET;
+  const [choice, setChoice] = useState(defaultChoice);
+  const [prepName, setPrepName] = useState(recipe.proposedName);
+  const [prepYieldQty, setPrepYieldQty] = useState("1");
+  const [prepYieldUnit, setPrepYieldUnit] = useState("each");
+  const [prepCustomYieldUnit, setPrepCustomYieldUnit] = useState("");
+  const isCustomPrepYieldUnit = prepYieldUnit === OTHER_YIELD_UNIT;
+  const resolvedPrepYieldUnit = isCustomPrepYieldUnit ? prepCustomYieldUnit.trim() : prepYieldUnit;
+  const isNewPrepChoice = choice === NEW_PREP_RECIPE_TARGET;
+  const isSkipChoice = choice === SKIP_TARGET;
+
+  return (
+    <div className="space-y-2 rounded-md border p-3">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="truncate text-sm font-medium">{recipe.proposedName}</div>
+          <div className="text-xs text-muted-foreground">
+            {recipe.lines.length} line{recipe.lines.length === 1 ? "" : "s"} found
+          </div>
+        </div>
+        <button
+          type="button"
+          className="shrink-0 text-xs text-muted-foreground hover:underline"
+          onClick={onSkip}
+        >
+          Skip
+        </button>
+      </div>
+
+      <Select value={choice} onValueChange={setChoice}>
+        <SelectTrigger className="h-8">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {items.map((item) => (
+            <SelectItem key={item.id} value={item.id}>
+              {item.name}
+            </SelectItem>
+          ))}
+          <SelectItem value={NEW_PREP_RECIPE_TARGET}>New prep recipe…</SelectItem>
+          <SelectItem value={SKIP_TARGET}>Skip</SelectItem>
+        </SelectContent>
+      </Select>
+
+      {isNewPrepChoice && (
+        <div className="space-y-2 rounded-md bg-muted/20 p-2">
+          <Input
+            value={prepName}
+            onChange={(e) => setPrepName(e.target.value)}
+            placeholder="Prep recipe name"
+            className="h-8"
+          />
+          <div className="flex gap-1.5">
+            <Input
+              type="number"
+              step="0.01"
+              min="0"
+              value={prepYieldQty}
+              onChange={(e) => setPrepYieldQty(e.target.value)}
+              placeholder="yield"
+              className="h-8 w-20"
+            />
+            <Select value={prepYieldUnit} onValueChange={setPrepYieldUnit}>
+              <SelectTrigger className="h-8 flex-1">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {PREP_YIELD_UNITS.map((u) => (
+                  <SelectItem key={u.value} value={u.value}>
+                    {u.label}
+                  </SelectItem>
+                ))}
+                <SelectItem value={OTHER_YIELD_UNIT}>Other…</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          {isCustomPrepYieldUnit && (
+            <Input
+              value={prepCustomYieldUnit}
+              onChange={(e) => setPrepCustomYieldUnit(e.target.value)}
+              placeholder="e.g. keg, batch"
+              className="h-8"
+            />
+          )}
+        </div>
+      )}
+
+      <Button
+        size="sm"
+        className="w-full"
+        disabled={
+          isSkipChoice ||
+          creating ||
+          (isNewPrepChoice && (!prepName.trim() || !resolvedPrepYieldUnit))
+        }
+        onClick={() => {
+          if (isNewPrepChoice) {
+            const qty = parseFloat(prepYieldQty);
+            if (!Number.isFinite(qty) || qty <= 0 || !resolvedPrepYieldUnit) return;
+            onResolveToNewPrepRecipe(prepName.trim(), qty, resolvedPrepYieldUnit);
+          } else if (!isSkipChoice) {
+            onResolveToMenuItem(choice);
+          }
+        }}
+      >
+        {creating ? "Creating…" : isNewPrepChoice ? "Create & review lines →" : "Review lines →"}
+      </Button>
+    </div>
   );
 }
 
@@ -1058,7 +1449,7 @@ function MenuItemRecipeSheet({
             </button>
           </div>
           <GeneratedRecipeReview
-            menuItemPosId={item.id}
+            target={{ kind: "menu_item", menuItemPosId: item.id }}
             lines={draftLines}
             ingredients={ingredients}
             prepRecipes={prepRecipes}
@@ -1094,10 +1485,12 @@ function MenuItemRecipeSheet({
 function PrepRecipeSheet({
   prepRecipeId,
   prepRecipe,
+  initialDraftLines,
   onDeleted,
 }: {
   prepRecipeId: string;
   prepRecipe: PrepRecipe | null;
+  initialDraftLines?: DraftLine[];
   onDeleted: () => void;
 }) {
   const { data: lines = [], isLoading } = usePrepRecipeLinesFor(prepRecipeId);
@@ -1112,6 +1505,7 @@ function PrepRecipeSheet({
   const deletePrepRecipe = useDeletePrepRecipe();
   const updatePrepRecipe = useUpdatePrepRecipe();
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [draftLines, setDraftLines] = useState<DraftLine[] | null>(initialDraftLines ?? null);
 
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState(prepRecipe?.name ?? "");
@@ -1282,6 +1676,31 @@ function PrepRecipeSheet({
           deletePending={deleteLine.isPending}
         />
       </div>
+
+      {draftLines != null && (
+        <div className="mt-4">
+          <div className="mb-2 flex items-center justify-between">
+            <div className="flex items-center gap-1.5 text-xs uppercase tracking-widest text-muted-foreground">
+              <Sparkles className="h-3.5 w-3.5" /> Imported — review before adding
+            </div>
+            <button
+              className="text-xs text-muted-foreground hover:underline"
+              onClick={() => setDraftLines(null)}
+            >
+              Dismiss
+            </button>
+          </div>
+          <GeneratedRecipeReview
+            target={{ kind: "prep_recipe", prepRecipeId }}
+            lines={draftLines}
+            ingredients={ingredients}
+            prepRecipes={allPrepRecipes}
+            onLineResolved={(key) =>
+              setDraftLines((cur) => (cur ? cur.filter((l) => l._key !== key) : cur))
+            }
+          />
+        </div>
+      )}
 
       <AddLineForm
         ingredients={ingredients}
@@ -1489,20 +1908,36 @@ function AddLineForm({
 // same useAddRecipeLine mutation manual entry uses. Dismissing a line
 // (or the whole draft) just drops it from local React state.
 
+// Reviewing a draft can commit into either a menu item's own recipe
+// or a prep recipe's own sub-ingredient list — same review row either
+// way, just a different mutation (and, for a prep recipe target, the
+// sub-recipe key is subPrepRecipeId, not prepRecipeId, since
+// prepRecipeId here already names the OWNING recipe).
+type DraftTarget =
+  | { kind: "menu_item"; menuItemPosId: string }
+  | { kind: "prep_recipe"; prepRecipeId: string };
+
 function GeneratedRecipeReview({
-  menuItemPosId,
+  target,
   lines,
   ingredients,
   prepRecipes,
   onLineResolved,
 }: {
-  menuItemPosId: string;
+  target: DraftTarget;
   lines: DraftLine[];
   ingredients: { id: string; name: string; unit: string }[];
   prepRecipes: PrepRecipe[];
   onLineResolved: (key: string) => void;
 }) {
-  const addLine = useAddRecipeLine();
+  const addRecipeLine = useAddRecipeLine();
+  const addPrepRecipeLine = useAddPrepRecipeLine();
+  // A prep recipe can't reference itself as one of its own lines —
+  // mirrors PrepRecipeSheet's own availableSubRecipes filter.
+  const availablePrepRecipes =
+    target.kind === "prep_recipe"
+      ? prepRecipes.filter((p) => p.id !== target.prepRecipeId)
+      : prepRecipes;
 
   if (lines.length === 0) {
     return (
@@ -1526,21 +1961,37 @@ function GeneratedRecipeReview({
             key={line._key}
             line={line}
             ingredients={ingredients}
-            prepRecipes={prepRecipes}
-            pending={addLine.isPending}
-            onAdd={(target, quantity, unit) =>
-              addLine.mutate(
-                {
-                  menuItemPosId,
-                  quantity,
-                  unit,
-                  ...(target.kind === "ingredient"
-                    ? { ingredientId: target.id }
-                    : { prepRecipeId: target.id }),
-                } as Parameters<typeof addLine.mutate>[0],
-                { onSuccess: () => onLineResolved(line._key) },
-              )
+            prepRecipes={availablePrepRecipes}
+            pending={
+              target.kind === "menu_item" ? addRecipeLine.isPending : addPrepRecipeLine.isPending
             }
+            onAdd={(lineTarget, quantity, unit) => {
+              if (target.kind === "menu_item") {
+                addRecipeLine.mutate(
+                  {
+                    menuItemPosId: target.menuItemPosId,
+                    quantity,
+                    unit,
+                    ...(lineTarget.kind === "ingredient"
+                      ? { ingredientId: lineTarget.id }
+                      : { prepRecipeId: lineTarget.id }),
+                  } as Parameters<typeof addRecipeLine.mutate>[0],
+                  { onSuccess: () => onLineResolved(line._key) },
+                );
+              } else {
+                addPrepRecipeLine.mutate(
+                  {
+                    prepRecipeId: target.prepRecipeId,
+                    quantity,
+                    unit,
+                    ...(lineTarget.kind === "ingredient"
+                      ? { ingredientId: lineTarget.id }
+                      : { subPrepRecipeId: lineTarget.id }),
+                  } as Parameters<typeof addPrepRecipeLine.mutate>[0],
+                  { onSuccess: () => onLineResolved(line._key) },
+                );
+              }
+            }}
             onDismiss={() => onLineResolved(line._key)}
           />
         ),
