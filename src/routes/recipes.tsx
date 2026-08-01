@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { Plus, Search, Sparkles, Trash2, Zap } from "lucide-react";
+import { Pencil, Plus, Search, Sparkles, Trash2, Zap } from "lucide-react";
 
 import { Topbar } from "@/components/dashboard/Topbar";
 import { useDateRange } from "@/lib/date-range-context";
@@ -17,6 +17,7 @@ import {
   useDeleteRecipeLine,
   usePrepRecipes,
   useCreatePrepRecipe,
+  useUpdatePrepRecipe,
   useDeletePrepRecipe,
   usePrepRecipeLinesFor,
   useAddPrepRecipeLine,
@@ -202,8 +203,13 @@ function RecipesPage() {
   // guessed at; the summary reports how many that leaves out.
   function runQuickMatch() {
     const results: GeneratedRecipe[] = [];
+    const prepRecipeNames = prepRecipes.map((p) => p.name);
     for (const item of quickMatchItems) {
-      const lines = matchBeverageLine({ name: item.name, category: item.category }, allIngredients);
+      const lines = matchBeverageLine(
+        { name: item.name, category: item.category },
+        allIngredients,
+        prepRecipeNames,
+      );
       if (lines.length > 0) results.push({ menuItemPosId: item.id, lines });
     }
     const drafts: Record<string, DraftLine[]> = {};
@@ -650,6 +656,7 @@ function RecipesPage() {
         <SheetContent className="w-full sm:max-w-lg overflow-y-auto">
           {selectedPrepId && (
             <PrepRecipeSheet
+              key={selectedPrepId}
               prepRecipeId={selectedPrepId}
               prepRecipe={prepRecipes.find((p) => p.id === selectedPrepId) ?? null}
               onDeleted={() => setSelectedPrepId(null)}
@@ -1103,7 +1110,26 @@ function PrepRecipeSheet({
   const addLine = useAddPrepRecipeLine();
   const deleteLine = useDeletePrepRecipeLine();
   const deletePrepRecipe = useDeletePrepRecipe();
+  const updatePrepRecipe = useUpdatePrepRecipe();
   const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  const [isEditing, setIsEditing] = useState(false);
+  const [editName, setEditName] = useState(prepRecipe?.name ?? "");
+  const [editYieldQty, setEditYieldQty] = useState(String(prepRecipe?.yieldQty ?? ""));
+  const [editYieldUnit, setEditYieldUnit] = useState(prepRecipe?.yieldUnit ?? "each");
+  const [editCustomYieldUnit, setEditCustomYieldUnit] = useState("");
+  const isCustomEditYieldUnit = editYieldUnit === OTHER_YIELD_UNIT;
+  const resolvedEditYieldUnit = isCustomEditYieldUnit ? editCustomYieldUnit.trim() : editYieldUnit;
+
+  const startEditing = () => {
+    if (!prepRecipe) return;
+    setEditName(prepRecipe.name);
+    setEditYieldQty(String(prepRecipe.yieldQty));
+    const knownUnit = PREP_YIELD_UNITS.some((u) => u.value === prepRecipe.yieldUnit);
+    setEditYieldUnit(knownUnit ? prepRecipe.yieldUnit : OTHER_YIELD_UNIT);
+    setEditCustomYieldUnit(knownUnit ? "" : prepRecipe.yieldUnit);
+    setIsEditing(true);
+  };
 
   const linesAsRecipeLines: RecipeLine[] = lines.map((l) => ({
     id: l.id,
@@ -1120,12 +1146,100 @@ function PrepRecipeSheet({
 
   return (
     <>
-      <SheetHeader>
-        <SheetTitle className="font-serif text-2xl">{prepRecipe?.name ?? "Prep recipe"}</SheetTitle>
-        <SheetDescription>
-          Yields {prepRecipe?.yieldQty} {prepRecipe?.yieldUnit}
-        </SheetDescription>
-      </SheetHeader>
+      {isEditing ? (
+        <div className="space-y-3 rounded-xl border p-4">
+          <div>
+            <Label htmlFor="prep-edit-name">Name</Label>
+            <Input
+              id="prep-edit-name"
+              value={editName}
+              onChange={(e) => setEditName(e.target.value)}
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label htmlFor="prep-edit-yield-qty">Yield quantity</Label>
+              <Input
+                id="prep-edit-yield-qty"
+                type="number"
+                step="0.01"
+                min="0"
+                value={editYieldQty}
+                onChange={(e) => setEditYieldQty(e.target.value)}
+              />
+            </div>
+            <div>
+              <Label htmlFor="prep-edit-yield-unit">Yield unit</Label>
+              <Select value={editYieldUnit} onValueChange={setEditYieldUnit}>
+                <SelectTrigger id="prep-edit-yield-unit">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {PREP_YIELD_UNITS.map((u) => (
+                    <SelectItem key={u.value} value={u.value}>
+                      {u.label}
+                    </SelectItem>
+                  ))}
+                  <SelectItem value={OTHER_YIELD_UNIT}>Other…</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          {isCustomEditYieldUnit && (
+            <div>
+              <Label htmlFor="prep-edit-yield-unit-custom">Custom unit</Label>
+              <Input
+                id="prep-edit-yield-unit-custom"
+                value={editCustomYieldUnit}
+                onChange={(e) => setEditCustomYieldUnit(e.target.value)}
+                placeholder="e.g. keg, batch"
+              />
+            </div>
+          )}
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              disabled={!editName.trim() || !resolvedEditYieldUnit || updatePrepRecipe.isPending}
+              onClick={() => {
+                const qty = parseFloat(editYieldQty);
+                if (!Number.isFinite(qty) || qty <= 0 || !resolvedEditYieldUnit) return;
+                updatePrepRecipe.mutate(
+                  {
+                    id: prepRecipeId,
+                    name: editName.trim(),
+                    yieldQty: qty,
+                    yieldUnit: resolvedEditYieldUnit,
+                  },
+                  { onSuccess: () => setIsEditing(false) },
+                );
+              }}
+            >
+              {updatePrepRecipe.isPending ? "Saving…" : "Save"}
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => setIsEditing(false)}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <SheetHeader className="pr-8">
+          <SheetTitle className="font-serif text-2xl">
+            {prepRecipe?.name ?? "Prep recipe"}
+          </SheetTitle>
+          <SheetDescription className="flex items-center gap-2">
+            <span>
+              Yields {prepRecipe?.yieldQty} {prepRecipe?.yieldUnit}
+            </span>
+            <button
+              type="button"
+              className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+              onClick={startEditing}
+            >
+              <Pencil className="h-3 w-3" /> Edit
+            </button>
+          </SheetDescription>
+        </SheetHeader>
+      )}
 
       <div className="mt-4 rounded-xl border bg-muted/20 p-4 text-sm">
         {prepRecipe?.costPerYieldUnitCents != null ? (
@@ -1309,7 +1423,24 @@ function AddLineForm({
         ))}
       </div>
       <div className="flex items-center gap-2">
-        <Select value={targetId} onValueChange={setTargetId}>
+        <Select
+          value={targetId}
+          onValueChange={(id) => {
+            setTargetId(id);
+            // A prep recipe's own yield is a reasonable starting guess
+            // for "how much of it goes into one serving" — most
+            // house-made batches (a lemonade batch, a single sauce
+            // portion) are sized to yield exactly one serving. Only
+            // pre-fills an empty box, and it's still fully editable —
+            // this is a default, not a locked-in answer, since a
+            // bigger batch used across several servings needs a
+            // different number here.
+            if (mode === "prep" && quantity.trim() === "") {
+              const prep = prepRecipes.find((p) => p.id === id);
+              if (prep) setQuantity(String(prep.yieldQty));
+            }
+          }}
+        >
           <SelectTrigger className="h-8 flex-1">
             <SelectValue
               placeholder={mode === "ingredient" ? "Add ingredient…" : "Add prep recipe…"}

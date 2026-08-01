@@ -151,13 +151,20 @@ function findIngredientMatch(
 
 // Proposes at most one draft recipe line per item. Returns an empty
 // array when the item looks poured/mixed, no ingredient matches
-// cleanly, or the matched ingredient is tracked in a bulk unit (case,
-// keg) that can't stand in for "one serving."
+// cleanly, the matched ingredient is tracked in a bulk unit (case,
+// keg) that can't stand in for "one serving," or a prep recipe with
+// the same name exists — a same-named house-made batch ("Lemonade"
+// the prep recipe vs. "Lemonade" a purchased ingredient) is exactly
+// the ambiguous case a name-only matcher can't safely resolve on its
+// own, so it's left for manual review rather than guessing the
+// purchased ingredient.
 export function matchBeverageLine(
   item: MatchableItem,
   ingredients: MatchableIngredient[],
+  prepRecipeNames: string[] = [],
 ): GeneratedRecipeLine[] {
   if (containsSignal(`${item.name} ${item.category}`, POURED_SIGNAL_KEYWORDS)) return [];
+  if (prepRecipeNames.some((name) => isCleanMatch(item.name, name))) return [];
 
   const drinkIngredients = ingredients.filter(
     (ing) => ing.category === "Alcohol" || ing.category === "Beverages",
