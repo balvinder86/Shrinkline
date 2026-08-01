@@ -3,7 +3,6 @@ import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useProductMix,
-  useUpdateItemCost,
   useOrderCount,
   useLastSyncTime,
   useOrderDetails,
@@ -135,7 +134,6 @@ function ProductMixPage() {
   const { data: orderCount = 0 } = useOrderCount(dateRange);
   const { data: orderDetails, isLoading: isOrderDetailsLoading } = useOrderDetails(dateRange);
   const { data: itemTrend, isLoading: isTrendLoading } = useItemTrend(dateRange, 5);
-  const updateCost = useUpdateItemCost();
 
   // Same top-N items and per-item colors as the velocity line chart
   // above it — just summed across the whole period instead of broken
@@ -826,9 +824,14 @@ function ProductMixPage() {
                             ))}
                           </Pie>
                           <Tooltip
-                            formatter={(_v: number, _n: string, item: { payload?: { value: number; revenue: number } }) =>
-                              [`${usd(item.payload?.revenue ?? 0)} · ${(item.payload?.value ?? 0).toLocaleString()} sold`, ""]
-                            }
+                            formatter={(
+                              _v: number,
+                              _n: string,
+                              item: { payload?: { value: number; revenue: number } },
+                            ) => [
+                              `${usd(item.payload?.revenue ?? 0)} · ${(item.payload?.value ?? 0).toLocaleString()} sold`,
+                              "",
+                            ]}
                             contentStyle={{
                               background: "hsl(var(--background))",
                               border: "1px solid hsl(var(--border))",
@@ -885,36 +888,18 @@ function ProductMixPage() {
               <div className="mt-6 space-y-5">
                 <div>
                   <div className="mb-2 flex items-center justify-between">
-                    <div className="text-xs uppercase tracking-widest text-muted-foreground">Recipe</div>
+                    <div className="text-xs uppercase tracking-widest text-muted-foreground">
+                      Recipe
+                    </div>
                     <Link
                       to="/recipes"
                       search={{ item: selected.id }}
                       className="text-xs font-medium text-primary hover:underline"
                     >
-                      Edit recipe →
+                      Edit recipe, cost & category →
                     </Link>
                   </div>
                   <RecipeSummary menuItemPosId={selected.id} />
-                </div>
-                <div>
-                  <div className="text-xs uppercase tracking-widest text-muted-foreground mb-2">
-                    Cost per unit{" "}
-                    {selected.cost != null && (
-                      <span className="normal-case">(fallback if no recipe)</span>
-                    )}
-                  </div>
-                  <CostEditor
-                    key={selected.id}
-                    item={selected}
-                    saving={updateCost.isPending}
-                    onSave={(cents) =>
-                      updateCost.mutate({
-                        locationId: selected.locationId,
-                        posId: selected.id,
-                        costCents: cents,
-                      })
-                    }
-                  />
                 </div>
                 <div className="grid grid-cols-3 gap-3">
                   <Stat
@@ -953,7 +938,13 @@ function ProductMixPage() {
                         {selected.price - selected.cost >= marginMedian ? "above" : "below"} median.
                       </>
                     ) : (
-                      <>Add a cost above to classify this item.</>
+                      <>
+                        Add a cost on the{" "}
+                        <Link to="/recipes" search={{ item: selected.id }} className="underline">
+                          Recipes page
+                        </Link>{" "}
+                        to classify this item.
+                      </>
                     )}
                   </div>
                 </div>
@@ -1055,7 +1046,8 @@ function RecipeSummary({ menuItemPosId }: { menuItemPosId: string }) {
     if (lines.length === 0) return null;
     let sum = 0;
     for (const l of lines) {
-      const lineCost = l.ingredientId != null ? l.ingredientCostCents : l.prepRecipeCostPerYieldUnitCents;
+      const lineCost =
+        l.ingredientId != null ? l.ingredientCostCents : l.prepRecipeCostPerYieldUnitCents;
       if (lineCost == null) return null;
       sum += l.quantity * lineCost;
     }
@@ -1064,7 +1056,9 @@ function RecipeSummary({ menuItemPosId }: { menuItemPosId: string }) {
 
   if (isLoading) return <p className="text-sm text-muted-foreground">Loading…</p>;
   if (lines.length === 0)
-    return <p className="text-sm text-muted-foreground">No recipe yet — add one on the Recipes page.</p>;
+    return (
+      <p className="text-sm text-muted-foreground">No recipe yet — add one on the Recipes page.</p>
+    );
 
   return (
     <div className="rounded-md border divide-y">
@@ -1077,7 +1071,9 @@ function RecipeSummary({ menuItemPosId }: { menuItemPosId: string }) {
             <div>
               <div>
                 {name}
-                {isPrep && <span className="ml-1.5 text-xs text-muted-foreground">(prep recipe)</span>}
+                {isPrep && (
+                  <span className="ml-1.5 text-xs text-muted-foreground">(prep recipe)</span>
+                )}
               </div>
               <div className="text-xs text-muted-foreground">
                 {l.quantity} {l.unit}
@@ -1093,46 +1089,6 @@ function RecipeSummary({ menuItemPosId }: { menuItemPosId: string }) {
           <span>${(totalCents / 100).toFixed(2)}</span>
         </div>
       )}
-    </div>
-  );
-}
-
-// Toast doesn't expose item cost via the Orders/Menus API, so margin
-// needs a manually-entered cost per item — this writes it straight to
-// menu_items.cost_cents (RLS-scoped to the signed-in user's restaurant).
-function CostEditor({
-  item,
-  onSave,
-  saving,
-}: {
-  item: MenuItem;
-  onSave: (cents: number | null) => void;
-  saving: boolean;
-}) {
-  const [value, setValue] = useState(item.cost != null ? item.cost.toFixed(2) : "");
-  return (
-    <div className="flex items-center gap-2">
-      <span className="text-sm text-muted-foreground">$</span>
-      <Input
-        type="number"
-        step="0.01"
-        min="0"
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        className="h-8 w-24"
-        placeholder="0.00"
-      />
-      <Button
-        size="sm"
-        variant="outline"
-        disabled={saving}
-        onClick={() => {
-          const num = parseFloat(value);
-          onSave(Number.isFinite(num) && num >= 0 ? Math.round(num * 100) : null);
-        }}
-      >
-        {saving ? "Saving…" : "Save cost"}
-      </Button>
     </div>
   );
 }

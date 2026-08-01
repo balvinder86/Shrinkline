@@ -21,7 +21,9 @@ export async function fetchRecipeCostContext(locationIds: string[]) {
   const [recipeLinesRes, prepRecipeLinesRes, prepRecipesRes] = await Promise.all([
     supabase
       .from("recipe_lines")
-      .select("menu_item_pos_id, ingredient_id, prep_recipe_id, quantity, ingredients (unit_cost_cents)")
+      .select(
+        "menu_item_pos_id, ingredient_id, prep_recipe_id, quantity, ingredients (unit_cost_cents)",
+      )
       .in("location_id", locationIds),
     // prep_recipe_lines has two FKs into prep_recipes (the owning
     // recipe via prep_recipe_id, and the referenced sub-recipe via
@@ -61,10 +63,12 @@ export async function fetchRecipeCostContext(locationIds: string[]) {
 
   const ingredientCostById = new Map<string, number | null>();
   for (const row of recipeLinesData) {
-    if (row.ingredient_id) ingredientCostById.set(row.ingredient_id, row.ingredients?.unit_cost_cents ?? null);
+    if (row.ingredient_id)
+      ingredientCostById.set(row.ingredient_id, row.ingredients?.unit_cost_cents ?? null);
   }
   for (const row of prepRecipeLinesData) {
-    if (row.ingredient_id) ingredientCostById.set(row.ingredient_id, row.ingredients?.unit_cost_cents ?? null);
+    if (row.ingredient_id)
+      ingredientCostById.set(row.ingredient_id, row.ingredients?.unit_cost_cents ?? null);
   }
 
   const prepRecipeLinesByPrepId = new Map<string, PrepRecipeLineRow[]>();
@@ -199,7 +203,15 @@ export type RealMenuItem = {
   id: string;
   locationId: string;
   name: string;
+  // Resolved: the manual override when one's been set, otherwise
+  // whatever Toast's own sync last wrote. Everything that filters/
+  // displays a menu item's category should use this.
   category: string;
+  // Toast's own real category, ignoring any manual override — shown
+  // in the edit UI so a reset-to-POS-value action has something real
+  // to reset to, and so it's clear when a category is manually pinned.
+  rawCategory: string;
+  categoryOverride: string | null;
   price: number;
   // True when `price` is a single, fixed real Toast catalog price. False
   // when the item has no single price and is instead priced via a Toast
@@ -247,7 +259,9 @@ export function useProductMix(range: DateRange) {
       const [menuItemsRes, currentRows, prevRows, recipeCostCtx] = await Promise.all([
         supabase
           .from("menu_items")
-          .select("pos_id, location_id, name, category, price_cents, price_is_starting_price, cost_cents")
+          .select(
+            "pos_id, location_id, name, category, category_override, price_cents, price_is_starting_price, cost_cents",
+          )
           .in("location_id", locationIds!)
           .eq("active", true),
         fetchAllRows((from, to) =>
@@ -301,7 +315,9 @@ export function useProductMix(range: DateRange) {
           id: m.pos_id,
           locationId: m.location_id,
           name: m.name,
-          category: m.category ?? "Uncategorized",
+          category: m.category_override ?? m.category ?? "Uncategorized",
+          rawCategory: m.category ?? "Uncategorized",
+          categoryOverride: m.category_override,
           price: (m.price_cents ?? 0) / 100,
           hasRealPrice: m.price_cents != null && !m.price_is_starting_price,
           cost: costCents != null ? costCents / 100 : undefined,
@@ -331,6 +347,34 @@ export function useUpdateItemCost() {
       const { error } = await supabase
         .from("menu_items")
         .update({ cost_cents: costCents })
+        .eq("location_id", locationId)
+        .eq("pos_id", posId);
+      if (error) throw error;
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["product-mix"] }),
+  });
+}
+
+// Writes to category_override, never the raw category column Toast's
+// own sync owns — see db/phase2/52_menu_item_category_override.sql
+// for why a plain overwrite of menu_items.category would get silently
+// reverted by the next real sync. Pass null to clear the override and
+// fall back to whatever Toast itself has the item categorized as.
+export function useUpdateItemCategory() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      locationId,
+      posId,
+      category,
+    }: {
+      locationId: string;
+      posId: string;
+      category: string | null;
+    }) => {
+      const { error } = await supabase
+        .from("menu_items")
+        .update({ category_override: category })
         .eq("location_id", locationId)
         .eq("pos_id", posId);
       if (error) throw error;

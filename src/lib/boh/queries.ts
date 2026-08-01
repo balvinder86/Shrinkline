@@ -151,6 +151,7 @@ export type Ingredient = {
   name: string;
   unit: string;
   unitCostCents: number | null;
+  category: string | null;
 };
 
 export function useIngredients() {
@@ -170,6 +171,7 @@ export function useIngredients() {
         name: row.name,
         unit: row.unit,
         unitCostCents: row.unit_cost_cents,
+        category: row.category,
       }));
     },
   });

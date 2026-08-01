@@ -1,10 +1,15 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { Plus, Search, Sparkles, Trash2 } from "lucide-react";
+import { Plus, Search, Sparkles, Trash2, Zap } from "lucide-react";
 
 import { Topbar } from "@/components/dashboard/Topbar";
 import { useDateRange } from "@/lib/date-range-context";
-import { useProductMix, type RealMenuItem } from "@/lib/pos/queries";
+import {
+  useProductMix,
+  useUpdateItemCategory,
+  useUpdateItemCost,
+  type RealMenuItem,
+} from "@/lib/pos/queries";
 import {
   useIngredients,
   useRecipeLinesForItem,
@@ -25,15 +30,35 @@ import {
 } from "@/lib/boh/queries";
 import { quadrant, QUAD_COLOR, formatItemPrice } from "@/lib/boh/menuEngineering";
 import { classifyMenuItemCategory, CATEGORIES } from "@/lib/boh/menu-category";
+import { matchBeverageLine } from "@/lib/boh/beverageMatch";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import {
   Dialog,
   DialogContent,
@@ -88,9 +113,13 @@ function RecipesPage() {
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [selectedPrepId, setSelectedPrepId] = useState<string | null>(null);
   const [newPrepOpen, setNewPrepOpen] = useState(false);
-  const [batchSummary, setBatchSummary] = useState<GeneratedRecipe[] | null>(null);
+  const [batchSummary, setBatchSummary] = useState<{
+    source: "ai" | "quick";
+    results: GeneratedRecipe[];
+  } | null>(null);
   const [pendingDrafts, setPendingDrafts] = useState<Record<string, DraftLine[]>>({});
   const batchGenerate = useGenerateRecipe();
+  const { data: allIngredients = [] } = useIngredients();
 
   const [categoryTab, setCategoryTab] = useState<string>("All");
   const [itemQuery, setItemQuery] = useState("");
@@ -108,12 +137,39 @@ function RecipesPage() {
 
   const { data: items = [], isLoading } = useProductMix(dateRange);
   const { data: prepRecipes = [], isLoading: isPrepLoading } = usePrepRecipes();
-  const unpricedItemIds = useMemo(() => items.filter((i) => !i.hasRecipe).map((i) => i.id), [items]);
+  const unpricedItemIds = useMemo(
+    () => items.filter((i) => !i.hasRecipe).map((i) => i.id),
+    [items],
+  );
+  // The subset "Quick-match" targets — unpriced items this app's own
+  // taxonomy already classifies as Alcohol/Beverages. Food/dessert/
+  // misc items are left to the AI generator or manual entry, since a
+  // name-matched single ingredient can't stand in for a prepared dish.
+  const quickMatchItems = useMemo(
+    () =>
+      items.filter(
+        (i) =>
+          !i.hasRecipe &&
+          ["Alcohol", "Beverages"].includes(classifyMenuItemCategory(i.category, i.name)),
+      ),
+    [items],
+  );
+  // Every real category currently in use across the menu — offered as
+  // the edit dropdown's options so reassigning an item reuses an
+  // existing category rather than accidentally forking a near-duplicate.
+  const allItemCategories = useMemo(
+    () => Array.from(new Set(items.map((i) => i.category))).sort((a, b) => a.localeCompare(b)),
+    [items],
+  );
 
   const filteredItems = useMemo(() => {
     const q = itemQuery.trim().toLowerCase();
     return items.filter((item) => {
-      if (categoryTab !== "All" && classifyMenuItemCategory(item.category, item.name) !== categoryTab) return false;
+      if (
+        categoryTab !== "All" &&
+        classifyMenuItemCategory(item.category, item.name) !== categoryTab
+      )
+        return false;
       if (unpricedOnly && item.hasRecipe) return false;
       if (q && !item.name.toLowerCase().includes(q)) return false;
       return true;
@@ -135,13 +191,31 @@ function RecipesPage() {
     }
     const drafts: Record<string, DraftLine[]> = {};
     for (const r of results) drafts[r.menuItemPosId] = tagDraftLines(r.lines);
-    setPendingDrafts(drafts);
-    setBatchSummary(results);
+    setPendingDrafts((prev) => ({ ...prev, ...drafts }));
+    setBatchSummary({ source: "ai", results });
+  }
+
+  // Rule-based, no AI call — matches each unpriced Alcohol/Beverages
+  // item to an existing ingredient by name (see beverageMatch.ts for
+  // the exact rules). Items with no clean match, or that look poured/
+  // mixed rather than sold whole, are simply skipped rather than
+  // guessed at; the summary reports how many that leaves out.
+  function runQuickMatch() {
+    const results: GeneratedRecipe[] = [];
+    for (const item of quickMatchItems) {
+      const lines = matchBeverageLine({ name: item.name, category: item.category }, allIngredients);
+      if (lines.length > 0) results.push({ menuItemPosId: item.id, lines });
+    }
+    const drafts: Record<string, DraftLine[]> = {};
+    for (const r of results) drafts[r.menuItemPosId] = tagDraftLines(r.lines);
+    setPendingDrafts((prev) => ({ ...prev, ...drafts }));
+    setBatchSummary({ source: "quick", results });
   }
 
   function summarizeDraft(lines: GeneratedRecipeLine[]) {
     const matched = lines.filter(
-      (l) => (l.kind === "ingredient" && l.ingredientId) || (l.kind === "prep_recipe" && l.prepRecipeId),
+      (l) =>
+        (l.kind === "ingredient" && l.ingredientId) || (l.kind === "prep_recipe" && l.prepRecipeId),
     ).length;
     return { matched, flagged: lines.length - matched };
   }
@@ -207,33 +281,53 @@ function RecipesPage() {
             <Card className="overflow-hidden">
               <div className="flex flex-col gap-2 border-b p-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="text-sm text-muted-foreground">
-                  {filteredItems.length} of {items.length} items — tap one to view or edit its recipe.
+                  {filteredItems.length} of {items.length} items — tap one to view or edit its
+                  recipe.
                 </div>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="gap-2"
-                  disabled={batchGenerate.isPending || unpricedItemIds.length === 0}
-                  onClick={runBatchGenerate}
-                >
-                  <Sparkles className="h-3.5 w-3.5" />
-                  {batchGenerate.isPending
-                    ? "Generating…"
-                    : `Generate recipes for unpriced items (${unpricedItemIds.length})`}
-                </Button>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-2"
+                    disabled={quickMatchItems.length === 0}
+                    onClick={runQuickMatch}
+                    title="Matches bottled/canned beer, brand-name pours, etc. by name — no AI call, nothing added until you review it."
+                  >
+                    <Zap className="h-3.5 w-3.5" />
+                    Quick-match beverages ({quickMatchItems.length})
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-2"
+                    disabled={batchGenerate.isPending || unpricedItemIds.length === 0}
+                    onClick={runBatchGenerate}
+                  >
+                    <Sparkles className="h-3.5 w-3.5" />
+                    {batchGenerate.isPending
+                      ? "Generating…"
+                      : `Generate recipes for unpriced items (${unpricedItemIds.length})`}
+                  </Button>
+                </div>
               </div>
 
               {/* Mobile: stacked cards, no horizontal scroll/tiny text.
                   Desktop (md+): the full table. */}
               <div className="divide-y md:hidden">
                 {isLoading ? (
-                  <div className="py-8 text-center text-sm text-muted-foreground">Loading real menu items…</div>
+                  <div className="py-8 text-center text-sm text-muted-foreground">
+                    Loading real menu items…
+                  </div>
                 ) : filteredItems.length === 0 ? (
-                  <div className="py-8 text-center text-sm text-muted-foreground">No items match these filters.</div>
+                  <div className="py-8 text-center text-sm text-muted-foreground">
+                    No items match these filters.
+                  </div>
                 ) : (
                   filteredItems.map((item) => {
                     const margin =
-                      item.hasRecipe && item.cost != null && item.price > 0 ? item.price - item.cost : null;
+                      item.hasRecipe && item.cost != null && item.price > 0
+                        ? item.price - item.cost
+                        : null;
                     const marginPct = margin != null ? (margin / item.price) * 100 : null;
                     const q = quadrant(item, popMedian, marginMedian);
                     return (
@@ -291,13 +385,19 @@ function RecipesPage() {
                   <TableBody>
                     {isLoading ? (
                       <TableRow>
-                        <TableCell colSpan={6} className="py-8 text-center text-sm text-muted-foreground">
+                        <TableCell
+                          colSpan={6}
+                          className="py-8 text-center text-sm text-muted-foreground"
+                        >
                           Loading real menu items…
                         </TableCell>
                       </TableRow>
                     ) : filteredItems.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={6} className="py-8 text-center text-sm text-muted-foreground">
+                        <TableCell
+                          colSpan={6}
+                          className="py-8 text-center text-sm text-muted-foreground"
+                        >
                           No items match these filters.
                         </TableCell>
                       </TableRow>
@@ -321,15 +421,21 @@ function RecipesPage() {
                                 {item.category}
                               </Badge>
                             </TableCell>
-                            <TableCell className="text-right font-mono">{formatItemPrice(item)}</TableCell>
+                            <TableCell className="text-right font-mono">
+                              {formatItemPrice(item)}
+                            </TableCell>
                             <TableCell className="text-right font-mono text-muted-foreground">
-                              {item.hasRecipe && item.cost != null ? `$${item.cost.toFixed(2)}` : "—"}
+                              {item.hasRecipe && item.cost != null
+                                ? `$${item.cost.toFixed(2)}`
+                                : "—"}
                             </TableCell>
                             <TableCell className="text-right">
                               {margin != null ? (
                                 <>
                                   <div className="font-mono">${margin.toFixed(2)}</div>
-                                  <div className="text-xs text-muted-foreground">{marginPct!.toFixed(0)}%</div>
+                                  <div className="text-xs text-muted-foreground">
+                                    {marginPct!.toFixed(0)}%
+                                  </div>
                                 </>
                               ) : (
                                 <span className="text-xs text-muted-foreground">Add recipe</span>
@@ -371,8 +477,8 @@ function RecipesPage() {
             <Card className="overflow-hidden">
               <div className="flex flex-col gap-2 border-b p-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="text-sm text-muted-foreground">
-                  House-made components (sauces, dressings, batches) used across dishes — cost rolls up
-                  automatically wherever they're used.
+                  House-made components (sauces, dressings, batches) used across dishes — cost rolls
+                  up automatically wherever they're used.
                 </div>
                 <Button size="sm" className="gap-2" onClick={() => setNewPrepOpen(true)}>
                   <Plus className="h-3.5 w-3.5" /> New prep recipe
@@ -404,7 +510,9 @@ function RecipesPage() {
                       </div>
                       <div className="text-right">
                         <div className="font-mono text-sm">
-                          {p.costPerYieldUnitCents != null ? formatMoney(p.costPerYieldUnitCents) : "—"}
+                          {p.costPerYieldUnitCents != null
+                            ? formatMoney(p.costPerYieldUnitCents)
+                            : "—"}
                         </div>
                         <div className="font-mono text-xs text-muted-foreground">
                           {p.yieldQty} {p.yieldUnit}
@@ -427,19 +535,28 @@ function RecipesPage() {
                   <TableBody>
                     {isPrepLoading ? (
                       <TableRow>
-                        <TableCell colSpan={4} className="py-8 text-center text-sm text-muted-foreground">
+                        <TableCell
+                          colSpan={4}
+                          className="py-8 text-center text-sm text-muted-foreground"
+                        >
                           Loading…
                         </TableCell>
                       </TableRow>
                     ) : prepRecipes.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={4} className="py-8 text-center text-sm text-muted-foreground">
+                        <TableCell
+                          colSpan={4}
+                          className="py-8 text-center text-sm text-muted-foreground"
+                        >
                           No prep recipes yet — add one to reuse it across dishes.
                         </TableCell>
                       </TableRow>
                     ) : filteredPrepRecipes.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={4} className="py-8 text-center text-sm text-muted-foreground">
+                        <TableCell
+                          colSpan={4}
+                          className="py-8 text-center text-sm text-muted-foreground"
+                        >
                           No prep recipes match "{prepQuery}".
                         </TableCell>
                       </TableRow>
@@ -458,7 +575,9 @@ function RecipesPage() {
                             {p.yieldQty} {p.yieldUnit}
                           </TableCell>
                           <TableCell className="text-right font-mono">
-                            {p.costPerYieldUnitCents != null ? formatMoney(p.costPerYieldUnitCents) : "—"}
+                            {p.costPerYieldUnitCents != null
+                              ? formatMoney(p.costPerYieldUnitCents)
+                              : "—"}
                           </TableCell>
                         </TableRow>
                       ))
@@ -477,6 +596,7 @@ function RecipesPage() {
             <MenuItemRecipeSheet
               key={selectedItem.id}
               item={selectedItem}
+              allCategories={allItemCategories}
               initialDraftLines={pendingDrafts[selectedItem.id]}
             />
           )}
@@ -486,32 +606,42 @@ function RecipesPage() {
       <Dialog open={!!batchSummary} onOpenChange={(o) => !o && setBatchSummary(null)}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle className="font-serif text-2xl">AI-generated recipes</DialogTitle>
+            <DialogTitle className="font-serif text-2xl">
+              {batchSummary?.source === "quick" ? "Quick-matched recipes" : "AI-generated recipes"}
+            </DialogTitle>
             <DialogDescription>
-              Click an item to review its proposed lines before adding anything.
+              {batchSummary?.source === "quick"
+                ? `Matched ${batchSummary.results.length} of ${quickMatchItems.length} unpriced beverage/alcohol items by name. The rest didn't have an obvious single-ingredient match — try "Generate recipes" or add them by hand.`
+                : "Click an item to review its proposed lines before adding anything."}
             </DialogDescription>
           </DialogHeader>
           <div className="max-h-[60vh] space-y-1 overflow-y-auto">
-            {(batchSummary ?? []).map((r) => {
-              const item = items.find((i) => i.id === r.menuItemPosId);
-              const { matched, flagged } = summarizeDraft(r.lines);
-              return (
-                <button
-                  key={r.menuItemPosId}
-                  className="flex w-full items-center justify-between rounded-md border px-3 py-2 text-left text-sm hover:bg-muted/30"
-                  onClick={() => {
-                    setBatchSummary(null);
-                    setActiveTab("items");
-                    setSelectedItemId(r.menuItemPosId);
-                  }}
-                >
-                  <span className="font-medium">{item?.name ?? r.menuItemPosId}</span>
-                  <span className="text-xs text-muted-foreground">
-                    {matched} matched{flagged > 0 && `, ${flagged} flagged`}
-                  </span>
-                </button>
-              );
-            })}
+            {batchSummary?.results.length === 0 ? (
+              <p className="py-6 text-center text-sm text-muted-foreground">
+                No obvious matches found.
+              </p>
+            ) : (
+              (batchSummary?.results ?? []).map((r) => {
+                const item = items.find((i) => i.id === r.menuItemPosId);
+                const { matched, flagged } = summarizeDraft(r.lines);
+                return (
+                  <button
+                    key={r.menuItemPosId}
+                    className="flex w-full items-center justify-between rounded-md border px-3 py-2 text-left text-sm hover:bg-muted/30"
+                    onClick={() => {
+                      setBatchSummary(null);
+                      setActiveTab("items");
+                      setSelectedItemId(r.menuItemPosId);
+                    }}
+                  >
+                    <span className="font-medium">{item?.name ?? r.menuItemPosId}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {matched} matched{flagged > 0 && `, ${flagged} flagged`}
+                    </span>
+                  </button>
+                );
+              })
+            )}
           </div>
         </DialogContent>
       </Dialog>
@@ -574,6 +704,7 @@ const PREP_YIELD_UNITS = [
   { value: "serving", label: "serving" },
 ] as const;
 const OTHER_YIELD_UNIT = "__other__";
+const OTHER_CATEGORY = "__other__";
 
 function NewPrepRecipeDialog({
   open,
@@ -615,7 +746,12 @@ function NewPrepRecipeDialog({
         <div className="space-y-3 py-2">
           <div>
             <Label htmlFor="prep-name">Name</Label>
-            <Input id="prep-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="House burger sauce" />
+            <Input
+              id="prep-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="House burger sauce"
+            />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -685,9 +821,11 @@ function NewPrepRecipeDialog({
 
 function MenuItemRecipeSheet({
   item,
+  allCategories,
   initialDraftLines,
 }: {
   item: RealMenuItem;
+  allCategories: string[];
   initialDraftLines?: DraftLine[];
 }) {
   const { data: lines = [], isLoading } = useRecipeLinesForItem(item.id);
@@ -697,12 +835,15 @@ function MenuItemRecipeSheet({
   const deleteLine = useDeleteRecipeLine();
   const generateRecipe = useGenerateRecipe();
   const [draftLines, setDraftLines] = useState<DraftLine[] | null>(initialDraftLines ?? null);
+  const updateCategory = useUpdateItemCategory();
+  const updateCost = useUpdateItemCost();
 
   const totalCents = useMemo(() => {
     if (lines.length === 0) return null;
     let sum = 0;
     for (const l of lines) {
-      const lineCost = l.ingredientId != null ? l.ingredientCostCents : l.prepRecipeCostPerYieldUnitCents;
+      const lineCost =
+        l.ingredientId != null ? l.ingredientCostCents : l.prepRecipeCostPerYieldUnitCents;
       if (lineCost == null) return null;
       sum += l.quantity * lineCost;
     }
@@ -711,22 +852,143 @@ function MenuItemRecipeSheet({
 
   const margin = totalCents != null ? item.price * 100 - totalCents : null;
   const marginPct = margin != null && item.price > 0 ? (margin / (item.price * 100)) * 100 : null;
-  const foodCostPct = totalCents != null && item.price > 0 ? (totalCents / (item.price * 100)) * 100 : null;
+  const foodCostPct =
+    totalCents != null && item.price > 0 ? (totalCents / (item.price * 100)) * 100 : null;
+
+  const [categoryChoice, setCategoryChoice] = useState(item.category);
+  const [customCategory, setCustomCategory] = useState("");
+  const isCustomCategory = categoryChoice === OTHER_CATEGORY;
+  const saveCategory = (category: string) => {
+    if (!category.trim()) return;
+    updateCategory.mutate({
+      locationId: item.locationId,
+      posId: item.id,
+      category: category.trim(),
+    });
+  };
+
+  const [costInput, setCostInput] = useState(item.cost != null ? item.cost.toFixed(2) : "");
 
   return (
     <>
       <SheetHeader>
         <SheetTitle className="font-serif text-2xl">{item.name}</SheetTitle>
-        <SheetDescription>{item.category}</SheetDescription>
+        <SheetDescription>{item.rawCategory}</SheetDescription>
       </SheetHeader>
+
+      <div className="mt-4 space-y-3 rounded-xl border p-4 text-sm">
+        <div>
+          <div className="mb-1 flex items-center justify-between">
+            <Label
+              htmlFor="item-category"
+              className="text-xs uppercase tracking-widest text-muted-foreground"
+            >
+              Category
+            </Label>
+            {item.categoryOverride != null && (
+              <button
+                type="button"
+                className="text-[11px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                onClick={() => {
+                  updateCategory.mutate({
+                    locationId: item.locationId,
+                    posId: item.id,
+                    category: null,
+                  });
+                  setCategoryChoice(item.rawCategory);
+                }}
+              >
+                Reset to POS category ({item.rawCategory})
+              </button>
+            )}
+          </div>
+          <div className="flex gap-1.5">
+            <Select
+              value={categoryChoice}
+              onValueChange={(v) => {
+                setCategoryChoice(v);
+                if (v !== OTHER_CATEGORY) saveCategory(v);
+              }}
+            >
+              <SelectTrigger id="item-category" className="h-8 flex-1">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {allCategories.map((c) => (
+                  <SelectItem key={c} value={c}>
+                    {c}
+                  </SelectItem>
+                ))}
+                <SelectItem value={OTHER_CATEGORY}>Other…</SelectItem>
+              </SelectContent>
+            </Select>
+            {isCustomCategory && (
+              <>
+                <Input
+                  value={customCategory}
+                  onChange={(e) => setCustomCategory(e.target.value)}
+                  placeholder="New category"
+                  className="h-8 flex-1"
+                />
+                <Button
+                  size="sm"
+                  className="h-8"
+                  disabled={!customCategory.trim()}
+                  onClick={() => saveCategory(customCategory)}
+                >
+                  Save
+                </Button>
+              </>
+            )}
+          </div>
+        </div>
+
+        <div>
+          <Label
+            htmlFor="item-cost"
+            className="text-xs uppercase tracking-widest text-muted-foreground"
+          >
+            Cost per unit{" "}
+            {item.hasRecipe && <span className="normal-case">(fallback if no recipe)</span>}
+          </Label>
+          <div className="mt-1 flex items-center gap-1.5">
+            <span className="text-sm text-muted-foreground">$</span>
+            <Input
+              id="item-cost"
+              type="number"
+              step="0.01"
+              min="0"
+              value={costInput}
+              onChange={(e) => setCostInput(e.target.value)}
+              className="h-8 w-24"
+              placeholder="0.00"
+            />
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8"
+              disabled={updateCost.isPending}
+              onClick={() => {
+                const num = parseFloat(costInput);
+                updateCost.mutate({
+                  locationId: item.locationId,
+                  posId: item.id,
+                  costCents: Number.isFinite(num) && num >= 0 ? Math.round(num * 100) : null,
+                });
+              }}
+            >
+              {updateCost.isPending ? "Saving…" : "Save"}
+            </Button>
+          </div>
+        </div>
+      </div>
 
       <div className="mt-4 rounded-xl border bg-muted/20 p-4 text-sm">
         {totalCents != null && marginPct != null && foodCostPct != null ? (
           <>
             Costs <span className="font-medium">{formatMoney(totalCents)}</span> · Sells{" "}
             <span className="font-medium">{formatItemPrice(item, { lowercase: true })}</span> ·{" "}
-            Margin{" "}
-            <span className="font-medium">{marginPct.toFixed(0)}%</span> (food cost{" "}
+            Margin <span className="font-medium">{marginPct.toFixed(0)}%</span> (food cost{" "}
             {foodCostPct.toFixed(0)}%)
           </>
         ) : (
@@ -767,7 +1029,9 @@ function MenuItemRecipeSheet({
           </Button>
           {generateRecipe.error && (
             <p className="mt-2 text-xs text-destructive">
-              {generateRecipe.error instanceof Error ? generateRecipe.error.message : "Generation failed"}
+              {generateRecipe.error instanceof Error
+                ? generateRecipe.error.message
+                : "Generation failed"}
             </p>
           )}
         </div>
@@ -866,7 +1130,8 @@ function PrepRecipeSheet({
       <div className="mt-4 rounded-xl border bg-muted/20 p-4 text-sm">
         {prepRecipe?.costPerYieldUnitCents != null ? (
           <>
-            Costs <span className="font-medium">{formatMoney(prepRecipe.costPerYieldUnitCents)}</span> per{" "}
+            Costs{" "}
+            <span className="font-medium">{formatMoney(prepRecipe.costPerYieldUnitCents)}</span> per{" "}
             {prepRecipe.yieldUnit}
           </>
         ) : (
@@ -880,9 +1145,11 @@ function PrepRecipeSheet({
 
       {prepRecipe && (
         <div className="mt-3 text-sm">
-          {prepRecipe.usedByMenuItemNames.length === 0 && prepRecipe.usedByPrepRecipeNames.length === 0 ? (
+          {prepRecipe.usedByMenuItemNames.length === 0 &&
+          prepRecipe.usedByPrepRecipeNames.length === 0 ? (
             <p className="text-amber-700">
-              Not used anywhere yet — its cost won't affect any dish's margin until it's added to one.
+              Not used anywhere yet — its cost won't affect any dish's margin until it's added to
+              one.
             </p>
           ) : (
             <div className="text-muted-foreground">
@@ -910,7 +1177,9 @@ function PrepRecipeSheet({
             prepRecipeId,
             quantity,
             unit,
-            ...(target.kind === "ingredient" ? { ingredientId: target.id } : { subPrepRecipeId: target.id }),
+            ...(target.kind === "ingredient"
+              ? { ingredientId: target.id }
+              : { subPrepRecipeId: target.id }),
           } as Parameters<typeof addLine.mutate>[0])
         }
         pending={addLine.isPending}
@@ -1016,7 +1285,8 @@ function AddLineForm({
 
   const selectedIngredient = ingredients.find((i) => i.id === targetId);
   const selectedPrep = prepRecipes.find((p) => p.id === targetId);
-  const unit = mode === "ingredient" ? (selectedIngredient?.unit ?? "") : (selectedPrep?.yieldUnit ?? "");
+  const unit =
+    mode === "ingredient" ? (selectedIngredient?.unit ?? "") : (selectedPrep?.yieldUnit ?? "");
 
   return (
     <div className="mt-3 space-y-2">
@@ -1041,7 +1311,9 @@ function AddLineForm({
       <div className="flex items-center gap-2">
         <Select value={targetId} onValueChange={setTargetId}>
           <SelectTrigger className="h-8 flex-1">
-            <SelectValue placeholder={mode === "ingredient" ? "Add ingredient…" : "Add prep recipe…"} />
+            <SelectValue
+              placeholder={mode === "ingredient" ? "Add ingredient…" : "Add prep recipe…"}
+            />
           </SelectTrigger>
           <SelectContent>
             {(mode === "ingredient" ? ingredients : prepRecipes).map((opt) => (
@@ -1102,14 +1374,22 @@ function GeneratedRecipeReview({
   const addLine = useAddRecipeLine();
 
   if (lines.length === 0) {
-    return <p className="text-sm text-muted-foreground">Claude didn't propose any lines for this item.</p>;
+    return (
+      <p className="text-sm text-muted-foreground">
+        Claude didn't propose any lines for this item.
+      </p>
+    );
   }
 
   return (
     <div className="space-y-2">
       {lines.map((line) =>
         line.kind === "new_prep_recipe" ? (
-          <NewPrepRecipeFlag key={line._key} line={line} onDismiss={() => onLineResolved(line._key)} />
+          <NewPrepRecipeFlag
+            key={line._key}
+            line={line}
+            onDismiss={() => onLineResolved(line._key)}
+          />
         ) : (
           <GeneratedLineRow
             key={line._key}
@@ -1159,9 +1439,15 @@ function GeneratedLineRow({
   onDismiss: () => void;
   pending: boolean;
 }) {
-  const [mode, setMode] = useState<"ingredient" | "prep">(line.kind === "prep_recipe" ? "prep" : "ingredient");
+  const [mode, setMode] = useState<"ingredient" | "prep">(
+    line.kind === "prep_recipe" ? "prep" : "ingredient",
+  );
   const [targetId, setTargetId] = useState(
-    line.kind === "ingredient" ? (line.ingredientId ?? "") : line.kind === "prep_recipe" ? (line.prepRecipeId ?? "") : "",
+    line.kind === "ingredient"
+      ? (line.ingredientId ?? "")
+      : line.kind === "prep_recipe"
+        ? (line.prepRecipeId ?? "")
+        : "",
   );
   const [quantity, setQuantity] = useState(line.quantity != null ? String(line.quantity) : "");
 
@@ -1170,7 +1456,8 @@ function GeneratedLineRow({
   // Unit is always re-derived from the selected row, never trusted from
   // Claude's own output — same discipline AddLineForm already applies
   // to manual entry.
-  const unit = mode === "ingredient" ? (selectedIngredient?.unit ?? "") : (selectedPrep?.yieldUnit ?? "");
+  const unit =
+    mode === "ingredient" ? (selectedIngredient?.unit ?? "") : (selectedPrep?.yieldUnit ?? "");
   const isMatched = (line.kind === "ingredient" || line.kind === "prep_recipe") && !!targetId;
 
   return (
@@ -1180,11 +1467,17 @@ function GeneratedLineRow({
           {!isMatched && line.proposedName && (
             <span className="truncate text-muted-foreground">Proposed: {line.proposedName}</span>
           )}
-          <Badge variant="outline" className={`shrink-0 text-[10px] font-normal ${CONFIDENCE_STYLE[line.confidence]}`}>
+          <Badge
+            variant="outline"
+            className={`shrink-0 text-[10px] font-normal ${CONFIDENCE_STYLE[line.confidence]}`}
+          >
             {line.confidence} confidence
           </Badge>
         </div>
-        <button className="shrink-0 text-xs text-muted-foreground hover:underline" onClick={onDismiss}>
+        <button
+          className="shrink-0 text-xs text-muted-foreground hover:underline"
+          onClick={onDismiss}
+        >
           Dismiss
         </button>
       </div>
@@ -1210,7 +1503,9 @@ function GeneratedLineRow({
       <div className="flex items-center gap-2">
         <Select value={targetId} onValueChange={setTargetId}>
           <SelectTrigger className="h-8 flex-1">
-            <SelectValue placeholder={mode === "ingredient" ? "Pick ingredient…" : "Pick prep recipe…"} />
+            <SelectValue
+              placeholder={mode === "ingredient" ? "Pick ingredient…" : "Pick prep recipe…"}
+            />
           </SelectTrigger>
           <SelectContent>
             {(mode === "ingredient" ? ingredients : prepRecipes).map((opt) => (
@@ -1247,14 +1542,23 @@ function GeneratedLineRow({
   );
 }
 
-function NewPrepRecipeFlag({ line, onDismiss }: { line: GeneratedRecipeLine; onDismiss: () => void }) {
+function NewPrepRecipeFlag({
+  line,
+  onDismiss,
+}: {
+  line: GeneratedRecipeLine;
+  onDismiss: () => void;
+}) {
   return (
     <div className="space-y-1.5 rounded-md border border-dashed bg-muted/20 p-2.5">
       <div className="flex items-center justify-between gap-2">
         <span className="text-xs font-medium">
           House-made — needs a prep recipe: {line.proposedName ?? "Untitled"}
         </span>
-        <button className="shrink-0 text-xs text-muted-foreground hover:underline" onClick={onDismiss}>
+        <button
+          className="shrink-0 text-xs text-muted-foreground hover:underline"
+          onClick={onDismiss}
+        >
           Dismiss
         </button>
       </div>

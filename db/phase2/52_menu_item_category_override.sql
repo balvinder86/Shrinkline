@@ -1,0 +1,11 @@
+-- Toast's own sync job (sync/src/db.ts upsertMenuItems) unconditionally
+-- overwrites menu_items.category on every real sync run (~every 10
+-- min) — a manual edit written straight into that column would be
+-- silently reverted within minutes. Same shape as the pre-existing
+-- cost_cents field's own reasoning (Toast never provides cost at all,
+-- so that one's safe to edit directly) but category needs its own
+-- override column instead, since Toast *does* keep sending a real
+-- value for it. Sync never touches this column; the frontend resolves
+-- category_override ?? category wherever a menu item's category is
+-- read.
+alter table menu_items add column if not exists category_override text;
