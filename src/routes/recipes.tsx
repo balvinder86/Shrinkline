@@ -554,6 +554,27 @@ function PrepUsageBadge({ prep }: { prep: PrepRecipe }) {
   );
 }
 
+// Common house-batch yield units — volume, weight, and count-based,
+// covering the real range of prep recipes (sauces/dressings by the
+// quart or gallon, batters/doughs by the pound, portioned items by
+// count). "Other" falls back to free text for anything not listed
+// rather than blocking a real, valid unit this list didn't anticipate.
+const PREP_YIELD_UNITS = [
+  { value: "oz", label: "oz (fl oz)" },
+  { value: "cup", label: "cup" },
+  { value: "pt", label: "pint" },
+  { value: "qt", label: "quart" },
+  { value: "gal", label: "gallon" },
+  { value: "ml", label: "ml" },
+  { value: "L", label: "liter" },
+  { value: "lb", label: "lb" },
+  { value: "g", label: "gram" },
+  { value: "each", label: "each" },
+  { value: "portion", label: "portion" },
+  { value: "serving", label: "serving" },
+] as const;
+const OTHER_YIELD_UNIT = "__other__";
+
 function NewPrepRecipeDialog({
   open,
   onOpenChange,
@@ -564,12 +585,16 @@ function NewPrepRecipeDialog({
   const [name, setName] = useState("");
   const [yieldQty, setYieldQty] = useState("1");
   const [yieldUnit, setYieldUnit] = useState("each");
+  const [customYieldUnit, setCustomYieldUnit] = useState("");
   const createPrepRecipe = useCreatePrepRecipe();
+  const isCustomUnit = yieldUnit === OTHER_YIELD_UNIT;
+  const resolvedYieldUnit = isCustomUnit ? customYieldUnit.trim() : yieldUnit;
 
   const reset = () => {
     setName("");
     setYieldQty("1");
     setYieldUnit("each");
+    setCustomYieldUnit("");
   };
 
   return (
@@ -606,26 +631,44 @@ function NewPrepRecipeDialog({
             </div>
             <div>
               <Label htmlFor="prep-yield-unit">Yield unit</Label>
-              <Input
-                id="prep-yield-unit"
-                value={yieldUnit}
-                onChange={(e) => setYieldUnit(e.target.value)}
-                placeholder="each, oz, qt…"
-              />
+              <Select value={yieldUnit} onValueChange={setYieldUnit}>
+                <SelectTrigger id="prep-yield-unit">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {PREP_YIELD_UNITS.map((u) => (
+                    <SelectItem key={u.value} value={u.value}>
+                      {u.label}
+                    </SelectItem>
+                  ))}
+                  <SelectItem value={OTHER_YIELD_UNIT}>Other…</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
+          {isCustomUnit && (
+            <div>
+              <Label htmlFor="prep-yield-unit-custom">Custom unit</Label>
+              <Input
+                id="prep-yield-unit-custom"
+                value={customYieldUnit}
+                onChange={(e) => setCustomYieldUnit(e.target.value)}
+                placeholder="e.g. keg, batch"
+              />
+            </div>
+          )}
           <p className="text-xs text-muted-foreground">
-            e.g. a batch that makes 2 quarts of sauce: yield quantity 2, yield unit "qt".
+            e.g. a batch that makes 2 quarts of sauce: yield quantity 2, yield unit "quart".
           </p>
         </div>
         <DialogFooter>
           <Button
-            disabled={!name.trim() || !yieldUnit.trim() || createPrepRecipe.isPending}
+            disabled={!name.trim() || !resolvedYieldUnit || createPrepRecipe.isPending}
             onClick={() => {
               const qty = parseFloat(yieldQty);
-              if (!Number.isFinite(qty) || qty <= 0) return;
+              if (!Number.isFinite(qty) || qty <= 0 || !resolvedYieldUnit) return;
               createPrepRecipe.mutate(
-                { name: name.trim(), yieldQty: qty, yieldUnit: yieldUnit.trim() },
+                { name: name.trim(), yieldQty: qty, yieldUnit: resolvedYieldUnit },
                 { onSuccess: () => onOpenChange(false) },
               );
             }}
