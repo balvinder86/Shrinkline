@@ -37,6 +37,7 @@ import { quadrant, QUAD_COLOR, formatItemPrice } from "@/lib/boh/menuEngineering
 import { classifyMenuItemCategory, CATEGORIES } from "@/lib/boh/menu-category";
 import { matchBeverageLine } from "@/lib/boh/beverageMatch";
 import { Card } from "@/components/ui/card";
+import { AiRecommendationsPanel } from "@/components/insights/AiRecommendationsPanel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -381,6 +382,8 @@ function RecipesPage() {
     <>
       <Topbar eyebrow="Menu Performance" title="Recipes" />
       <main className="space-y-6 px-6 py-6">
+        <AiRecommendationsPanel tab="recipes" />
+
         <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "items" | "prep")}>
           <TabsList className="bg-card">
             <TabsTrigger value="items">Menu items</TabsTrigger>

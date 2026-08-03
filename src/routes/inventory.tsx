@@ -63,6 +63,7 @@ import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxi
 
 import { Topbar } from "@/components/dashboard/Topbar";
 import { Card } from "@/components/ui/card";
+import { AiRecommendationsPanel } from "@/components/insights/AiRecommendationsPanel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -747,6 +748,8 @@ function InventoryPage() {
             </p>
           </div>
         </div>
+
+        <AiRecommendationsPanel tab="inventory" />
 
         {/* KPIs */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">

@@ -6,6 +6,7 @@ import { Topbar } from "@/components/dashboard/Topbar";
 import { useDateRange } from "@/lib/date-range-context";
 import { isoDate, formatDateRange } from "@/lib/date-range";
 import { Card } from "@/components/ui/card";
+import { AiRecommendationsPanel } from "@/components/insights/AiRecommendationsPanel";
 import { useFoodCostSummary } from "@/lib/pos/queries";
 import { useLaborCostSummary } from "@/lib/labor/queries";
 import { useExpenseCategorySpend } from "@/lib/boh/queries";
@@ -156,6 +157,8 @@ function PnlPage() {
     <>
       <Topbar eyebrow="Financials" title="P&L" />
       <main className="space-y-6 px-6 py-6">
+        <AiRecommendationsPanel tab="food_cost" />
+
         {/* KPI row */}
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
           <KPI
