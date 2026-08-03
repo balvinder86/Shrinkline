@@ -37,9 +37,12 @@ export async function submitBatch(
 ): Promise<string> {
   const batch = await client.messages.batches.create({
     requests: tenants.map(({ location, ctx }) => ({
-      // restaurant_id:location_id — tenant identity for the ingest step
-      // comes from this, never from anything the model returns.
-      custom_id: `${location.restaurant_id}:${location.id}`,
+      // location_id alone — the Batch API caps custom_id at 64 chars,
+      // too short for "restaurant_id:location_id" (73 chars, two UUIDs).
+      // restaurant_id is resolved back at ingest time via a fresh
+      // locations lookup; tenant identity for the write still never
+      // comes from anything the model returns.
+      custom_id: location.id,
       params: {
         model: "claude-opus-5",
         max_tokens: 1024,
@@ -63,6 +66,7 @@ export async function getBatchStatus(anthropicBatchId: string) {
 export async function ingestBatchResults(
   anthropicBatchId: string,
   businessDate: string,
+  restaurantIdByLocationId: Map<string, string>,
 ): Promise<RecommendationRow[]> {
   const rows: RecommendationRow[] = [];
   for await (const result of await client.messages.batches.results(anthropicBatchId)) {
@@ -70,7 +74,12 @@ export async function ingestBatchResults(
       console.error(`[insights] ${result.custom_id}: batch entry ${result.result.type}`);
       continue;
     }
-    const [restaurantId, locationId] = result.custom_id.split(":");
+    const locationId = result.custom_id;
+    const restaurantId = restaurantIdByLocationId.get(locationId);
+    if (!restaurantId) {
+      console.error(`[insights] ${locationId}: no matching location found at ingest time — skipping`);
+      continue;
+    }
     // Batch results come back as a plain Message (no client-side .parse()
     // wrapper), so read the guaranteed-valid JSON text block directly
     // rather than relying on the parsed_output convenience field.

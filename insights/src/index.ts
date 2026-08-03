@@ -60,7 +60,12 @@ async function pollExistingBatch(
     await markBatchEnded(id);
   }
 
-  const rows = await ingestBatchResults(anthropicBatchId, businessDate);
+  // custom_id in batch results is location_id alone (64-char Batch API
+  // limit) — resolve restaurant_id back via a fresh locations lookup.
+  const locations = await getAllLocations();
+  const restaurantIdByLocationId = new Map(locations.map((l) => [l.id, l.restaurant_id]));
+
+  const rows = await ingestBatchResults(anthropicBatchId, businessDate, restaurantIdByLocationId);
   await upsertRecommendations(rows);
   await markBatchIngested(id);
   console.log(`[insights] ${businessDate}: ingested ${rows.length} recommendation(s)`);
