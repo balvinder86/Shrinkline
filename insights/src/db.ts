@@ -17,6 +17,7 @@ export type LowParItem = {
   ingredient_id: string;
   par_quantity: number;
   suggested_par_quantity: number | null;
+  avg_daily_usage: number | null;
 };
 
 export type TabContext = {
@@ -41,16 +42,25 @@ export type TabContext = {
 // every other cross-tenant loop in this codebase.
 export async function getTabContext(loc: Location): Promise<TabContext> {
   const [lowParRes, foodCost] = await Promise.all([
+    // PostgREST's .lt()/.gt() compare a column against a literal value,
+    // not another column — "avg_daily_usage < par_quantity" has to be
+    // filtered in JS instead of pushed into the query. (This is the fix
+    // for the bug that silently broke every cron run since deploy: the
+    // prior version passed "par_quantity" as a string literal, which
+    // Postgres rejected trying to parse it as numeric.)
     supabase
       .from("par_levels")
-      .select("ingredient_id, par_quantity, suggested_par_quantity")
-      .eq("location_id", loc.id)
-      .lt("avg_daily_usage", "par_quantity"), // TODO: replace with the real low-stock predicate once wired to ingredient_stock
+      .select("ingredient_id, par_quantity, suggested_par_quantity, avg_daily_usage")
+      .eq("location_id", loc.id),
     computeFoodCostSummary(loc.id),
   ]);
   if (lowParRes.error) throw new Error(`load par_levels for ${loc.id} failed: ${lowParRes.error.message}`);
 
-  return { lowPar: lowParRes.data ?? [], foodCost, invoiceDrift: [] };
+  const lowPar = (lowParRes.data ?? []).filter(
+    (row) => row.avg_daily_usage != null && row.avg_daily_usage < row.par_quantity,
+  );
+
+  return { lowPar, foodCost, invoiceDrift: [] };
 }
 
 export type BatchRecord = {
