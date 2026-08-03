@@ -126,7 +126,7 @@ export async function upsertRecommendations(rows: RecommendationRow[]) {
     .from("ai_recommendations")
     .upsert(
       rows.map((r) => ({ ...r, generated_at: new Date().toISOString() })),
-      { onConflict: "location_id,tab,business_date" },
+      { onConflict: "location_id,tab,business_date,headline" },
     );
   if (error) throw new Error(`upsert ai_recommendations failed: ${error.message}`);
 }
