@@ -22,9 +22,12 @@ export type AiRecommendation = {
 };
 
 // Written by the insights Railway service's nightly Batch API run — see
-// insights/src/index.ts. Rows are upserted per (location_id, tab,
-// business_date), so this always reflects the latest generated batch;
-// there's no in-app generation, only reading what already ran.
+// insights/src/index.ts. There's no in-app generation, only reading what
+// already ran. Rows accumulate one business_date's worth per day (a tab
+// can have more than one recommendation per day — see
+// db/phase2/55_ai_recommendations_multi_per_tab.sql) — filter to the
+// latest business_date present so yesterday's recommendations don't
+// keep piling up alongside today's once more than one day exists.
 export function useAiRecommendations(tab: RecommendationTab) {
   const locationId = useCurrentLocationId();
   return useQuery({
@@ -38,7 +41,9 @@ export function useAiRecommendations(tab: RecommendationTab) {
         .eq("tab", tab)
         .order("business_date", { ascending: false });
       if (error) throw error;
-      return data ?? [];
+      const rows = data ?? [];
+      const latestDate = rows[0]?.business_date;
+      return rows.filter((r) => r.business_date === latestDate);
     },
   });
 }

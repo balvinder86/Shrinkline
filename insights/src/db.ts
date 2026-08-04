@@ -14,7 +14,7 @@ export async function getAllLocations(): Promise<Location[]> {
 }
 
 export type LowParItem = {
-  ingredient_id: string;
+  ingredient_name: string;
   par_quantity: number;
   suggested_par_quantity: number | null;
   avg_daily_usage: number | null;
@@ -48,17 +48,35 @@ export async function getTabContext(loc: Location): Promise<TabContext> {
     // for the bug that silently broke every cron run since deploy: the
     // prior version passed "par_quantity" as a string literal, which
     // Postgres rejected trying to parse it as numeric.)
+    //
+    // Joins ingredients(name) so recommendations can reference "Heineken
+    // 24-pack" instead of a raw ingredient_id UUID — the first real
+    // batch run surfaced exactly that readability gap.
     supabase
       .from("par_levels")
-      .select("ingredient_id, par_quantity, suggested_par_quantity, avg_daily_usage")
+      .select(
+        "par_quantity, suggested_par_quantity, avg_daily_usage, ingredients (name)",
+      )
       .eq("location_id", loc.id),
     computeFoodCostSummary(loc.id),
   ]);
   if (lowParRes.error) throw new Error(`load par_levels for ${loc.id} failed: ${lowParRes.error.message}`);
 
-  const lowPar = (lowParRes.data ?? []).filter(
-    (row) => row.avg_daily_usage != null && row.avg_daily_usage < row.par_quantity,
-  );
+  type LowParDbRow = {
+    par_quantity: number;
+    suggested_par_quantity: number | null;
+    avg_daily_usage: number | null;
+    ingredients: { name: string } | null;
+  };
+
+  const lowPar: LowParItem[] = (lowParRes.data as unknown as LowParDbRow[])
+    .filter((row) => row.avg_daily_usage != null && row.avg_daily_usage < row.par_quantity)
+    .map((row) => ({
+      ingredient_name: row.ingredients?.name ?? "Unknown ingredient",
+      par_quantity: row.par_quantity,
+      suggested_par_quantity: row.suggested_par_quantity,
+      avg_daily_usage: row.avg_daily_usage,
+    }));
 
   return { lowPar, foodCost, invoiceDrift: [] };
 }
