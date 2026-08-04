@@ -14,7 +14,7 @@ const LOOKBACK_DAYS = 180;
 // item is actually recommendation-worthy. Deliberately far below the
 // OCR check's 3x factor, which exists to catch unit mismatches, not
 // flag a real price increase.
-const INCLUDE_THRESHOLD_PCT = 15;
+const INCLUDE_THRESHOLD_PCT = 10;
 const MAX_ITEMS = 10;
 
 type InvoiceLineDbRow = {

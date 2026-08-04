@@ -9,7 +9,7 @@ invoice price drift). Any signal may be empty if there's nothing to report — a
 not itself something to flag.
 
 invoiceDrift entries are (vendor, ingredient) pairs whose latest approved-invoice unit cost moved
-at least 15% from the average of their prior invoices in the last 180 days — that threshold only
+at least 10% from the average of their prior invoices in the last 180 days — that threshold only
 bounds what you're shown, it does not mean every entry is worth a recommendation. Weigh
 prior_data_points before treating a move as a real trend: 2-3 points is a thin baseline and could
 be normal noise or a one-off promo price, while more points behind a consistent move is stronger
