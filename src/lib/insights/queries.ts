@@ -1,12 +1,17 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { supabase } from "@/lib/supabase/client";
-import { useLocationIds } from "@/lib/supabase/scope";
+import { useLocationIds, useRestaurantIds } from "@/lib/supabase/scope";
 
 // A user's dashboard today only ever shows one location — same
 // simplification as useCurrentLocationId in lib/boh/queries.ts.
 function useCurrentLocationId(): string | undefined {
   return useLocationIds().data?.[0];
+}
+
+// Same simplification as useCurrentRestaurantId in lib/boh/queries.ts.
+function useCurrentRestaurantId(): string | undefined {
+  return useRestaurantIds()[0];
 }
 
 export type RecommendationTab = "food_cost" | "inventory" | "invoices" | "recipes";
@@ -44,6 +49,50 @@ export function useAiRecommendations(tab: RecommendationTab) {
       const rows = data ?? [];
       const latestDate = rows[0]?.business_date;
       return rows.filter((r) => r.business_date === latestDate);
+    },
+  });
+}
+
+export type AiInsightsSettings = {
+  invoiceDriftThresholdPct: number;
+};
+
+// insights/src/invoiceDrift.ts reads this same table (falling back to
+// the same 10% default) at batch time — see
+// db/phase2/56_ai_insights_settings.sql.
+export function useAiInsightsSettings() {
+  const restaurantId = useCurrentRestaurantId();
+  return useQuery({
+    queryKey: ["ai-insights-settings", restaurantId],
+    enabled: !!restaurantId,
+    queryFn: async (): Promise<AiInsightsSettings> => {
+      const { data, error } = await supabase
+        .from("ai_insights_settings")
+        .select("invoice_drift_threshold_pct")
+        .eq("restaurant_id", restaurantId!)
+        .maybeSingle();
+      if (error) throw error;
+      return { invoiceDriftThresholdPct: data?.invoice_drift_threshold_pct ?? 10 };
+    },
+  });
+}
+
+export function useUpdateInvoiceDriftThreshold() {
+  const restaurantId = useCurrentRestaurantId();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (thresholdPct: number) => {
+      if (!restaurantId) throw new Error("no current restaurant");
+      const { error } = await supabase
+        .from("ai_insights_settings")
+        .upsert(
+          { restaurant_id: restaurantId, invoice_drift_threshold_pct: thresholdPct },
+          { onConflict: "restaurant_id" },
+        );
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["ai-insights-settings"] });
     },
   });
 }

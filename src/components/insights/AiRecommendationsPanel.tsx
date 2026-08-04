@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { AlertTriangle, Brain, Info } from "lucide-react";
 
 import { Card } from "@/components/ui/card";
@@ -37,7 +38,17 @@ function RecommendationRow({ rec }: { rec: AiRecommendation }) {
 // (dark gradient card, Brain icon) — reads as one system rather than a
 // bolted-on feature. Always renders (even empty), so the AI layer stays
 // discoverable rather than only appearing once it has something to say.
-export function AiRecommendationsPanel({ tab }: { tab: RecommendationTab }) {
+//
+// headerAction is an optional slot (e.g. a settings-gear button) so a
+// page can attach its own controls without this shared component
+// needing to know about any tab-specific settings.
+export function AiRecommendationsPanel({
+  tab,
+  headerAction,
+}: {
+  tab: RecommendationTab;
+  headerAction?: ReactNode;
+}) {
   const { data, isLoading } = useAiRecommendations(tab);
   const recommendations = data ?? [];
   const generatedAt = recommendations[0]?.generated_at;
@@ -56,6 +67,7 @@ export function AiRecommendationsPanel({ tab }: { tab: RecommendationTab }) {
                 Updated {new Date(generatedAt).toLocaleDateString()}
               </span>
             )}
+            {headerAction && <div className="ml-auto">{headerAction}</div>}
           </div>
 
           {isLoading ? (

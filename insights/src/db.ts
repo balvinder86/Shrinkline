@@ -1,6 +1,6 @@
 import { supabase } from "./supabase.js";
 import { computeFoodCostSummary, type FoodCostSummary } from "./foodCost.js";
-import { computeInvoiceDrift, type PriceDriftItem } from "./invoiceDrift.js";
+import { computeInvoiceDrift, type InvoiceDriftResult } from "./invoiceDrift.js";
 
 export type Location = {
   id: string;
@@ -31,7 +31,7 @@ export type TabContext = {
   // vendor_product_pack_info.last_unit_cost_cents, which is only an OCR
   // plausibility baseline (ocr/src/server.ts, PRICE_DRIFT_FACTOR = 3x)
   // tuned to catch case/bottle mismatches, not real price increases.
-  invoiceDrift: PriceDriftItem[];
+  invoiceDrift: InvoiceDriftResult;
 };
 
 // Pulls each tab's already-computed numbers into a compact per-tenant
@@ -58,7 +58,7 @@ export async function getTabContext(loc: Location): Promise<TabContext> {
       )
       .eq("location_id", loc.id),
     computeFoodCostSummary(loc.id),
-    computeInvoiceDrift(loc.id),
+    computeInvoiceDrift(loc.id, loc.restaurant_id),
   ]);
   if (lowParRes.error) throw new Error(`load par_levels for ${loc.id} failed: ${lowParRes.error.message}`);
 

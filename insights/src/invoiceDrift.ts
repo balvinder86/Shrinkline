@@ -9,13 +9,24 @@
 import { supabase } from "./supabase.js";
 
 const LOOKBACK_DAYS = 180;
-// Below this, a move is likely normal week-to-week noise, not worth
-// spending context on — the model still judges whether an included
-// item is actually recommendation-worthy. Deliberately far below the
-// OCR check's 3x factor, which exists to catch unit mismatches, not
-// flag a real price increase.
-const INCLUDE_THRESHOLD_PCT = 10;
+// Per-tenant default when no ai_insights_settings row exists yet — see
+// db/phase2/56_ai_insights_settings.sql. Below this, a move is likely
+// normal week-to-week noise, not worth spending context on — the model
+// still judges whether an included item is actually recommendation-
+// worthy. Deliberately far below the OCR check's 3x factor, which
+// exists to catch unit mismatches, not flag a real price increase.
+const DEFAULT_THRESHOLD_PCT = 10;
 const MAX_ITEMS = 10;
+
+async function getThresholdPct(restaurantId: string): Promise<number> {
+  const { data, error } = await supabase
+    .from("ai_insights_settings")
+    .select("invoice_drift_threshold_pct")
+    .eq("restaurant_id", restaurantId)
+    .maybeSingle();
+  if (error) throw new Error(`load ai_insights_settings for ${restaurantId} failed: ${error.message}`);
+  return data?.invoice_drift_threshold_pct ?? DEFAULT_THRESHOLD_PCT;
+}
 
 type InvoiceLineDbRow = {
   unit_cost_cents: number | null;
@@ -37,7 +48,19 @@ export type PriceDriftItem = {
   prior_data_points: number;
 };
 
-export async function computeInvoiceDrift(locationId: string): Promise<PriceDriftItem[]> {
+export type InvoiceDriftResult = {
+  // Included in what's sent to the model so its recommendation text can
+  // reference the tenant's actual configured threshold, since it's no
+  // longer a fixed value baked into the system prompt.
+  threshold_pct: number;
+  items: PriceDriftItem[];
+};
+
+export async function computeInvoiceDrift(
+  locationId: string,
+  restaurantId: string,
+): Promise<InvoiceDriftResult> {
+  const thresholdPct = await getThresholdPct(restaurantId);
   const windowStart = new Date(Date.now() - LOOKBACK_DAYS * 86_400_000).toISOString().slice(0, 10);
 
   const { data, error } = await supabase
@@ -84,7 +107,7 @@ export async function computeInvoiceDrift(locationId: string): Promise<PriceDrif
     if (priorAvg <= 0) continue;
 
     const pctChange = ((current - priorAvg) / priorAvg) * 100;
-    if (Math.abs(pctChange) < INCLUDE_THRESHOLD_PCT) continue;
+    if (Math.abs(pctChange) < thresholdPct) continue;
 
     drifts.push({
       ingredient_name: ingredientName,
@@ -98,5 +121,9 @@ export async function computeInvoiceDrift(locationId: string): Promise<PriceDrif
 
   // Cap the payload rather than silently sending an unbounded list for
   // a tenant with a lot of invoice history — largest moves first.
-  return drifts.sort((a, b) => Math.abs(b.pct_change) - Math.abs(a.pct_change)).slice(0, MAX_ITEMS);
+  const items = drifts
+    .sort((a, b) => Math.abs(b.pct_change) - Math.abs(a.pct_change))
+    .slice(0, MAX_ITEMS);
+
+  return { threshold_pct: thresholdPct, items };
 }

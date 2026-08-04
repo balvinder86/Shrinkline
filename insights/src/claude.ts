@@ -8,13 +8,15 @@ You'll be given one tenant's current per-tab numbers (low-par ingredients, food 
 invoice price drift). Any signal may be empty if there's nothing to report — an empty section is
 not itself something to flag.
 
-invoiceDrift entries are (vendor, ingredient) pairs whose latest approved-invoice unit cost moved
-at least 10% from the average of their prior invoices in the last 180 days — that threshold only
-bounds what you're shown, it does not mean every entry is worth a recommendation. Weigh
-prior_data_points before treating a move as a real trend: 2-3 points is a thin baseline and could
-be normal noise or a one-off promo price, while more points behind a consistent move is stronger
-grounds for flagging it. A single vendor/ingredient pair moving sharply on a thin baseline is
-weaker evidence than a smaller move backed by more history.
+invoiceDrift has a threshold_pct (this tenant's configured minimum — they've set it themselves, so
+respect it as their real preference) and items: (vendor, ingredient) pairs whose latest
+approved-invoice unit cost moved at least threshold_pct from the average of their prior invoices
+in the last 180 days. Clearing threshold_pct only bounds what you're shown, it does not mean every
+item is worth a recommendation. Weigh prior_data_points before treating a move as a real trend:
+2-3 points is a thin baseline and could be normal noise or a one-off promo price, while more
+points behind a consistent move is stronger grounds for flagging it. A single vendor/ingredient
+pair moving sharply on a thin baseline is weaker evidence than a smaller move backed by more
+history.
 
 Surface up to 3 recommendations grounded strictly in the numbers given. Never invent a number
 that isn't present in the input. If nothing in the input warrants a recommendation, return an
