@@ -477,13 +477,13 @@ function SchedulingPage() {
                 <div className="h-72">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={forecastData}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                       <XAxis dataKey="day" tick={{ fontSize: 11 }} />
                       <YAxis tick={{ fontSize: 11 }} />
                       <Tooltip />
                       <Legend />
-                      <Bar dataKey="sales" name="Forecast sales" fill="hsl(var(--primary))" radius={[6, 6, 0, 0]} />
-                      <Bar dataKey="labor" name="Projected labor" fill="hsl(var(--accent-foreground))" radius={[6, 6, 0, 0]} />
+                      <Bar dataKey="sales" name="Forecast sales" fill="var(--primary)" radius={[6, 6, 0, 0]} />
+                      <Bar dataKey="labor" name="Projected labor" fill="var(--accent-foreground)" radius={[6, 6, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
@@ -525,14 +525,14 @@ function SchedulingPage() {
               <div className="h-72">
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={hourlyForecast}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                     <XAxis dataKey="hour" tick={{ fontSize: 11 }} />
                     <YAxis tick={{ fontSize: 11 }} />
                     <Tooltip />
                     <Legend />
-                    <Line type="monotone" dataKey="covers" stroke="hsl(var(--primary))" strokeWidth={2} />
+                    <Line type="monotone" dataKey="covers" stroke="var(--primary)" strokeWidth={2} />
                     <Line type="monotone" dataKey="needed" stroke="#d97706" strokeWidth={2} />
-                    <Line type="monotone" dataKey="scheduled" stroke="hsl(var(--muted-foreground))" strokeWidth={2} strokeDasharray="4 4" />
+                    <Line type="monotone" dataKey="scheduled" stroke="var(--muted-foreground)" strokeWidth={2} strokeDasharray="4 4" />
                   </LineChart>
                 </ResponsiveContainer>
               </div>

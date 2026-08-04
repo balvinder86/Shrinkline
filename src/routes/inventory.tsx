@@ -181,7 +181,7 @@ function stockState(item: Item): { label: string; tone: string } {
   if (ratio <= 0.34)
     return {
       label: "Critical",
-      tone: "bg-[hsl(var(--terracotta))]/15 text-[hsl(var(--terracotta))] border-[hsl(var(--terracotta))]/30",
+      tone: "bg-terracotta/15 text-terracotta border-terracotta/30",
     };
   if (ratio <= 0.6) return { label: "Low", tone: "bg-amber-100 text-amber-900 border-amber-300" };
   if (ratio >= 1)
@@ -729,17 +729,17 @@ function InventoryPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[hsl(var(--cream))]">
+    <div className="min-h-screen bg-cream">
       <Topbar eyebrow="Stock & purchasing" title="Inventory & Ordering" />
 
       <main className="px-8 py-8 max-w-[1500px] mx-auto space-y-8">
         {/* Header */}
         <div className="flex items-end justify-between gap-6 flex-wrap">
           <div>
-            <p className="text-xs uppercase tracking-[0.18em] text-[hsl(var(--terracotta))] font-semibold">
+            <p className="text-xs uppercase tracking-[0.18em] text-terracotta font-semibold">
               Stock & purchasing
             </p>
-            <h1 className="font-serif text-4xl text-[hsl(var(--ink))] mt-2">
+            <h1 className="font-serif text-4xl text-ink mt-2">
               Inventory & Ordering
             </h1>
             <p className="text-sm text-stone-600 mt-2 max-w-xl">
@@ -754,7 +754,7 @@ function InventoryPage() {
         {/* KPIs */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <KpiCard
-            icon={<AlertTriangle className="h-4 w-4 text-[hsl(var(--terracotta))]" />}
+            icon={<AlertTriangle className="h-4 w-4 text-terracotta" />}
             label="Critical items"
             value={String(kpis.critical)}
             hint="≤ 34% of par"
@@ -767,7 +767,7 @@ function InventoryPage() {
             hint="Suggested reorder"
           />
           <KpiCard
-            icon={<Package className="h-4 w-4 text-[hsl(var(--ink))]" />}
+            icon={<Package className="h-4 w-4 text-ink" />}
             label="On-hand value"
             value={`$${kpis.inventoryValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
             hint="Across all categories"
@@ -782,7 +782,7 @@ function InventoryPage() {
         </div>
 
         {/* AI Agent strip */}
-        <Card className="p-5 bg-gradient-to-br from-[hsl(var(--ink))] to-stone-800 text-cream border-0">
+        <Card className="p-5 bg-gradient-to-br from-ink to-stone-800 text-cream border-0">
           <div className="flex items-start gap-4 flex-wrap">
             <div className="h-11 w-11 rounded-xl bg-white/10 flex items-center justify-center shrink-0">
               <Brain className="h-5 w-5 text-amber-200" />
@@ -830,7 +830,7 @@ function InventoryPage() {
                 <BarChart
                   data={usageTrend.map((p) => ({ week: p.week, usage: p.usageCents / 100 }))}
                 >
-                  <Bar dataKey="usage" fill="hsl(var(--terracotta))" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="usage" fill="var(--terracotta)" radius={[4, 4, 0, 0]} />
                   <XAxis
                     dataKey="week"
                     tick={{ fill: "#d6d3d1", fontSize: 10 }}
@@ -858,7 +858,7 @@ function InventoryPage() {
         {/* Items vs Vendors */}
         <Tabs value={view} onValueChange={(v) => setView(v as "items" | "vendors" | "orders")}>
           <div className="max-w-full overflow-x-auto">
-            <TabsList className="bg-[hsl(var(--cream))] border border-stone-200">
+            <TabsList className="bg-cream border border-stone-200">
               <TabsTrigger value="items">
                 <Package className="h-3.5 w-3.5" /> Items
                 <Badge variant="outline" className="ml-2 font-normal">
@@ -886,7 +886,7 @@ function InventoryPage() {
             <div className="flex items-center gap-3 flex-wrap">
               <div className="max-w-full overflow-x-auto">
                 <Tabs value={tab} onValueChange={(v) => setTab(v as Category | "All")}>
-                  <TabsList className="bg-[hsl(var(--cream))] border border-stone-200">
+                  <TabsList className="bg-cream border border-stone-200">
                     <TabsTrigger value="All">All</TabsTrigger>
                     {CATEGORIES.map((c) => (
                       <TabsTrigger key={c} value={c}>
@@ -956,9 +956,9 @@ function InventoryPage() {
 
             {/* Bulk vendor assignment */}
             {selectedIds.size > 0 && (
-              <Card className="border-stone-200 bg-[hsl(var(--cream))] p-3">
+              <Card className="border-stone-200 bg-cream p-3">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-sm font-medium text-[hsl(var(--ink))]">
+                  <span className="text-sm font-medium text-ink">
                     {selectedIds.size} item{selectedIds.size === 1 ? "" : "s"} selected
                   </span>
                   <select
@@ -1042,7 +1042,7 @@ function InventoryPage() {
                               />
                             </TableCell>
                             <TableCell>
-                              <p className="font-medium text-[hsl(var(--ink))]">{item.name}</p>
+                              <p className="font-medium text-ink">{item.name}</p>
                             </TableCell>
                             <TableCell className="text-sm text-stone-700">{item.vendor}</TableCell>
                             <TableCell>
@@ -1101,7 +1101,7 @@ function InventoryPage() {
                                 <Button
                                   size="icon"
                                   variant="ghost"
-                                  className="h-8 w-8 text-stone-500 hover:text-[hsl(var(--terracotta))]"
+                                  className="h-8 w-8 text-stone-500 hover:text-terracotta"
                                   onClick={() => setItemToDelete(item)}
                                   aria-label={`Delete ${item.name}`}
                                 >
@@ -1163,7 +1163,7 @@ function InventoryPage() {
           <TabsContent value="vendors" className="space-y-5 mt-5">
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div>
-                <p className="font-serif text-2xl text-[hsl(var(--ink))]">Vendor management</p>
+                <p className="font-serif text-2xl text-ink">Vendor management</p>
                 <p className="text-sm text-stone-600">
                   {vendors.length} vendors · {items.length} items assigned · used by Inventory,
                   Invoices and the Ordering agent.
@@ -1195,7 +1195,7 @@ function InventoryPage() {
                     return (
                       <TableRow key={v.id} className="hover:bg-stone-50/50">
                         <TableCell>
-                          <p className="font-medium text-[hsl(var(--ink))]">{v.name}</p>
+                          <p className="font-medium text-ink">{v.name}</p>
                           {v.notes && <p className="text-xs text-stone-500 mt-0.5">{v.notes}</p>}
                         </TableCell>
                         <TableCell>
@@ -1250,7 +1250,7 @@ function InventoryPage() {
                             <Button
                               size="icon"
                               variant="ghost"
-                              className="h-8 w-8 text-stone-500 hover:text-[hsl(var(--terracotta))]"
+                              className="h-8 w-8 text-stone-500 hover:text-terracotta"
                               onClick={() => setVendorToDelete(v)}
                               aria-label={`Delete ${v.name}`}
                             >
@@ -1327,7 +1327,7 @@ function InventoryPage() {
                 <TableBody>
                   {pagedPurchaseOrders.map((po) => (
                     <TableRow key={po.id} className="hover:bg-stone-50/50">
-                      <TableCell className="font-medium text-[hsl(var(--ink))]">
+                      <TableCell className="font-medium text-ink">
                         {po.vendorName}
                       </TableCell>
                       <TableCell className="text-sm text-stone-700">
@@ -1362,7 +1362,7 @@ function InventoryPage() {
                           <div className="flex items-center gap-2">
                             {po.emailError && (
                               <span
-                                className="text-xs text-[hsl(var(--terracotta))]"
+                                className="text-xs text-terracotta"
                                 title={po.emailError}
                               >
                                 Failed
@@ -1491,7 +1491,7 @@ function InventoryPage() {
                           ${line.lineTotal.toFixed(2)}
                         </p>
                         <button
-                          className="text-stone-400 hover:text-[hsl(var(--terracotta))]"
+                          className="text-stone-400 hover:text-terracotta"
                           onClick={() => setCartQty(line.id, 0)}
                         >
                           <Trash2 className="h-3.5 w-3.5" />
@@ -1559,15 +1559,15 @@ function InventoryPage() {
               </p>
               <ul className="text-sm space-y-1.5 text-stone-700">
                 <li className="flex items-center gap-2">
-                  <Sparkles className="h-3 w-3 text-[hsl(var(--terracotta))]" /> Current par level
+                  <Sparkles className="h-3 w-3 text-terracotta" /> Current par level
                   minus current on-hand count
                 </li>
                 <li className="flex items-center gap-2">
-                  <Sparkles className="h-3 w-3 text-[hsl(var(--terracotta))]" /> Weekly usage, from
+                  <Sparkles className="h-3 w-3 text-terracotta" /> Weekly usage, from
                   real POS sales mapped through each item's recipe
                 </li>
                 <li className="flex items-center gap-2">
-                  <Sparkles className="h-3 w-3 text-[hsl(var(--terracotta))]" /> +15% padded on top
+                  <Sparkles className="h-3 w-3 text-terracotta" /> +15% padded on top
                   as safety stock
                 </li>
               </ul>
@@ -1615,7 +1615,7 @@ function InventoryPage() {
 
       {/* Toast */}
       {sentToast && (
-        <div className="fixed bottom-6 right-6 z-50 max-w-sm bg-[hsl(var(--ink))] text-cream rounded-lg shadow-xl p-4 flex items-start gap-3 animate-in fade-in slide-in-from-bottom-4">
+        <div className="fixed bottom-6 right-6 z-50 max-w-sm bg-ink text-cream rounded-lg shadow-xl p-4 flex items-start gap-3 animate-in fade-in slide-in-from-bottom-4">
           <CheckCircle2 className="h-5 w-5 text-emerald-300 mt-0.5 shrink-0" />
           <div className="flex-1 text-sm text-stone-100">{sentToast}</div>
           <button onClick={() => setSentToast(null)} className="text-stone-400 hover:text-white">
@@ -1805,9 +1805,9 @@ function InventoryPage() {
                 anything Claude got wrong, uncheck rows to skip, then confirm.
               </p>
 
-              <Card className="border-stone-200 bg-[hsl(var(--cream))] p-3">
+              <Card className="border-stone-200 bg-cream p-3">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-sm font-medium text-[hsl(var(--ink))]">
+                  <span className="text-sm font-medium text-ink">
                     {bulkImportRows.filter((r) => r.include).length} row
                     {bulkImportRows.filter((r) => r.include).length === 1 ? "" : "s"} checked
                   </span>
@@ -2021,7 +2021,7 @@ function InventoryPage() {
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
               onClick={confirmDeleteItem}
-              className="bg-[hsl(var(--terracotta))] hover:bg-[hsl(var(--terracotta))]/90"
+              className="bg-terracotta hover:bg-terracotta/90"
             >
               Delete item
             </AlertDialogAction>
@@ -2134,10 +2134,10 @@ function InventoryPage() {
                   if (vendorSenderEmailsError) setVendorSenderEmailsError(null);
                 }}
                 placeholder="e.g. invoices@vendor.com, @vendor.com"
-                className={vendorSenderEmailsError ? "border-[hsl(var(--terracotta))]" : ""}
+                className={vendorSenderEmailsError ? "border-terracotta" : ""}
               />
               {vendorSenderEmailsError ? (
-                <p className="mt-1 text-xs text-[hsl(var(--terracotta))]">{vendorSenderEmailsError}</p>
+                <p className="mt-1 text-xs text-terracotta">{vendorSenderEmailsError}</p>
               ) : (
                 <p className="mt-1 text-xs text-stone-500">
                   Comma-separated — full addresses (invoices@vendor.com) and/or whole domains
@@ -2178,7 +2178,7 @@ function InventoryPage() {
             <AlertDialogDescription>
               {vendorToDelete && vendorItemCount(vendorToDelete.name) > 0 ? (
                 <>
-                  <span className="text-[hsl(var(--terracotta))] font-medium">
+                  <span className="text-terracotta font-medium">
                     {vendorItemCount(vendorToDelete.name)} item(s) are still assigned to this
                     vendor.
                   </span>{" "}
@@ -2195,7 +2195,7 @@ function InventoryPage() {
             <AlertDialogAction
               onClick={confirmDeleteVendor}
               disabled={!!vendorToDelete && vendorItemCount(vendorToDelete.name) > 0}
-              className="bg-[hsl(var(--terracotta))] hover:bg-[hsl(var(--terracotta))]/90"
+              className="bg-terracotta hover:bg-terracotta/90"
             >
               Delete vendor
             </AlertDialogAction>
@@ -2226,10 +2226,10 @@ function KpiCard({
         <span>{label}</span>
         {trend === "up" && <TrendingUp className="h-3 w-3 text-emerald-600 ml-auto" />}
         {trend === "down" && (
-          <TrendingDown className="h-3 w-3 text-[hsl(var(--terracotta))] ml-auto" />
+          <TrendingDown className="h-3 w-3 text-terracotta ml-auto" />
         )}
       </div>
-      <p className="font-serif text-3xl text-[hsl(var(--ink))] mt-2 tabular-nums">{value}</p>
+      <p className="font-serif text-3xl text-ink mt-2 tabular-nums">{value}</p>
       {hint && <p className="text-xs text-stone-500 mt-1">{hint}</p>}
     </Card>
   );
@@ -2306,7 +2306,7 @@ function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div className="border border-stone-200 rounded-md p-3">
       <p className="text-xs uppercase tracking-wider text-stone-500">{label}</p>
-      <p className="text-sm font-medium text-[hsl(var(--ink))] mt-1">{value}</p>
+      <p className="text-sm font-medium text-ink mt-1">{value}</p>
     </div>
   );
 }

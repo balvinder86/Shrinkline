@@ -505,7 +505,7 @@ function AdminPage() {
                 if (memberToRemove) removeMember.mutate(memberToRemove.userId);
                 setMemberToRemove(null);
               }}
-              className="bg-[hsl(var(--terracotta))] hover:bg-[hsl(var(--terracotta))]/90"
+              className="bg-terracotta hover:bg-terracotta/90"
             >
               Remove
             </AlertDialogAction>

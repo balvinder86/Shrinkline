@@ -23,7 +23,7 @@ function RecommendationRow({ rec }: { rec: AiRecommendation }) {
       <AlertTriangle className={`h-4 w-4 mt-0.5 shrink-0 ${style.icon}`} />
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
-          <p className="font-medium text-sm text-stone-900">{rec.headline}</p>
+          <p className="font-medium text-sm text-ink">{rec.headline}</p>
           <Badge variant="outline" className={style.badge}>
             {rec.severity}
           </Badge>
@@ -34,10 +34,17 @@ function RecommendationRow({ rec }: { rec: AiRecommendation }) {
   );
 }
 
-// Same visual language as the "AI Agent strip" on the Inventory page
-// (dark gradient card, Brain icon) — reads as one system rather than a
-// bolted-on feature. Always renders (even empty), so the AI layer stays
-// discoverable rather than only appearing once it has something to say.
+// Light card matching the rest of the dashboard's KPI-card style
+// (bg-white, border-stone-200) instead of the dark
+// bg-gradient-to-br from-[hsl(var(--ink))] pattern used elsewhere in
+// this codebase — that gradient is broken CSS (--ink/--terracotta are
+// defined as oklch(), so wrapping them in hsl(...) is invalid; the
+// browser silently drops it and the "from" side washes out to the page
+// background, which is why that pattern reads as low-contrast). Uses
+// the pre-registered `text-ink`/`bg-terracotta` utilities (see
+// styles.css's @theme block) instead, which resolve correctly. Always
+// renders (even empty), so the AI layer stays discoverable rather than
+// only appearing once it has something to say.
 //
 // headerAction is an optional slot (e.g. a settings-gear button) so a
 // page can attach its own controls without this shared component
@@ -54,16 +61,16 @@ export function AiRecommendationsPanel({
   const generatedAt = recommendations[0]?.generated_at;
 
   return (
-    <Card className="p-5 bg-gradient-to-br from-[hsl(var(--ink))] to-stone-800 text-cream border-0">
+    <Card className="p-5 border-stone-200 bg-white">
       <div className="flex items-start gap-4">
-        <div className="h-11 w-11 rounded-xl bg-white/10 flex items-center justify-center shrink-0">
-          <Brain className="h-5 w-5 text-amber-200" />
+        <div className="h-11 w-11 rounded-xl bg-terracotta/10 flex items-center justify-center shrink-0">
+          <Brain className="h-5 w-5 text-terracotta" />
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <p className="font-serif text-lg text-stone-100">AI Recommendations</p>
+            <p className="font-serif text-lg text-ink">AI Recommendations</p>
             {generatedAt && (
-              <span className="text-xs text-stone-400">
+              <span className="text-xs text-stone-500">
                 Updated {new Date(generatedAt).toLocaleDateString()}
               </span>
             )}
@@ -71,14 +78,14 @@ export function AiRecommendationsPanel({
           </div>
 
           {isLoading ? (
-            <p className="text-sm text-stone-300 mt-1">Loading...</p>
+            <p className="text-sm text-stone-500 mt-1">Loading...</p>
           ) : recommendations.length === 0 ? (
-            <p className="text-sm text-stone-300 mt-1 flex items-center gap-1.5">
-              <Info className="h-3.5 w-3.5" /> No recommendations yet — check back after tonight's
-              analysis.
+            <p className="text-sm text-stone-500 mt-1 flex items-center gap-1.5">
+              <Info className="h-3.5 w-3.5" /> No recommendations yet — check back after
+              tonight's analysis.
             </p>
           ) : (
-            <div className="bg-white rounded-lg mt-3 px-4 divide-y divide-stone-100">
+            <div className="mt-3 divide-y divide-stone-100">
               {recommendations.map((rec) => (
                 <RecommendationRow key={`${rec.tab}-${rec.headline}`} rec={rec} />
               ))}

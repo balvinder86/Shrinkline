@@ -90,12 +90,12 @@ type MenuItem = RealMenuItem;
 const ITEMS_PAGE_SIZE = 50;
 
 const PALETTE = {
-  ink: "hsl(var(--foreground))",
+  ink: "var(--foreground)",
   terracotta: "#c4654a",
   olive: "#87a878",
   amber: "#d4a574",
   rose: "#c17c74",
-  muted: "hsl(var(--muted-foreground))",
+  muted: "var(--muted-foreground)",
 };
 
 const TREND_COLORS = [PALETTE.terracotta, "#3a2418", PALETTE.amber, PALETTE.olive, PALETTE.rose];
@@ -705,13 +705,13 @@ function ProductMixPage() {
                   <div className="h-72">
                     <ResponsiveContainer width="100%" height="100%">
                       <LineChart data={dayparts.hourlyChart}>
-                        <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="2 4" />
+                        <CartesianGrid stroke="var(--border)" strokeDasharray="2 4" />
                         <XAxis dataKey="hr" tick={{ fontSize: 11 }} />
                         <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `$${v}`} />
                         <Tooltip
                           contentStyle={{
-                            background: "hsl(var(--background))",
-                            border: "1px solid hsl(var(--border))",
+                            background: "var(--background)",
+                            border: "1px solid var(--border)",
                             borderRadius: 8,
                             fontSize: 12,
                           }}
@@ -762,13 +762,13 @@ function ProductMixPage() {
                   <div className="h-80">
                     <ResponsiveContainer width="100%" height="100%">
                       <LineChart data={itemTrend.series}>
-                        <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="2 4" />
+                        <CartesianGrid stroke="var(--border)" strokeDasharray="2 4" />
                         <XAxis dataKey="bucket" tick={{ fontSize: 11 }} />
                         <YAxis tick={{ fontSize: 11 }} />
                         <Tooltip
                           contentStyle={{
-                            background: "hsl(var(--background))",
-                            border: "1px solid hsl(var(--border))",
+                            background: "var(--background)",
+                            border: "1px solid var(--border)",
                             borderRadius: 8,
                             fontSize: 12,
                           }}
@@ -833,8 +833,8 @@ function ProductMixPage() {
                               "",
                             ]}
                             contentStyle={{
-                              background: "hsl(var(--background))",
-                              border: "1px solid hsl(var(--border))",
+                              background: "var(--background)",
+                              border: "1px solid var(--border)",
                               borderRadius: 8,
                               fontSize: 12,
                             }}

@@ -393,7 +393,7 @@ function RecipesPage() {
           <TabsContent value="items" className="mt-4 space-y-3">
             <div className="max-w-full overflow-x-auto">
               <Tabs value={categoryTab} onValueChange={setCategoryTab}>
-                <TabsList className="bg-[hsl(var(--cream))] border border-stone-200">
+                <TabsList className="bg-cream border border-stone-200">
                   <TabsTrigger value="All">All</TabsTrigger>
                   {CATEGORIES.map((c) => (
                     <TabsTrigger key={c} value={c}>

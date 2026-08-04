@@ -421,7 +421,7 @@ function InvoicesPage() {
             <Button
               size="sm"
               variant="ghost"
-              className="text-stone-300 hover:text-white hover:bg-white/10 h-7 px-2"
+              className="text-stone-500 hover:text-ink hover:bg-stone-100 h-7 px-2"
               onClick={() => setInsightsSettingsOpen(true)}
             >
               <Settings2 className="h-3.5 w-3.5" /> Settings
@@ -723,7 +723,7 @@ function InvoicesPage() {
               </div>
               <div className="max-w-full overflow-x-auto">
                 <Tabs value={categoryFilter} onValueChange={setCategoryFilter}>
-                  <TabsList className="bg-[hsl(var(--cream))] border border-stone-200">
+                  <TabsList className="bg-cream border border-stone-200">
                     <TabsTrigger value="all">All categories</TabsTrigger>
                     {VENDOR_CATEGORIES.map((c) => (
                       <TabsTrigger key={c.value} value={c.value}>
