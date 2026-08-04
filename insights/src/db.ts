@@ -1,5 +1,6 @@
 import { supabase } from "./supabase.js";
 import { computeFoodCostSummary, type FoodCostSummary } from "./foodCost.js";
+import { computeInvoiceDrift, type PriceDriftItem } from "./invoiceDrift.js";
 
 export type Location = {
   id: string;
@@ -26,13 +27,11 @@ export type TabContext = {
   // same computation as useFoodCostSummary (src/lib/pos/queries.ts),
   // ported to run server-side in foodCost.ts.
   foodCost: FoodCostSummary;
-  // TODO: no dashboard metric for genuine vendor price increases exists
-  // yet — vendor_product_pack_info.last_unit_cost_cents is only an OCR
-  // plausibility baseline (see ocr/src/server.ts, PRICE_DRIFT_FACTOR =
-  // 3x), tuned to catch case/bottle mismatches, not real price drift.
-  // Left empty rather than repurposing that threshold for something it
-  // wasn't built to detect.
-  invoiceDrift: [];
+  // Real vendor price-drift signal — see invoiceDrift.ts. Distinct from
+  // vendor_product_pack_info.last_unit_cost_cents, which is only an OCR
+  // plausibility baseline (ocr/src/server.ts, PRICE_DRIFT_FACTOR = 3x)
+  // tuned to catch case/bottle mismatches, not real price increases.
+  invoiceDrift: PriceDriftItem[];
 };
 
 // Pulls each tab's already-computed numbers into a compact per-tenant
@@ -41,7 +40,7 @@ export type TabContext = {
 // from `loc`, never from anything returned by these queries, same as
 // every other cross-tenant loop in this codebase.
 export async function getTabContext(loc: Location): Promise<TabContext> {
-  const [lowParRes, foodCost] = await Promise.all([
+  const [lowParRes, foodCost, invoiceDrift] = await Promise.all([
     // PostgREST's .lt()/.gt() compare a column against a literal value,
     // not another column — "avg_daily_usage < par_quantity" has to be
     // filtered in JS instead of pushed into the query. (This is the fix
@@ -59,6 +58,7 @@ export async function getTabContext(loc: Location): Promise<TabContext> {
       )
       .eq("location_id", loc.id),
     computeFoodCostSummary(loc.id),
+    computeInvoiceDrift(loc.id),
   ]);
   if (lowParRes.error) throw new Error(`load par_levels for ${loc.id} failed: ${lowParRes.error.message}`);
 
@@ -78,7 +78,7 @@ export async function getTabContext(loc: Location): Promise<TabContext> {
       avg_daily_usage: row.avg_daily_usage,
     }));
 
-  return { lowPar, foodCost, invoiceDrift: [] };
+  return { lowPar, foodCost, invoiceDrift };
 }
 
 export type BatchRecord = {
