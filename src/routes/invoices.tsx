@@ -125,11 +125,7 @@ import {
   type RealInvoice,
 } from "@/lib/boh/queries";
 import { attachmentGateError } from "@/lib/boh/attachmentGate";
-import {
-  VENDOR_CATEGORIES,
-  VENDOR_CATEGORY_LABEL,
-  VENDOR_CATEGORY_COLOR,
-} from "@/lib/boh/vendor-categories";
+import { VENDOR_CATEGORIES, VENDOR_CATEGORY_LABEL, VENDOR_CATEGORY_COLOR } from "@/lib/boh/vendor-categories";
 
 export const Route = createFileRoute("/invoices")({
   head: () => ({
@@ -601,11 +597,7 @@ function InvoicesPage() {
           ) : (
             <div className="mt-4 h-[220px]">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart
-                  data={sortedExpenseCategorySpend}
-                  layout="vertical"
-                  margin={{ left: 8, right: 8 }}
-                >
+                <BarChart data={sortedExpenseCategorySpend} layout="vertical" margin={{ left: 8, right: 8 }}>
                   <CartesianGrid stroke="var(--border)" strokeDasharray="2 4" horizontal={false} />
                   <XAxis
                     type="number"
@@ -617,9 +609,7 @@ function InvoicesPage() {
                     dataKey="category"
                     tick={{ fontSize: 11 }}
                     width={140}
-                    tickFormatter={(c: string) =>
-                      VENDOR_CATEGORY_LABEL[c as keyof typeof VENDOR_CATEGORY_LABEL]
-                    }
+                    tickFormatter={(c: string) => VENDOR_CATEGORY_LABEL[c as keyof typeof VENDOR_CATEGORY_LABEL]}
                   />
                   <Tooltip
                     contentStyle={{
@@ -629,8 +619,7 @@ function InvoicesPage() {
                       fontSize: 12,
                     }}
                     formatter={(v: number, _name, item) => {
-                      const category = item?.payload
-                        ?.category as keyof typeof VENDOR_CATEGORY_LABEL;
+                      const category = item?.payload?.category as keyof typeof VENDOR_CATEGORY_LABEL;
                       const count = item?.payload?.invoiceCount ?? 0;
                       return [
                         `${formatMoney(v / 100)} · ${count} invoice${count === 1 ? "" : "s"}`,
@@ -774,104 +763,104 @@ function InvoicesPage() {
 
             <Card className="overflow-hidden">
               <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="bg-muted/40">
-                      <TableHead className="w-[44px]">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-muted/40">
+                    <TableHead className="w-[44px]">
+                      <Checkbox
+                        checked={allPagedSelected}
+                        onCheckedChange={(checked) => toggleSelectAllPaged(checked === true)}
+                        aria-label="Select all invoices on this page"
+                      />
+                    </TableHead>
+                    <TableHead>Vendor</TableHead>
+                    <TableHead>Invoice #</TableHead>
+                    <TableHead>Date</TableHead>
+                    <TableHead className="text-right">Total</TableHead>
+                    <TableHead className="text-right">Savings</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead />
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {pagedInvoices.map((inv) => (
+                    <TableRow
+                      key={inv.id}
+                      className="cursor-pointer"
+                      onClick={() => setOcrSheetInvoiceId(inv.id)}
+                    >
+                      <TableCell onClick={(e) => e.stopPropagation()}>
                         <Checkbox
-                          checked={allPagedSelected}
-                          onCheckedChange={(checked) => toggleSelectAllPaged(checked === true)}
-                          aria-label="Select all invoices on this page"
+                          checked={selectedInvoiceIds.has(inv.id)}
+                          onCheckedChange={(checked) =>
+                            toggleInvoiceSelected(inv.id, checked === true)
+                          }
+                          aria-label={`Select invoice${inv.vendorName ? ` from ${inv.vendorName}` : ""}`}
                         />
-                      </TableHead>
-                      <TableHead>Vendor</TableHead>
-                      <TableHead>Invoice #</TableHead>
-                      <TableHead>Date</TableHead>
-                      <TableHead className="text-right">Total</TableHead>
-                      <TableHead className="text-right">Savings</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead />
+                      </TableCell>
+                      <TableCell className="font-medium">
+                        {inv.vendorName ?? (
+                          <Badge
+                            variant="outline"
+                            className="border-amber-200 bg-amber-50 text-amber-800"
+                          >
+                            Needs vendor
+                          </Badge>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-sm">{inv.invoiceNumber ?? "—"}</TableCell>
+                      <TableCell className="text-sm">{inv.invoiceDate ?? "—"}</TableCell>
+                      <TableCell className="text-right font-medium">
+                        {inv.totalCents != null ? formatMoney(inv.totalCents / 100) : "—"}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {inv.discountCents ? (
+                          <span className="text-emerald-700">
+                            {formatMoney(inv.discountCents / 100)}
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {ocrStatusBadge(inv.ocrStatus, inv.status)}
+                        {flagBadges(inv.flags, inv.documentType)}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          <Button size="sm" variant="ghost" className="h-8">
+                            Review
+                          </Button>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setInvoiceToDelete(inv);
+                            }}
+                            aria-label={`Delete invoice${inv.vendorName ? ` from ${inv.vendorName}` : ""}`}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </TableCell>
                     </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {pagedInvoices.map((inv) => (
-                      <TableRow
-                        key={inv.id}
-                        className="cursor-pointer"
-                        onClick={() => setOcrSheetInvoiceId(inv.id)}
+                  ))}
+                  {filteredInvoices.length === 0 && (
+                    <TableRow>
+                      <TableCell
+                        colSpan={8}
+                        className="py-10 text-center text-sm text-muted-foreground"
                       >
-                        <TableCell onClick={(e) => e.stopPropagation()}>
-                          <Checkbox
-                            checked={selectedInvoiceIds.has(inv.id)}
-                            onCheckedChange={(checked) =>
-                              toggleInvoiceSelected(inv.id, checked === true)
-                            }
-                            aria-label={`Select invoice${inv.vendorName ? ` from ${inv.vendorName}` : ""}`}
-                          />
-                        </TableCell>
-                        <TableCell className="font-medium">
-                          {inv.vendorName ?? (
-                            <Badge
-                              variant="outline"
-                              className="border-amber-200 bg-amber-50 text-amber-800"
-                            >
-                              Needs vendor
-                            </Badge>
-                          )}
-                        </TableCell>
-                        <TableCell className="text-sm">{inv.invoiceNumber ?? "—"}</TableCell>
-                        <TableCell className="text-sm">{inv.invoiceDate ?? "—"}</TableCell>
-                        <TableCell className="text-right font-medium">
-                          {inv.totalCents != null ? formatMoney(inv.totalCents / 100) : "—"}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {inv.discountCents ? (
-                            <span className="text-emerald-700">
-                              {formatMoney(inv.discountCents / 100)}
-                            </span>
-                          ) : (
-                            <span className="text-muted-foreground">—</span>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          {ocrStatusBadge(inv.ocrStatus, inv.status)}
-                          {flagBadges(inv.flags, inv.documentType)}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex items-center justify-end gap-1">
-                            <Button size="sm" variant="ghost" className="h-8">
-                              Review
-                            </Button>
-                            <Button
-                              size="icon"
-                              variant="ghost"
-                              className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setInvoiceToDelete(inv);
-                              }}
-                              aria-label={`Delete invoice${inv.vendorName ? ` from ${inv.vendorName}` : ""}`}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                    {filteredInvoices.length === 0 && (
-                      <TableRow>
-                        <TableCell
-                          colSpan={8}
-                          className="py-10 text-center text-sm text-muted-foreground"
-                        >
-                          {realInvoices.length === 0
-                            ? "No invoices yet — upload one or connect email ingestion to get started."
-                            : `No invoices in ${rangeLabel} — try a different period.`}
-                        </TableCell>
-                      </TableRow>
-                    )}
-                  </TableBody>
-                </Table>
+                        {realInvoices.length === 0
+                          ? "No invoices yet — upload one or connect email ingestion to get started."
+                          : `No invoices in ${rangeLabel} — try a different period.`}
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
               </div>
               <div className="flex flex-wrap items-center justify-between gap-2 border-t bg-muted/30 px-4 py-3 text-sm">
                 <span className="text-muted-foreground">
@@ -1007,61 +996,61 @@ function InvoicesPage() {
                   </p>
                 </div>
                 <div className="mt-3 overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Item</TableHead>
-                        <TableHead>Vendor</TableHead>
-                        <TableHead className="text-right">Spend</TableHead>
-                        <TableHead className="text-right">Δ price</TableHead>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Item</TableHead>
+                      <TableHead>Vendor</TableHead>
+                      <TableHead className="text-right">Spend</TableHead>
+                      <TableHead className="text-right">Δ price</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {topLineItems.map((i) => (
+                      <TableRow key={i.ingredientId}>
+                        <TableCell className="font-medium">{i.name}</TableCell>
+                        <TableCell className="text-xs text-muted-foreground">
+                          {i.vendorLabel}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {formatMoney(i.spendCents / 100)}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {i.priceChangePct == null ? (
+                            <span className="text-xs text-muted-foreground">—</span>
+                          ) : (
+                            <span
+                              className={`inline-flex items-center gap-0.5 text-xs font-medium ${
+                                i.priceChangePct > 0
+                                  ? "text-rose-600"
+                                  : i.priceChangePct < 0
+                                    ? "text-emerald-600"
+                                    : "text-muted-foreground"
+                              }`}
+                            >
+                              {i.priceChangePct > 0 ? (
+                                <ArrowUpRight className="h-3 w-3" />
+                              ) : i.priceChangePct < 0 ? (
+                                <ArrowDownRight className="h-3 w-3" />
+                              ) : null}
+                              {i.priceChangePct === 0 ? "—" : `${Math.abs(i.priceChangePct)}%`}
+                            </span>
+                          )}
+                        </TableCell>
                       </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {topLineItems.map((i) => (
-                        <TableRow key={i.ingredientId}>
-                          <TableCell className="font-medium">{i.name}</TableCell>
-                          <TableCell className="text-xs text-muted-foreground">
-                            {i.vendorLabel}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            {formatMoney(i.spendCents / 100)}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            {i.priceChangePct == null ? (
-                              <span className="text-xs text-muted-foreground">—</span>
-                            ) : (
-                              <span
-                                className={`inline-flex items-center gap-0.5 text-xs font-medium ${
-                                  i.priceChangePct > 0
-                                    ? "text-rose-600"
-                                    : i.priceChangePct < 0
-                                      ? "text-emerald-600"
-                                      : "text-muted-foreground"
-                                }`}
-                              >
-                                {i.priceChangePct > 0 ? (
-                                  <ArrowUpRight className="h-3 w-3" />
-                                ) : i.priceChangePct < 0 ? (
-                                  <ArrowDownRight className="h-3 w-3" />
-                                ) : null}
-                                {i.priceChangePct === 0 ? "—" : `${Math.abs(i.priceChangePct)}%`}
-                              </span>
-                            )}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                      {topLineItems.length === 0 && (
-                        <TableRow>
-                          <TableCell
-                            colSpan={4}
-                            className="py-10 text-center text-sm text-muted-foreground"
-                          >
-                            No matched line items on approved invoices yet.
-                          </TableCell>
-                        </TableRow>
-                      )}
-                    </TableBody>
-                  </Table>
+                    ))}
+                    {topLineItems.length === 0 && (
+                      <TableRow>
+                        <TableCell
+                          colSpan={4}
+                          className="py-10 text-center text-sm text-muted-foreground"
+                        >
+                          No matched line items on approved invoices yet.
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
                 </div>
               </Card>
 
@@ -1293,52 +1282,45 @@ function RealInvoiceUploadsCard({ onOpenInvoice }: { onOpenInvoice: (id: string)
         </div>
       </div>
       <div className="overflow-x-auto">
-        <Table>
-          <TableHeader>
-            <TableRow className="bg-muted/40">
-              <TableHead>Vendor</TableHead>
-              <TableHead>Invoice #</TableHead>
-              <TableHead>Date</TableHead>
-              <TableHead className="text-right">Total</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead />
+      <Table>
+        <TableHeader>
+          <TableRow className="bg-muted/40">
+            <TableHead>Vendor</TableHead>
+            <TableHead>Invoice #</TableHead>
+            <TableHead>Date</TableHead>
+            <TableHead className="text-right">Total</TableHead>
+            <TableHead>Status</TableHead>
+            <TableHead />
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {invoices.map((inv) => (
+            <TableRow key={inv.id} className="cursor-pointer" onClick={() => onOpenInvoice(inv.id)}>
+              <TableCell className="font-medium">
+                {inv.vendorName ?? (
+                  <Badge variant="outline" className="border-amber-200 bg-amber-50 text-amber-800">
+                    Needs vendor
+                  </Badge>
+                )}
+              </TableCell>
+              <TableCell className="text-sm">{inv.invoiceNumber ?? "—"}</TableCell>
+              <TableCell className="text-sm">{inv.invoiceDate ?? "—"}</TableCell>
+              <TableCell className="text-right font-medium">
+                {inv.totalCents != null ? formatMoney(inv.totalCents / 100) : "—"}
+              </TableCell>
+              <TableCell>
+                {ocrStatusBadge(inv.ocrStatus, inv.status)}
+                {flagBadges(inv.flags, inv.documentType)}
+              </TableCell>
+              <TableCell className="text-right">
+                <Button size="sm" variant="ghost" className="h-8">
+                  Review
+                </Button>
+              </TableCell>
             </TableRow>
-          </TableHeader>
-          <TableBody>
-            {invoices.map((inv) => (
-              <TableRow
-                key={inv.id}
-                className="cursor-pointer"
-                onClick={() => onOpenInvoice(inv.id)}
-              >
-                <TableCell className="font-medium">
-                  {inv.vendorName ?? (
-                    <Badge
-                      variant="outline"
-                      className="border-amber-200 bg-amber-50 text-amber-800"
-                    >
-                      Needs vendor
-                    </Badge>
-                  )}
-                </TableCell>
-                <TableCell className="text-sm">{inv.invoiceNumber ?? "—"}</TableCell>
-                <TableCell className="text-sm">{inv.invoiceDate ?? "—"}</TableCell>
-                <TableCell className="text-right font-medium">
-                  {inv.totalCents != null ? formatMoney(inv.totalCents / 100) : "—"}
-                </TableCell>
-                <TableCell>
-                  {ocrStatusBadge(inv.ocrStatus, inv.status)}
-                  {flagBadges(inv.flags, inv.documentType)}
-                </TableCell>
-                <TableCell className="text-right">
-                  <Button size="sm" variant="ghost" className="h-8">
-                    Review
-                  </Button>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+          ))}
+        </TableBody>
+      </Table>
       </div>
     </Card>
   );
@@ -1412,8 +1394,8 @@ function CameraCaptureDialog({
         const name = e instanceof DOMException ? e.name : "";
         setError(
           name === "NotAllowedError"
-            ? 'Camera access was denied — allow camera access for this site in your browser settings, or use "Choose a file" instead.'
-            : 'Couldn\'t access a camera on this device — use "Choose a file" instead.',
+            ? "Camera access was denied — allow camera access for this site in your browser settings, or use \"Choose a file\" instead."
+            : "Couldn't access a camera on this device — use \"Choose a file\" instead.",
         );
       });
 
@@ -1485,8 +1467,8 @@ function CameraCaptureDialog({
         )}
         {!error && !previewUrl && (
           <p className="text-xs text-muted-foreground">
-            Hold the invoice flat and fill as much of the frame as you can — an angled or cropped
-            shot is much less likely to extract cleanly.
+            Hold the invoice flat and fill as much of the frame as you can — an angled or
+            cropped shot is much less likely to extract cleanly.
           </p>
         )}
         <DialogFooter>
@@ -1702,10 +1684,7 @@ function InvoiceOcrSheet({
     setStarting(true);
     setStartError(null);
     try {
-      const id = await uploadInvoice.mutateAsync({
-        vendorId: vendorId || null,
-        file: fileToUpload,
-      });
+      const id = await uploadInvoice.mutateAsync({ vendorId: vendorId || null, file: fileToUpload });
       await enqueueOcr.mutateAsync(id);
       setUploadedId(id);
     } catch (e) {
@@ -1945,164 +1924,148 @@ function InvoiceOcrSheet({
                 Line items — match to an ingredient
               </div>
               <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Extracted description</TableHead>
-                      <TableHead>Qty</TableHead>
-                      <TableHead className="text-right">Total</TableHead>
-                      <TableHead>Case or individual unit?</TableHead>
-                      <TableHead>Ingredient match</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {lines.map((l) => {
-                      const manualPackSize = manualPackSizeInputs[l.id] ?? "";
-                      const manualPackSizeNumber = Number(manualPackSize);
-                      const hasValidManualPackSize =
-                        manualPackSize.trim() !== "" && manualPackSizeNumber > 0;
-                      const resolveWith = (
-                        orderUnit: "case" | "bottle",
-                        packSize: number | null,
-                      ) => {
-                        resolveCasePricing.mutate({
-                          lineId: l.id,
-                          vendorId: invoice!.vendorId!,
-                          productCode: l.productCode!,
-                          quantity: l.quantity ?? 1,
-                          lineTotalCents: l.lineTotalCents,
-                          detectedPackSize: packSize,
-                          orderUnit,
-                        });
-                        setManualOverrideLineIds((prev) => {
-                          const next = new Set(prev);
-                          next.delete(l.id);
-                          return next;
-                        });
-                        setManualPackSizeInputs((prev) => {
-                          const next = { ...prev };
-                          delete next[l.id];
-                          return next;
-                        });
-                      };
-                      return (
-                        <TableRow key={l.id}>
-                          <TableCell>
-                            <div className="font-medium">{l.rawDescription || "—"}</div>
-                          </TableCell>
-                          <TableCell className="text-sm">
-                            {l.quantity != null ? `${l.quantity} ${l.unit ?? ""}` : "—"}
-                          </TableCell>
-                          <TableCell className="text-right font-medium">
-                            {l.lineTotalCents != null ? formatMoney(l.lineTotalCents / 100) : "—"}
-                          </TableCell>
-                          <TableCell>
-                            {(l.casePricingStatus === "needs_review" ||
-                              manualOverrideLineIds.has(l.id)) &&
-                            invoice?.vendorId &&
-                            l.productCode ? (
-                              <div className="flex flex-col gap-1">
-                                <span className="text-[11px] text-amber-700">
-                                  {l.detectedPackSize != null
-                                    ? `Found a pack size of ${l.detectedPackSize} — which was this?`
-                                    : "Case or individual unit?"}
-                                </span>
-                                <div className="flex flex-wrap items-center gap-1.5">
-                                  {l.detectedPackSize != null ? (
-                                    <Button
-                                      size="sm"
-                                      variant="outline"
-                                      className="h-7 px-2 text-xs"
-                                      disabled={resolveCasePricing.isPending}
-                                      onClick={() => resolveWith("case", l.detectedPackSize)}
-                                    >
-                                      Case
-                                    </Button>
-                                  ) : (
-                                    <div className="flex items-center gap-1">
-                                      <span className="text-[11px] text-muted-foreground">
-                                        Case of
-                                      </span>
-                                      <Input
-                                        type="number"
-                                        min={1}
-                                        value={manualPackSize}
-                                        onChange={(e) =>
-                                          setManualPackSizeInputs((prev) => ({
-                                            ...prev,
-                                            [l.id]: e.target.value,
-                                          }))
-                                        }
-                                        placeholder="units"
-                                        className="h-7 w-16 px-1.5 text-xs"
-                                      />
-                                      <Button
-                                        size="sm"
-                                        variant="outline"
-                                        className="h-7 px-2 text-xs"
-                                        disabled={
-                                          resolveCasePricing.isPending || !hasValidManualPackSize
-                                        }
-                                        onClick={() => resolveWith("case", manualPackSizeNumber)}
-                                      >
-                                        Confirm
-                                      </Button>
-                                    </div>
-                                  )}
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Extracted description</TableHead>
+                    <TableHead>Qty</TableHead>
+                    <TableHead className="text-right">Total</TableHead>
+                    <TableHead>Case or individual unit?</TableHead>
+                    <TableHead>Ingredient match</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {lines.map((l) => {
+                    const manualPackSize = manualPackSizeInputs[l.id] ?? "";
+                    const manualPackSizeNumber = Number(manualPackSize);
+                    const hasValidManualPackSize = manualPackSize.trim() !== "" && manualPackSizeNumber > 0;
+                    const resolveWith = (orderUnit: "case" | "bottle", packSize: number | null) => {
+                      resolveCasePricing.mutate({
+                        lineId: l.id,
+                        vendorId: invoice!.vendorId!,
+                        productCode: l.productCode!,
+                        quantity: l.quantity ?? 1,
+                        lineTotalCents: l.lineTotalCents,
+                        detectedPackSize: packSize,
+                        orderUnit,
+                      });
+                      setManualOverrideLineIds((prev) => {
+                        const next = new Set(prev);
+                        next.delete(l.id);
+                        return next;
+                      });
+                      setManualPackSizeInputs((prev) => {
+                        const next = { ...prev };
+                        delete next[l.id];
+                        return next;
+                      });
+                    };
+                    return (
+                    <TableRow key={l.id}>
+                      <TableCell>
+                        <div className="font-medium">{l.rawDescription || "—"}</div>
+                      </TableCell>
+                      <TableCell className="text-sm">
+                        {l.quantity != null ? `${l.quantity} ${l.unit ?? ""}` : "—"}
+                      </TableCell>
+                      <TableCell className="text-right font-medium">
+                        {l.lineTotalCents != null ? formatMoney(l.lineTotalCents / 100) : "—"}
+                      </TableCell>
+                      <TableCell>
+                        {(l.casePricingStatus === "needs_review" || manualOverrideLineIds.has(l.id)) &&
+                        invoice?.vendorId &&
+                        l.productCode ? (
+                          <div className="flex flex-col gap-1">
+                            <span className="text-[11px] text-amber-700">
+                              {l.detectedPackSize != null
+                                ? `Found a pack size of ${l.detectedPackSize} — which was this?`
+                                : "Case or individual unit?"}
+                            </span>
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              {l.detectedPackSize != null ? (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-7 px-2 text-xs"
+                                  disabled={resolveCasePricing.isPending}
+                                  onClick={() => resolveWith("case", l.detectedPackSize)}
+                                >
+                                  Case
+                                </Button>
+                              ) : (
+                                <div className="flex items-center gap-1">
+                                  <span className="text-[11px] text-muted-foreground">Case of</span>
+                                  <Input
+                                    type="number"
+                                    min={1}
+                                    value={manualPackSize}
+                                    onChange={(e) =>
+                                      setManualPackSizeInputs((prev) => ({ ...prev, [l.id]: e.target.value }))
+                                    }
+                                    placeholder="units"
+                                    className="h-7 w-16 px-1.5 text-xs"
+                                  />
                                   <Button
                                     size="sm"
                                     variant="outline"
                                     className="h-7 px-2 text-xs"
-                                    disabled={resolveCasePricing.isPending}
-                                    onClick={() => resolveWith("bottle", null)}
+                                    disabled={resolveCasePricing.isPending || !hasValidManualPackSize}
+                                    onClick={() => resolveWith("case", manualPackSizeNumber)}
                                   >
-                                    Individual unit
+                                    Confirm
                                   </Button>
                                 </div>
-                              </div>
-                            ) : l.casePricingStatus === "auto" ? (
-                              <div className="flex items-center gap-1.5">
-                                <span className="text-[11px] text-muted-foreground">
-                                  Remembered ✓
-                                </span>
-                                <button
-                                  type="button"
-                                  className="text-[11px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
-                                  onClick={() =>
-                                    setManualOverrideLineIds((prev) => new Set(prev).add(l.id))
-                                  }
-                                >
-                                  Change
-                                </button>
-                              </div>
-                            ) : (
-                              <span className="text-[11px] text-muted-foreground">—</span>
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            <select
-                              value={l.ingredientId ?? ""}
-                              onChange={(e) =>
-                                updateLineIngredient.mutate({
-                                  lineId: l.id,
-                                  ingredientId: e.target.value || null,
-                                })
-                              }
-                              className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs"
+                              )}
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-7 px-2 text-xs"
+                                disabled={resolveCasePricing.isPending}
+                                onClick={() => resolveWith("bottle", null)}
+                              >
+                                Individual unit
+                              </Button>
+                            </div>
+                          </div>
+                        ) : l.casePricingStatus === "auto" ? (
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[11px] text-muted-foreground">Remembered ✓</span>
+                            <button
+                              type="button"
+                              className="text-[11px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                              onClick={() => setManualOverrideLineIds((prev) => new Set(prev).add(l.id))}
                             >
-                              <option value="">Unmatched</option>
-                              {ingredients.map((ing) => (
-                                <option key={ing.id} value={ing.id}>
-                                  {ing.name}
-                                </option>
-                              ))}
-                            </select>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
+                              Change
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="text-[11px] text-muted-foreground">—</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <select
+                          value={l.ingredientId ?? ""}
+                          onChange={(e) =>
+                            updateLineIngredient.mutate({
+                              lineId: l.id,
+                              ingredientId: e.target.value || null,
+                            })
+                          }
+                          className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs"
+                        >
+                          <option value="">Unmatched</option>
+                          {ingredients.map((ing) => (
+                            <option key={ing.id} value={ing.id}>
+                              {ing.name}
+                            </option>
+                          ))}
+                        </select>
+                      </TableCell>
+                    </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
               </div>
             </div>
 
@@ -2331,78 +2294,78 @@ function AutomationTab() {
                 ? vendors.find((v) => v.id === inv.vendorId)
                 : null;
               return (
-                <div key={inv.id} className="rounded-xl border border-amber-200 bg-white p-3">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="min-w-0">
-                      <div className="text-sm font-medium">
-                        {inv.sourceEmailFrom ?? "Unknown sender"}
-                      </div>
-                      {inv.sourceEmailSubject && (
-                        <div className="truncate text-xs text-muted-foreground">
-                          {inv.sourceEmailSubject}
+                  <div key={inv.id} className="rounded-xl border border-amber-200 bg-white p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="text-sm font-medium">
+                          {inv.sourceEmailFrom ?? "Unknown sender"}
                         </div>
-                      )}
+                        {inv.sourceEmailSubject && (
+                          <div className="truncate text-xs text-muted-foreground">
+                            {inv.sourceEmailSubject}
+                          </div>
+                        )}
+                      </div>
+                      <div className="font-display text-sm">
+                        {inv.totalCents != null ? formatMoney(inv.totalCents / 100) : "—"}
+                      </div>
                     </div>
-                    <div className="font-display text-sm">
-                      {inv.totalCents != null ? formatMoney(inv.totalCents / 100) : "—"}
-                    </div>
-                  </div>
-                  {/* Vendor-name fallback (ocr/'s persistResult) may have already
+                    {/* Vendor-name fallback (ocr/'s persistResult) may have already
                         resolved this from the invoice content itself, even though
                         the sender is unrecognized — surfaced as an explicit confirm
                         rather than a pre-selected <select> option, since re-picking
                         an already-selected <option> doesn't fire onChange. */}
-                  {suggestedVendor && (
-                    <div className="mt-2.5 flex flex-wrap items-center gap-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                      <span>
-                        Matched to <span className="font-medium">{suggestedVendor.name}</span> from
-                        the invoice content — confirm to also remember this sender.
-                      </span>
-                      <Button
-                        size="sm"
-                        className="h-7 gap-1 text-xs"
-                        disabled={promoteSender.isPending}
-                        onClick={() =>
+                    {suggestedVendor && (
+                      <div className="mt-2.5 flex flex-wrap items-center gap-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                        <span>
+                          Matched to <span className="font-medium">{suggestedVendor.name}</span>{" "}
+                          from the invoice content — confirm to also remember this sender.
+                        </span>
+                        <Button
+                          size="sm"
+                          className="h-7 gap-1 text-xs"
+                          disabled={promoteSender.isPending}
+                          onClick={() =>
+                            promoteSender.mutate({
+                              invoiceId: inv.id,
+                              vendorId: suggestedVendor.id,
+                              currentFlags: inv.flags,
+                              senderEmail,
+                            })
+                          }
+                        >
+                          Confirm {suggestedVendor.name}
+                        </Button>
+                      </div>
+                    )}
+                    <select
+                      defaultValue=""
+                      disabled={promoteSender.isPending}
+                      onChange={(e) => {
+                        if (e.target.value) {
                           promoteSender.mutate({
                             invoiceId: inv.id,
-                            vendorId: suggestedVendor.id,
+                            vendorId: e.target.value,
                             currentFlags: inv.flags,
                             senderEmail,
-                          })
+                          });
                         }
-                      >
-                        Confirm {suggestedVendor.name}
-                      </Button>
-                    </div>
-                  )}
-                  <select
-                    defaultValue=""
-                    disabled={promoteSender.isPending}
-                    onChange={(e) => {
-                      if (e.target.value) {
-                        promoteSender.mutate({
-                          invoiceId: inv.id,
-                          vendorId: e.target.value,
-                          currentFlags: inv.flags,
-                          senderEmail,
-                        });
-                      }
-                    }}
-                    className="mt-2.5 h-9 w-full rounded-md border border-amber-300 bg-white px-3 text-sm"
-                  >
-                    <option value="">
-                      {suggestedVendor
-                        ? "Or pick a different vendor…"
-                        : "Assign vendor & remember this sender…"}
-                    </option>
-                    {vendors.map((v) => (
-                      <option key={v.id} value={v.id}>
-                        {v.name}
+                      }}
+                      className="mt-2.5 h-9 w-full rounded-md border border-amber-300 bg-white px-3 text-sm"
+                    >
+                      <option value="">
+                        {suggestedVendor
+                          ? "Or pick a different vendor…"
+                          : "Assign vendor & remember this sender…"}
                       </option>
-                    ))}
-                  </select>
-                </div>
-              );
+                      {vendors.map((v) => (
+                        <option key={v.id} value={v.id}>
+                          {v.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                );
             })}
           </div>
         </Card>
@@ -2422,8 +2385,7 @@ function AutomationTab() {
                 </div>
                 <div className="mt-0.5 flex flex-wrap items-center gap-2">
                   <span className="text-sm font-medium">
-                    {e.vendorName ??
-                      (e.invoiceId ? "Needs vendor" : (e.filename ?? "No attachment"))}
+                    {e.vendorName ?? (e.invoiceId ? "Needs vendor" : (e.filename ?? "No attachment"))}
                   </span>
                   {e.outcome === "processed" ? (
                     e.flags.length > 0 ? (
