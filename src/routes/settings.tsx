@@ -48,7 +48,15 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
+import { useToastConnection, useConnectToast } from "@/lib/integrations/queries";
 
 export const Route = createFileRoute("/settings")({
   head: () => ({ meta: [{ title: "Settings · Thrasher's Pub" }] }),
@@ -627,11 +635,29 @@ type AppRow = {
   desc: string;
   meta?: string;
   channel?: "EDI" | "API" | "Email PO" | "Portal" | "CSV";
+  onClick?: () => void;
 };
 
 function IntegrationsSection() {
+  const [toastSheetOpen, setToastSheetOpen] = useState(false);
+  const { data: toastConnection } = useToastConnection();
+
+  const lastSyncedAt = toastConnection?.credential?.last_synced_at;
+  const lastSyncedLabel = lastSyncedAt
+    ? `Last synced ${new Date(lastSyncedAt).toLocaleString()}.`
+    : "Not synced yet.";
+  const toastDesc = toastConnection?.connected
+    ? `Syncs orders, menu, payments. ${lastSyncedLabel}`
+    : "Syncs orders, menu, payments.";
+
   const platform: AppRow[] = [
-    { name: "Toast POS", cat: "Point of sale", status: "Connected", desc: "Syncs orders, menu, payments." },
+    {
+      name: "Toast POS",
+      cat: "Point of sale",
+      status: toastConnection?.connected ? "Connected" : "Available",
+      desc: toastDesc,
+      onClick: () => setToastSheetOpen(true),
+    },
     { name: "Square", cat: "Payments", status: "Connected", desc: "Card processing & online ordering." },
     { name: "QuickBooks Online", cat: "Accounting", status: "Connected", desc: "Pushes invoices, sales, payroll exports." },
     { name: "Mailchimp", cat: "Email", status: "Connected", desc: "Sync segments and send campaigns." },
@@ -683,7 +709,108 @@ function IntegrationsSection() {
           </Button>
         }
       />
+
+      <ToastConnectSheet open={toastSheetOpen} onOpenChange={setToastSheetOpen} />
     </div>
+  );
+}
+
+function ToastConnectSheet({
+  open,
+  onOpenChange,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const connectToast = useConnectToast();
+  const [clientId, setClientId] = useState("");
+  const [clientSecret, setClientSecret] = useState("");
+  const [posLocationRef, setPosLocationRef] = useState("");
+
+  const isValid = clientId.trim() && clientSecret.trim() && posLocationRef.trim();
+
+  const handleConnect = () => {
+    if (!isValid) return;
+    connectToast.mutate(
+      {
+        clientId: clientId.trim(),
+        clientSecret: clientSecret.trim(),
+        posLocationRef: posLocationRef.trim(),
+      },
+      {
+        onSuccess: () => {
+          onOpenChange(false);
+          setClientId("");
+          setClientSecret("");
+          setPosLocationRef("");
+          connectToast.reset();
+        },
+      },
+    );
+  };
+
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent className="sm:max-w-md">
+        <SheetHeader>
+          <SheetTitle className="font-serif text-2xl flex items-center gap-2">
+            <Plug className="h-5 w-5" /> Connect Toast POS
+          </SheetTitle>
+          <SheetDescription>
+            Generate a Client ID and Client Secret in Toast's admin portal (Toast Web →
+            Integrations → API Access — no partner approval needed for your own restaurant),
+            then paste them here.
+          </SheetDescription>
+        </SheetHeader>
+
+        <div className="mt-6 space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="toast-client-id">Client ID</Label>
+            <Input
+              id="toast-client-id"
+              value={clientId}
+              onChange={(e) => setClientId(e.target.value)}
+              autoComplete="off"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="toast-client-secret">Client Secret</Label>
+            <Input
+              id="toast-client-secret"
+              type="password"
+              value={clientSecret}
+              onChange={(e) => setClientSecret(e.target.value)}
+              autoComplete="off"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="toast-location-ref">Restaurant GUID</Label>
+            <Input
+              id="toast-location-ref"
+              value={posLocationRef}
+              onChange={(e) => setPosLocationRef(e.target.value)}
+              autoComplete="off"
+              placeholder="e.g. 8f2c1a3e-..."
+            />
+            <p className="text-xs text-muted-foreground">
+              Toast Web → Restaurant Info — labeled "Restaurant GUID" or "External ID."
+            </p>
+          </div>
+
+          {connectToast.isError && (
+            <p className="text-sm text-destructive">{(connectToast.error as Error).message}</p>
+          )}
+
+          <Button
+            onClick={handleConnect}
+            disabled={!isValid || connectToast.isPending}
+            className="w-full"
+          >
+            {connectToast.isPending ? "Verifying with Toast..." : "Connect"}
+          </Button>
+        </div>
+      </SheetContent>
+    </Sheet>
   );
 }
 
@@ -741,6 +868,8 @@ function IntegrationGroup({
               size="sm"
               variant={a.status === "Action needed" ? "default" : "outline"}
               className="w-full"
+              onClick={a.onClick}
+              disabled={!a.onClick}
             >
               {a.status === "Connected"
                 ? "Manage"
