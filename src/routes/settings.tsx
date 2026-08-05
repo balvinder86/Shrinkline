@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Building2,
   Clock,
@@ -56,7 +56,12 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
-import { useToastConnection, useConnectToast } from "@/lib/integrations/queries";
+import {
+  useToastConnection,
+  useConnectToast,
+  useGmailConnection,
+  useConnectGmail,
+} from "@/lib/integrations/queries";
 
 export const Route = createFileRoute("/settings")({
   head: () => ({ meta: [{ title: "Settings · Thrasher's Pub" }] }),
@@ -89,7 +94,13 @@ const SECTIONS: { id: SectionId; label: string; icon: typeof Building2; group: s
 ];
 
 function SettingsPage() {
-  const [active, setActive] = useState<SectionId>("profile");
+  // The Gmail OAuth callback (connect-gmail-callback) redirects back
+  // here with ?gmail=connected|error after a full page navigation —
+  // land on Integrations instead of the default Profile tab so the
+  // result is immediately visible.
+  const [active, setActive] = useState<SectionId>(() =>
+    new URLSearchParams(window.location.search).has("gmail") ? "integrations" : "profile",
+  );
   const grouped = SECTIONS.reduce<Record<string, typeof SECTIONS>>((acc, s) => {
     (acc[s.group] ||= []).push(s);
     return acc;
@@ -641,6 +652,27 @@ type AppRow = {
 function IntegrationsSection() {
   const [toastSheetOpen, setToastSheetOpen] = useState(false);
   const { data: toastConnection } = useToastConnection();
+  const { data: gmailConnection, refetch: refetchGmail } = useGmailConnection();
+  const connectGmail = useConnectGmail();
+
+  const [callbackBanner, setCallbackBanner] = useState<{
+    status: "connected" | "error";
+    message?: string;
+  } | null>(null);
+
+  // The Gmail OAuth callback (connect-gmail-callback) redirects back
+  // here with ?gmail=connected|error — a full page load, not a
+  // client-side navigation, so this only needs to run once on mount.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const status = params.get("gmail");
+    if (status === "connected" || status === "error") {
+      setCallbackBanner({ status, message: params.get("message") ?? undefined });
+      refetchGmail();
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const lastSyncedAt = toastConnection?.credential?.last_synced_at;
   const lastSyncedLabel = lastSyncedAt
@@ -650,6 +682,10 @@ function IntegrationsSection() {
     ? `Syncs orders, menu, payments. ${lastSyncedLabel}`
     : "Syncs orders, menu, payments.";
 
+  const gmailDesc = gmailConnection
+    ? `Reads vendor invoice emails, sends purchase orders. Connected as ${gmailConnection.connectedEmail}.`
+    : "Reads vendor invoice emails, sends purchase orders.";
+
   const platform: AppRow[] = [
     {
       name: "Toast POS",
@@ -657,6 +693,13 @@ function IntegrationsSection() {
       status: toastConnection?.connected ? "Connected" : "Available",
       desc: toastDesc,
       onClick: () => setToastSheetOpen(true),
+    },
+    {
+      name: "Gmail",
+      cat: "Invoice inbox",
+      status: gmailConnection ? "Connected" : "Available",
+      desc: gmailDesc,
+      onClick: () => connectGmail.mutate(),
     },
     { name: "Square", cat: "Payments", status: "Connected", desc: "Card processing & online ordering." },
     { name: "QuickBooks Online", cat: "Accounting", status: "Connected", desc: "Pushes invoices, sales, payroll exports." },
@@ -692,6 +735,25 @@ function IntegrationsSection() {
         title="Integrations"
         description="Connect Thrasher's Pub to the systems you already run."
       />
+
+      {callbackBanner && (
+        <div
+          className={`flex items-center justify-between gap-3 rounded-xl border p-3 text-sm ${
+            callbackBanner.status === "connected"
+              ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+              : "border-destructive/30 bg-destructive/5 text-destructive"
+          }`}
+        >
+          <span>
+            {callbackBanner.status === "connected"
+              ? "Gmail connected."
+              : `Couldn't connect Gmail${callbackBanner.message ? `: ${callbackBanner.message}` : "."}`}
+          </span>
+          <button className="text-xs underline" onClick={() => setCallbackBanner(null)}>
+            Dismiss
+          </button>
+        </div>
+      )}
 
       <IntegrationGroup
         title="Platform & operations"
