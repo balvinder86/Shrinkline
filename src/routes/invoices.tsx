@@ -10,6 +10,7 @@ import {
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
+  CircleDollarSign,
   Clock,
   ExternalLink,
   FileSearch,
@@ -109,6 +110,7 @@ import {
   useEnqueueOcr,
   useIngredients,
   useOriginalInvoiceUrl,
+  useCreateManualExpense,
   useCategorySpend,
   dateInRange,
   usePromoteSenderAndAssignVendor,
@@ -242,6 +244,7 @@ function InvoicesPage() {
   const [vendorFilter, setVendorFilter] = useState<string>("all");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [ocrSheetInvoiceId, setOcrSheetInvoiceId] = useState<string | null | undefined>(undefined);
+  const [manualExpenseOpen, setManualExpenseOpen] = useState(false);
   const [page, setPage] = useState(1);
   const [invoiceToDelete, setInvoiceToDelete] = useState<RealInvoice | null>(null);
   const [insightsSettingsOpen, setInsightsSettingsOpen] = useState(false);
@@ -599,6 +602,14 @@ function InvoicesPage() {
               </TabsList>
             </div>
             <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-9 gap-1.5"
+                onClick={() => setManualExpenseOpen(true)}
+              >
+                <CircleDollarSign className="h-3.5 w-3.5" /> Log expense
+              </Button>
               <Button
                 variant="outline"
                 size="sm"
@@ -1053,6 +1064,8 @@ function InvoicesPage() {
         invoiceId={ocrSheetInvoiceId}
         onClose={() => setOcrSheetInvoiceId(undefined)}
       />
+
+      <ManualExpenseDialog open={manualExpenseOpen} onOpenChange={setManualExpenseOpen} />
 
       <InsightsSettingsSheet open={insightsSettingsOpen} onOpenChange={setInsightsSettingsOpen} />
 
@@ -1518,6 +1531,161 @@ function InsightsSettingsSheet({
   );
 }
 
+// For a paid-with-no-paper-trail expense — cash to a landlord or a
+// repair person, for example. Skips OCR/upload entirely: pick a
+// vendor, type the amount, done. Logged straight in as approved since
+// there's nothing to extract or double-check against a document.
+function ManualExpenseDialog({
+  open,
+  onOpenChange,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const { data: vendors = [] } = useRealVendors();
+  const createManualExpense = useCreateManualExpense();
+
+  const [vendorId, setVendorId] = useState("");
+  const [amountInput, setAmountInput] = useState("");
+  const [dateInput, setDateInput] = useState("");
+  const [note, setNote] = useState("");
+
+  useEffect(() => {
+    if (open) {
+      setVendorId("");
+      setAmountInput("");
+      setDateInput(isoDate(new Date()));
+      setNote("");
+      createManualExpense.reset();
+    }
+    // createManualExpense's identity changes every render — only re-arm on open
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  const parsedCents = Math.round(parseFloat(amountInput) * 100);
+  const isValid =
+    !!vendorId &&
+    amountInput.trim() !== "" &&
+    Number.isFinite(parsedCents) &&
+    parsedCents > 0 &&
+    !!dateInput;
+
+  function handleSubmit() {
+    if (!isValid) return;
+    createManualExpense.mutate(
+      {
+        vendorId,
+        totalCents: parsedCents,
+        invoiceDate: dateInput,
+        note: note.trim() || null,
+      },
+      { onSuccess: () => onOpenChange(false) },
+    );
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <CircleDollarSign className="h-5 w-5" /> Log an expense
+          </DialogTitle>
+        </DialogHeader>
+
+        <div className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            For anything with no invoice to upload — cash paid for rent, a repair, or any other
+            vendor. Recorded as approved right away.
+          </p>
+
+          <div className="space-y-1.5">
+            <FormLabel htmlFor="manual-expense-vendor">Vendor</FormLabel>
+            <select
+              id="manual-expense-vendor"
+              value={vendorId}
+              onChange={(e) => setVendorId(e.target.value)}
+              className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+            >
+              <option value="">Select a vendor…</option>
+              {VENDOR_CATEGORIES.map((c) => {
+                const vendorsInCategory = vendors.filter((v) => v.category === c.value);
+                if (vendorsInCategory.length === 0) return null;
+                return (
+                  <optgroup key={c.value} label={c.label}>
+                    {vendorsInCategory.map((v) => (
+                      <option key={v.id} value={v.id}>
+                        {v.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                );
+              })}
+            </select>
+            {vendors.length === 0 && (
+              <p className="text-xs text-muted-foreground">
+                No vendors yet — add one in the Vendors tab of Inventory first.
+              </p>
+            )}
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <FormLabel htmlFor="manual-expense-amount">Amount</FormLabel>
+              <div className="relative">
+                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
+                  $
+                </span>
+                <Input
+                  id="manual-expense-amount"
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  placeholder="0.00"
+                  value={amountInput}
+                  onChange={(e) => setAmountInput(e.target.value)}
+                  className="pl-6"
+                />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <FormLabel htmlFor="manual-expense-date">Date</FormLabel>
+              <Input
+                id="manual-expense-date"
+                type="date"
+                value={dateInput}
+                onChange={(e) => setDateInput(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <FormLabel htmlFor="manual-expense-note">Reference / note (optional)</FormLabel>
+            <Input
+              id="manual-expense-note"
+              placeholder="e.g. paid by check #204"
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+            />
+          </div>
+
+          {createManualExpense.isError && (
+            <p className="text-xs text-destructive">Couldn't save that expense — try again.</p>
+          )}
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button onClick={handleSubmit} disabled={!isValid || createManualExpense.isPending}>
+            {createManualExpense.isPending ? "Saving…" : "Log expense"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // `invoiceId === undefined` → sheet closed. `null` → upload a new
 // invoice. A real id → review that invoice's extraction.
 function InvoiceOcrSheet({
@@ -1540,7 +1708,15 @@ function InvoiceOcrSheet({
   const activeId = uploadedId ?? (typeof invoiceId === "string" ? invoiceId : null);
   const invoice = invoices.find((i) => i.id === activeId);
   const { data: lines = [] } = useRealInvoiceLines(activeId ?? undefined);
-  const isExtracting = !invoice || invoice.ocrStatus === "processing" || invoice.ocrStatus == null;
+  // A manually-logged expense (no source file) never gets an ocr_status
+  // at all — only treat a null status as "still extracting" when there's
+  // actually a file being processed, so a manual entry doesn't sit in a
+  // spinner that never resolves.
+  const isExtracting =
+    !invoice ||
+    invoice.ocrStatus === "processing" ||
+    (invoice.ocrStatus == null && !!invoice.sourceFileUrl);
+  const isManualEntry = !!invoice && invoice.ocrStatus == null && !invoice.sourceFileUrl;
 
   const uploadInvoice = useUploadInvoice();
   const originalInvoiceUrl = useOriginalInvoiceUrl();
@@ -1672,9 +1848,11 @@ function InvoiceOcrSheet({
             )}
           </div>
           <SheetDescription>
-            {activeId
-              ? "Extracted with Mindee OCR — confirm the ingredient match on each line before approving."
-              : "Upload a photo or PDF of a vendor invoice — from your phone or computer. Pick the vendor if you know it, or leave it blank and we'll try to match it from the invoice itself."}
+            {!activeId
+              ? "Upload a photo or PDF of a vendor invoice — from your phone or computer. Pick the vendor if you know it, or leave it blank and we'll try to match it from the invoice itself."
+              : isManualEntry
+                ? "Logged manually — no document to extract."
+                : "Extracted with Mindee OCR — confirm the ingredient match on each line before approving."}
           </SheetDescription>
           {activeId && originalInvoiceUrl.isError && (
             <p className="text-xs text-rose-600">
@@ -1781,6 +1959,49 @@ function InvoiceOcrSheet({
             <Loader2 className="h-6 w-6 animate-spin text-primary" />
             <div className="text-sm font-medium">Extracting with Mindee…</div>
             <div className="text-xs text-muted-foreground">This usually takes 10–20 seconds.</div>
+          </div>
+        )}
+
+        {activeId && isManualEntry && invoice && (
+          <div className="mt-5 space-y-4">
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-4">
+              <div className="text-[11px] uppercase tracking-[0.18em] text-emerald-800">
+                Manually logged expense
+              </div>
+              <p className="mt-1.5 text-sm text-emerald-900">
+                No document was attached — this was entered directly and is already approved.
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+              <div className="rounded-xl border bg-muted/30 p-3">
+                <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+                  Vendor
+                </div>
+                <div className="mt-1 text-sm font-medium">{invoice.vendorName ?? "—"}</div>
+              </div>
+              <div className="rounded-xl border bg-muted/30 p-3">
+                <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+                  Amount
+                </div>
+                <div className="mt-1 text-sm font-medium">
+                  {invoice.totalCents != null ? formatMoney(invoice.totalCents / 100) : "—"}
+                </div>
+              </div>
+              <div className="rounded-xl border bg-muted/30 p-3">
+                <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+                  Date
+                </div>
+                <div className="mt-1 text-sm font-medium">{invoice.invoiceDate ?? "—"}</div>
+              </div>
+            </div>
+            {invoice.invoiceNumber && (
+              <div className="rounded-xl border bg-muted/30 p-3">
+                <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+                  Reference / note
+                </div>
+                <div className="mt-1 text-sm">{invoice.invoiceNumber}</div>
+              </div>
+            )}
           </div>
         )}
 

@@ -2266,6 +2266,45 @@ export function useOriginalInvoiceUrl() {
   });
 }
 
+// For expenses with no document to OCR — cash paid to a landlord or
+// repair person, for example. Skips the upload/extraction pipeline
+// entirely and inserts an already-approved invoice with no line items;
+// vendor-spend and category-spend rollups read totals straight off
+// `invoices` (no invoice_lines join), so a lineless row still counts
+// correctly everywhere except the ingredient-based charts, where it
+// rightly doesn't appear since it isn't food/ingredient spend.
+export function useCreateManualExpense() {
+  const restaurantId = useCurrentRestaurantId();
+  const locationId = useCurrentLocationId();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: {
+      vendorId: string;
+      totalCents: number;
+      invoiceDate: string;
+      note: string | null;
+    }): Promise<string> => {
+      if (!restaurantId || !locationId) throw new Error("no current restaurant/location");
+      const { data, error } = await supabase
+        .from("invoices")
+        .insert({
+          restaurant_id: restaurantId,
+          location_id: locationId,
+          vendor_id: input.vendorId,
+          invoice_date: input.invoiceDate,
+          invoice_number: input.note,
+          total_cents: input.totalCents,
+          status: "approved",
+        })
+        .select("id")
+        .single();
+      if (error) throw error;
+      return data.id as string;
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["real-invoices"] }),
+  });
+}
+
 export type OcrCheckResult = {
   status: "processing" | "ready" | "failed";
   supplierName?: string | null;
