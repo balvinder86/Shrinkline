@@ -11,6 +11,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock,
+  ExternalLink,
   FileSearch,
   FileText,
   Inbox,
@@ -107,8 +108,8 @@ import {
   useEmailIngestionStatus,
   useEnqueueOcr,
   useIngredients,
+  useOriginalInvoiceUrl,
   useCategorySpend,
-  useExpenseCategorySpend,
   dateInRange,
   usePromoteSenderAndAssignVendor,
   useRealInvoiceLines,
@@ -272,7 +273,6 @@ function InvoicesPage() {
   const { data: vendorSpend = [] } = useVendorSpendSummary(dateRange);
   const { data: topLineItems = [] } = useTopLineItems(dateRange);
   const { data: categorySpend = [] } = useCategorySpend(dateRange);
-  const { data: expenseCategorySpend = [] } = useExpenseCategorySpend(dateRange);
   const { data: savingsSummary } = useSavingsSummary(dateRange);
 
   // vendorId -> expense category, for filtering "All invoices" by
@@ -281,11 +281,6 @@ function InvoicesPage() {
   const vendorCategoryById = useMemo(
     () => new Map(vendorSpend.map((v) => [v.vendorId, v.category])),
     [vendorSpend],
-  );
-
-  const sortedExpenseCategorySpend = useMemo(
-    () => [...expenseCategorySpend].sort((a, b) => b.spendCents - a.spendCents),
-    [expenseCategorySpend],
   );
 
   // Every invoice-derived calc on this page (KPIs, charts, the
@@ -580,63 +575,6 @@ function InvoicesPage() {
             )}
           </Card>
         </div>
-
-        {/* By expense category — the real Food & Beverage vs Utilities
-            vs Maintenance vs Rent vs Insurance vs Other breakdown,
-            distinct from the ingredient-category "Category mix" chart
-            above (that one is what you bought; this is why). */}
-        <Card className="p-5">
-          <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
-            By expense category
-          </div>
-          <h3 className="mt-1 font-display text-xl">Where operating costs go</h3>
-          {expenseCategorySpend.every((c) => c.spendCents === 0) ? (
-            <div className="mt-4 flex h-[180px] items-center justify-center rounded-xl border border-dashed text-center text-sm text-muted-foreground">
-              No approved invoices in {rangeLabel} yet.
-            </div>
-          ) : (
-            <div className="mt-4 h-[220px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={sortedExpenseCategorySpend} layout="vertical" margin={{ left: 8, right: 8 }}>
-                  <CartesianGrid stroke="var(--border)" strokeDasharray="2 4" horizontal={false} />
-                  <XAxis
-                    type="number"
-                    tick={{ fontSize: 11 }}
-                    tickFormatter={(v: number) => formatMoney(v / 100, { compact: true })}
-                  />
-                  <YAxis
-                    type="category"
-                    dataKey="category"
-                    tick={{ fontSize: 11 }}
-                    width={140}
-                    tickFormatter={(c: string) => VENDOR_CATEGORY_LABEL[c as keyof typeof VENDOR_CATEGORY_LABEL]}
-                  />
-                  <Tooltip
-                    contentStyle={{
-                      background: "var(--background)",
-                      border: "1px solid var(--border)",
-                      borderRadius: 8,
-                      fontSize: 12,
-                    }}
-                    formatter={(v: number, _name, item) => {
-                      const category = item?.payload?.category as keyof typeof VENDOR_CATEGORY_LABEL;
-                      const count = item?.payload?.invoiceCount ?? 0;
-                      return [
-                        `${formatMoney(v / 100)} · ${count} invoice${count === 1 ? "" : "s"}`,
-                        VENDOR_CATEGORY_LABEL[category],
-                      ];
-                    }}
-                  />
-                  <Bar dataKey="spendCents" radius={[0, 4, 4, 0]}>
-                    {sortedExpenseCategorySpend.map((c) => (
-                      <Cell key={c.category} fill={VENDOR_CATEGORY_COLOR[c.category]} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          )}
-        </Card>
 
         {/* Tabs */}
         <Tabs defaultValue="invoices" className="space-y-4">
@@ -1605,6 +1543,7 @@ function InvoiceOcrSheet({
   const isExtracting = !invoice || invoice.ocrStatus === "processing" || invoice.ocrStatus == null;
 
   const uploadInvoice = useUploadInvoice();
+  const originalInvoiceUrl = useOriginalInvoiceUrl();
   const enqueueOcr = useEnqueueOcr();
   const checkOcr = useCheckOcr();
   const approveInvoice = useApproveInvoice();
@@ -1705,18 +1644,43 @@ function InvoiceOcrSheet({
     startUpload(captured);
   }
 
+  async function viewOriginal() {
+    if (!invoice?.sourceFileUrl) return;
+    const url = await originalInvoiceUrl.mutateAsync(invoice.sourceFileUrl);
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
+
   return (
     <Sheet open={open} onOpenChange={(o) => !o && onClose()}>
       <SheetContent className="w-full overflow-y-auto sm:max-w-2xl">
         <SheetHeader>
-          <SheetTitle className="font-display text-2xl">
-            {activeId ? "Invoice review" : "Upload invoice"}
-          </SheetTitle>
+          <div className="flex items-start justify-between gap-3">
+            <SheetTitle className="font-display text-2xl">
+              {activeId ? "Invoice review" : "Upload invoice"}
+            </SheetTitle>
+            {activeId && invoice?.sourceFileUrl && (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={originalInvoiceUrl.isPending}
+                onClick={viewOriginal}
+                className="mt-0.5 shrink-0 gap-1.5"
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+                {originalInvoiceUrl.isPending ? "Opening…" : "View original"}
+              </Button>
+            )}
+          </div>
           <SheetDescription>
             {activeId
               ? "Extracted with Mindee OCR — confirm the ingredient match on each line before approving."
               : "Upload a photo or PDF of a vendor invoice — from your phone or computer. Pick the vendor if you know it, or leave it blank and we'll try to match it from the invoice itself."}
           </SheetDescription>
+          {activeId && originalInvoiceUrl.isError && (
+            <p className="text-xs text-rose-600">
+              Couldn't open the original file — it may have been removed.
+            </p>
+          )}
         </SheetHeader>
 
         {!activeId && (

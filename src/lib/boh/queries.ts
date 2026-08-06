@@ -2250,6 +2250,22 @@ export function useUploadInvoice() {
   });
 }
 
+// The `invoice-uploads` bucket is private, so viewing the original file
+// a customer/vendor sent means minting a short-lived signed URL on
+// demand rather than storing a public one — generated fresh per click
+// so it isn't sitting around in cache after the link expires.
+export function useOriginalInvoiceUrl() {
+  return useMutation({
+    mutationFn: async (sourceFileUrl: string): Promise<string> => {
+      const { data, error } = await supabase.storage
+        .from("invoice-uploads")
+        .createSignedUrl(sourceFileUrl, 60);
+      if (error) throw error;
+      return data.signedUrl;
+    },
+  });
+}
+
 export type OcrCheckResult = {
   status: "processing" | "ready" | "failed";
   supplierName?: string | null;
