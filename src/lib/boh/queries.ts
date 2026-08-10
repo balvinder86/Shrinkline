@@ -2360,7 +2360,7 @@ export function useApproveInvoice() {
     mutationFn: async (invoiceId: string) => {
       const { data: invoice, error: invoiceErr } = await supabase
         .from("invoices")
-        .select("restaurant_id, invoice_date")
+        .select("restaurant_id, invoice_date, flags")
         .eq("id", invoiceId)
         .single();
       if (invoiceErr) throw invoiceErr;
@@ -2399,9 +2399,20 @@ export function useApproveInvoice() {
         if (historyErr) throw historyErr;
       }
 
+      // unknown_sender/totals_mismatch exist to prompt a human to check
+      // the vendor and the numbers before approving — clicking Approve
+      // (which already requires a vendor to be assigned, per the UI's
+      // disabled state) is that check happening, so carrying them
+      // forward past this point is just stale noise. Other flags
+      // (duplicate, not_an_invoice, low_confidence, case_pricing_*)
+      // aren't cleared here — those aren't resolved by the act of
+      // approving itself.
+      const clearedOnApprove = new Set(["unknown_sender", "totals_mismatch"]);
+      const remainingFlags = (invoice.flags ?? []).filter((f: string) => !clearedOnApprove.has(f));
+
       const { error: approveErr } = await supabase
         .from("invoices")
-        .update({ status: "approved" })
+        .update({ status: "approved", flags: remainingFlags })
         .eq("id", invoiceId);
       if (approveErr) throw approveErr;
     },
