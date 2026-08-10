@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { AlertTriangle, Brain, Info } from "lucide-react";
+import { AlertTriangle, Bell, Info } from "lucide-react";
 
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -64,25 +64,24 @@ export function AiRecommendationsPanel({
     <Card className="p-5 border-stone-200 bg-white">
       <div className="flex items-start gap-4">
         <div className="h-11 w-11 rounded-xl bg-terracotta/10 flex items-center justify-center shrink-0">
-          <Brain className="h-5 w-5 text-terracotta" />
+          <Bell className="h-5 w-5 text-terracotta" />
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <p className="font-serif text-lg text-ink">AI Recommendations</p>
-            {generatedAt && (
-              <span className="text-xs text-stone-500">
-                Updated {new Date(generatedAt).toLocaleDateString()}
-              </span>
-            )}
+            <p className="font-serif text-lg text-ink">Price Alerts</p>
             {headerAction && <div className="ml-auto">{headerAction}</div>}
           </div>
+          <p className="text-xs text-stone-500">
+            Cost changes worth a look
+            {generatedAt && ` — updated ${new Date(generatedAt).toLocaleDateString()}`}
+          </p>
 
           {isLoading ? (
             <p className="text-sm text-stone-500 mt-1">Loading...</p>
           ) : recommendations.length === 0 ? (
             <p className="text-sm text-stone-500 mt-1 flex items-center gap-1.5">
-              <Info className="h-3.5 w-3.5" /> No recommendations yet — check back after
-              tonight's analysis.
+              <Info className="h-3.5 w-3.5" /> Nothing flagged yet — check back after tonight's
+              analysis.
             </p>
           ) : (
             <div className="mt-3 divide-y divide-stone-100">
