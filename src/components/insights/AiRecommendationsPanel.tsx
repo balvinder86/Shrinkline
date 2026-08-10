@@ -10,6 +10,16 @@ import {
   type RecommendationTab,
 } from "@/lib/insights/queries";
 
+// Invoices/P&L content really is price movement ("this vendor's cost
+// went up 12%"); Inventory/Recipes content is broader (par-level gaps,
+// margin) so "Price Alerts" doesn't fit there — just "Alerts".
+const PANEL_TITLE: Record<RecommendationTab, string> = {
+  invoices: "Price Alerts",
+  food_cost: "Price Alerts",
+  inventory: "Alerts",
+  recipes: "Alerts",
+};
+
 const SEVERITY_STYLE: Record<RecommendationSeverity, { badge: string; icon: string }> = {
   critical: { badge: "border-red-200 bg-red-50 text-red-700", icon: "text-red-500" },
   warning: { badge: "border-amber-200 bg-amber-50 text-amber-800", icon: "text-amber-500" },
@@ -68,7 +78,7 @@ export function AiRecommendationsPanel({
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <p className="font-serif text-lg text-ink">Price Alerts</p>
+            <p className="font-serif text-lg text-ink">{PANEL_TITLE[tab]}</p>
             {headerAction && <div className="ml-auto">{headerAction}</div>}
           </div>
           <p className="text-xs text-stone-500">
