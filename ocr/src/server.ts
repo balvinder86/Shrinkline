@@ -24,6 +24,7 @@ import {
   persistResult,
   insertInvoiceLine,
   addInvoiceFlag,
+  getVendorCategory,
   getVendorProductPackInfo,
   updateVendorProductPackInfoPrice,
   insertInvoicePageJobs,
@@ -218,19 +219,27 @@ export async function handleEnqueue(invoiceId: string) {
 async function processReadyResult(invoice: Invoice, result: ReadyResult) {
   const outcome = await persistResult(invoice, result);
 
+  // Case/bottle resolution is a food-and-beverage-distributor concept
+  // (cases of bottles/cans) — a maintenance, utilities, or SaaS/POS
+  // vendor never has it, so skip the whole branch for anything else
+  // (including a not-yet-matched vendor, since we can't tell either
+  // way for those).
+  const vendorCategory = outcome.vendorId ? await getVendorCategory(outcome.vendorId) : null;
+  const appliesToCasePricing = vendorCategory === "food_beverage";
+
   const insertedLines = [];
   let casePricingAdjusted = false;
   let casePricingNeedsReview = false;
   for (const item of result.lineItems) {
     const description = item.description ?? "";
-    let detectedPackSize = parsePackSize(description);
+    let detectedPackSize = appliesToCasePricing ? parsePackSize(description) : null;
     const key = resolutionKey(item.product_code, item.description);
 
     // Only a real vendor + resolution key lets us look up or create a
     // remembered resolution — without both, this line always falls
     // back to today's pre-existing (unmultiplied) behavior.
     const memory =
-      outcome.vendorId && key
+      appliesToCasePricing && outcome.vendorId && key
         ? await getVendorProductPackInfo(invoice.restaurant_id, outcome.vendorId, key)
         : null;
 
@@ -238,7 +247,10 @@ async function processReadyResult(invoice: Invoice, result: ReadyResult) {
     let unitCostCents = item.unit_price != null ? Math.round(item.unit_price * 100) : null;
     let casePricingStatus: "auto" | "needs_review" | null = null;
 
-    if (memory && item.quantity != null) {
+    if (!appliesToCasePricing) {
+      // Leave quantity/cost exactly as extracted, no case/bottle
+      // question — nothing below this branch applies.
+    } else if (memory && item.quantity != null) {
       // A human has already told us, for this exact vendor + product,
       // whether the printed quantity means cases or bottles — trust
       // that over re-parsing the description every time (which is

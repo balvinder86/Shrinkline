@@ -397,6 +397,22 @@ export async function insertInvoiceLine(
   return { matched: matchedIngredientId != null };
 }
 
+// Case-vs-bottle resolution only makes sense for a food/beverage
+// distributor's case-packed goods — a maintenance vendor (Cintas) or a
+// SaaS/POS bill (Toast) has no such thing, and flagging one for review
+// anyway was a real bug (case_pricing_needs_review firing regardless
+// of what kind of vendor the invoice was even from). Read once per
+// invoice in server.ts and gate the whole case-pricing branch on it.
+export async function getVendorCategory(vendorId: string): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("vendors")
+    .select("category")
+    .eq("id", vendorId)
+    .maybeSingle();
+  if (error) throw new Error(`fetch vendor category failed: ${error.message}`);
+  return data?.category ?? null;
+}
+
 // Per-tenant, per-vendor, per-SKU memory of whether a product is
 // ordered by the case or by the bottle from this vendor — see
 // db/phase2/48_case_bottle_resolution.sql for why this exists instead
