@@ -1,10 +1,13 @@
-import type { ReactNode } from "react";
-import { AlertTriangle, Bell, Info } from "lucide-react";
+import { useState, type ReactNode } from "react";
+import { AlertTriangle, Bell, ChevronDown, Info, X } from "lucide-react";
 
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   useAiRecommendations,
+  useDismissedRecommendationDate,
+  useDismissRecommendations,
   type AiRecommendation,
   type RecommendationSeverity,
   type RecommendationTab,
@@ -69,6 +72,36 @@ export function AiRecommendationsPanel({
   const { data, isLoading } = useAiRecommendations(tab);
   const recommendations = data ?? [];
   const generatedAt = recommendations[0]?.generated_at;
+  const latestBusinessDate = recommendations[0]?.business_date;
+
+  const { data: dismissedDate } = useDismissedRecommendationDate(tab);
+  const dismissRecommendations = useDismissRecommendations(tab);
+  // Peeking at a dismissed batch (via "Show") is session-local — it
+  // doesn't clear the persisted dismissal, so it's back to collapsed
+  // on the next reload/login unless a genuinely new business_date has
+  // landed by then.
+  const [peeking, setPeeking] = useState(false);
+  const isDismissed = !!latestBusinessDate && dismissedDate === latestBusinessDate && !peeking;
+
+  if (isDismissed) {
+    return (
+      <Card className="p-3 border-stone-200 bg-white">
+        <button
+          onClick={() => setPeeking(true)}
+          className="flex w-full items-center gap-2.5 text-left"
+        >
+          <div className="h-7 w-7 rounded-lg bg-terracotta/10 flex items-center justify-center shrink-0">
+            <Bell className="h-3.5 w-3.5 text-terracotta" />
+          </div>
+          <span className="text-sm font-medium text-ink">{PANEL_TITLE[tab]}</span>
+          <span className="text-xs text-stone-500">
+            dismissed — {recommendations.length} item{recommendations.length === 1 ? "" : "s"}
+          </span>
+          <ChevronDown className="h-4 w-4 text-stone-400 ml-auto" />
+        </button>
+      </Card>
+    );
+  }
 
   return (
     <Card className="p-5 border-stone-200 bg-white">
@@ -79,7 +112,23 @@ export function AiRecommendationsPanel({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <p className="font-serif text-lg text-ink">{PANEL_TITLE[tab]}</p>
-            {headerAction && <div className="ml-auto">{headerAction}</div>}
+            <div className="ml-auto flex items-center gap-1">
+              {headerAction}
+              {recommendations.length > 0 && latestBusinessDate && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 text-stone-400 hover:text-stone-700"
+                  onClick={() => {
+                    setPeeking(false);
+                    dismissRecommendations.mutate(latestBusinessDate);
+                  }}
+                  title="Dismiss until the next new alert"
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
           </div>
           <p className="text-xs text-stone-500">
             Cost changes worth a look

@@ -53,6 +53,54 @@ export function useAiRecommendations(tab: RecommendationTab) {
   });
 }
 
+// Which business_date's alerts were last closed/minimized for a tab —
+// null means never dismissed (or the dismissal is for an older batch
+// than what's showing now). The panel compares this against the
+// latest business_date in useAiRecommendations(tab): a match means
+// "stay collapsed", anything else (including a newer batch landing)
+// means "show it, this is new."
+export function useDismissedRecommendationDate(tab: RecommendationTab) {
+  const locationId = useCurrentLocationId();
+  return useQuery({
+    queryKey: ["ai-recommendation-dismissal", locationId, tab],
+    enabled: !!locationId,
+    queryFn: async (): Promise<string | null> => {
+      const { data, error } = await supabase
+        .from("ai_recommendation_dismissals")
+        .select("dismissed_business_date")
+        .eq("location_id", locationId!)
+        .eq("tab", tab)
+        .maybeSingle();
+      if (error) throw error;
+      return data?.dismissed_business_date ?? null;
+    },
+  });
+}
+
+export function useDismissRecommendations(tab: RecommendationTab) {
+  const restaurantId = useCurrentRestaurantId();
+  const locationId = useCurrentLocationId();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (businessDate: string) => {
+      if (!restaurantId || !locationId) throw new Error("no current restaurant/location");
+      const { error } = await supabase.from("ai_recommendation_dismissals").upsert(
+        {
+          restaurant_id: restaurantId,
+          location_id: locationId,
+          tab,
+          dismissed_business_date: businessDate,
+        },
+        { onConflict: "location_id,tab" },
+      );
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["ai-recommendation-dismissal"] });
+    },
+  });
+}
+
 export type AiInsightsSettings = {
   invoiceDriftThresholdPct: number;
 };
