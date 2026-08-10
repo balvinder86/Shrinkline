@@ -112,6 +112,7 @@ import {
   useOriginalInvoiceUrl,
   useCreateManualExpense,
   useCategorySpend,
+  useExpenseCategorySpend,
   dateInRange,
   usePromoteSenderAndAssignVendor,
   useRealInvoiceLines,
@@ -165,25 +166,6 @@ const CATEGORY_COLORS = [
   "hsl(280 40% 55%)",
   "hsl(190 55% 45%)",
 ];
-
-// Real ingredient categories (confirmed live: Alcohol, Beverages, Dry
-// Goods, Food, Miscellaneous, Seafood) get a fixed, semantically
-// chosen color each — deterministic by name, not by array position, so
-// "Alcohol" is always the same color regardless of what other
-// categories exist that period, and two categories never coincidentally
-// land on near-identical hues the way index-cycling risked (Alcohol and
-// Seafood previously both landed on similar warm orange-reds). Any
-// category not in this map (a new one added later) falls back to
-// CATEGORY_COLORS, cycled only among the unmapped ones so it doesn't
-// collide with a named color either.
-const CATEGORY_COLOR_MAP: Record<string, string> = {
-  alcohol: "hsl(35 65% 48%)",
-  beverages: "hsl(190 55% 45%)",
-  "dry goods": "hsl(28 35% 42%)",
-  food: "hsl(120 30% 42%)",
-  miscellaneous: "hsl(220 12% 55%)",
-  seafood: "hsl(205 60% 48%)",
-};
 
 function KPI({
   label,
@@ -276,6 +258,7 @@ function InvoicesPage() {
   const { data: vendorSpend = [] } = useVendorSpendSummary(dateRange);
   const { data: topLineItems = [] } = useTopLineItems(dateRange);
   const { data: categorySpend = [] } = useCategorySpend(dateRange);
+  const { data: expenseCategorySpend = [] } = useExpenseCategorySpend(dateRange);
   const { data: savingsSummary } = useSavingsSummary(dateRange);
 
   // vendorId -> expense category, for filtering "All invoices" by
@@ -333,21 +316,26 @@ function InvoicesPage() {
     }));
   }, [vendorSpend]);
 
+  // Vendor-category based (Food & Beverage, Utilities, Maintenance,
+  // Rent, Insurance, Events, Other) rather than the old ingredient-
+  // category split — that one only covered line items matched to an
+  // actual ingredient, so a Cintas/Toast/rent invoice (no ingredient
+  // lines at all) was invisible and the chart undercounted total spend
+  // badly. This sums straight off invoices.total_cents, same as "By
+  // vendor" above, so the two always agree.
   const categoryMix = useMemo(() => {
-    const total = categorySpend.reduce((a, b) => a + b.spendCents, 0);
+    const nonZero = expenseCategorySpend.filter((c) => c.spendCents > 0);
+    const total = nonZero.reduce((a, b) => a + b.spendCents, 0);
     if (total === 0) return [] as { name: string; value: number; color: string; pct: number }[];
-    let fallbackIndex = 0;
-    return categorySpend.map((c) => {
-      const mapped = CATEGORY_COLOR_MAP[c.category.trim().toLowerCase()];
-      const color = mapped ?? CATEGORY_COLORS[fallbackIndex++ % CATEGORY_COLORS.length];
-      return {
-        name: c.category,
+    return nonZero
+      .map((c) => ({
+        name: VENDOR_CATEGORY_LABEL[c.category],
         value: c.spendCents / 100,
         pct: Math.round((c.spendCents / total) * 100),
-        color,
-      };
-    });
-  }, [categorySpend]);
+        color: VENDOR_CATEGORY_COLOR[c.category],
+      }))
+      .sort((a, b) => b.value - a.value);
+  }, [expenseCategorySpend]);
 
   const filteredInvoices = useMemo(() => {
     return dateFilteredInvoices.filter((inv) => {
@@ -533,8 +521,7 @@ function InvoicesPage() {
             <h3 className="mt-1 font-display text-xl">Where your dollars go</h3>
             {categoryMix.length === 0 ? (
               <div className="mt-4 flex h-[200px] items-center justify-center rounded-xl border border-dashed p-4 text-center text-xs text-muted-foreground">
-                Category mix appears once invoice line items are matched to ingredients with a
-                category.
+                Category mix appears once you have approved invoices in this period.
               </div>
             ) : (
               <>
