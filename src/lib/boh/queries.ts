@@ -5,6 +5,7 @@ import { useLocationIds, useRestaurantIds } from "@/lib/supabase/scope";
 import { VENDOR_CATEGORIES, type VendorCategory } from "@/lib/boh/vendor-categories";
 import { fetchRecipeCostContext } from "@/lib/pos/queries";
 import { resolvePrepRecipeCostPerYieldUnit, wouldCreateCycle } from "@/lib/boh/recipeCost";
+import { convertQuantityToIngredientUnit } from "@/lib/units";
 
 // A user's dashboard today only ever shows one location — same
 // simplification as useCurrentRestaurantId, revisit when multi-location
@@ -152,6 +153,7 @@ export type Ingredient = {
   unit: string;
   unitCostCents: number | null;
   category: string | null;
+  containerSizeMl: number | null;
 };
 
 export function useIngredients() {
@@ -172,12 +174,18 @@ export function useIngredients() {
         unit: row.unit,
         unitCostCents: row.unit_cost_cents,
         category: row.category,
+        containerSizeMl: row.container_size_ml,
       }));
     },
   });
 }
 
-export type IngredientInput = { name: string; unit: string; unitCostCents?: number | null };
+export type IngredientInput = {
+  name: string;
+  unit: string;
+  unitCostCents?: number | null;
+  containerSizeMl?: number | null;
+};
 
 export function useCreateIngredient() {
   const restaurantId = useCurrentRestaurantId();
@@ -190,6 +198,7 @@ export function useCreateIngredient() {
         name: input.name,
         unit: input.unit,
         unit_cost_cents: input.unitCostCents ?? null,
+        container_size_ml: input.containerSizeMl ?? null,
       });
       if (error) throw error;
     },
@@ -207,6 +216,7 @@ export function useUpdateIngredient() {
           name: input.name,
           unit: input.unit,
           unit_cost_cents: input.unitCostCents ?? null,
+          container_size_ml: input.containerSizeMl ?? null,
         })
         .eq("id", id);
       if (error) throw error;
@@ -249,6 +259,11 @@ export type InventoryItem = {
   weeklyUsage: number;
   suggestedPar: number | null;
   lastOrdered: string;
+  // How much volume (ml) is in one purchase unit — e.g. 750 for a
+  // standard wine bottle bought "each." Only meaningful/set for
+  // count-purchased ingredients also used in recipes by the oz/ml/L;
+  // lets recipe lines convert between the two. Null when not set.
+  containerSizeMl: number | null;
 };
 
 function formatLastOrdered(iso: string | null): string {
@@ -296,6 +311,7 @@ export function useInventoryItems() {
           suggestedPar:
             par?.suggested_par_quantity != null ? Number(par.suggested_par_quantity) : null,
           lastOrdered: formatLastOrdered(stock?.last_ordered_at ?? null),
+          containerSizeMl: ing.container_size_ml != null ? Number(ing.container_size_ml) : null,
         };
       });
     },
@@ -353,7 +369,9 @@ export function useUsageTrend(weeks = 8) {
           .gte("business_date", windowStart.toISOString().slice(0, 10)),
         supabase
           .from("recipe_lines")
-          .select("menu_item_pos_id, quantity, ingredients(unit_cost_cents)")
+          .select(
+            "menu_item_pos_id, quantity, unit, ingredients(unit_cost_cents, unit, container_size_ml)",
+          )
           .eq("location_id", locationId!),
       ]);
       if (salesRes.error) throw salesRes.error;
@@ -362,14 +380,26 @@ export function useUsageTrend(weeks = 8) {
       type RecipeRow = {
         menu_item_pos_id: string;
         quantity: number;
-        ingredients: { unit_cost_cents: number | null } | null;
+        unit: string;
+        ingredients: {
+          unit_cost_cents: number | null;
+          unit: string;
+          container_size_ml: number | null;
+        } | null;
       };
       const costPerUnit = new Map<string, number>();
       for (const row of (recipeRes.data ?? []) as unknown as RecipeRow[]) {
         const unitCost = row.ingredients?.unit_cost_cents;
-        if (unitCost == null) continue;
+        if (unitCost == null || !row.ingredients) continue;
+        const converted = convertQuantityToIngredientUnit(
+          Number(row.quantity),
+          row.unit,
+          row.ingredients.unit,
+          row.ingredients.container_size_ml,
+        );
+        if (converted == null) continue;
         const cur = costPerUnit.get(row.menu_item_pos_id) ?? 0;
-        costPerUnit.set(row.menu_item_pos_id, cur + Number(row.quantity) * unitCost);
+        costPerUnit.set(row.menu_item_pos_id, cur + converted * unitCost);
       }
 
       const buckets = new Map<string, { usageCents: number; date: Date }>();
@@ -403,6 +433,7 @@ export type InventoryItemInput = {
   par: number;
   vendorId: string | null;
   costCents: number | null;
+  containerSizeMl?: number | null;
 };
 
 export function useCreateInventoryItem() {
@@ -421,6 +452,7 @@ export function useCreateInventoryItem() {
           unit: input.unit,
           unit_cost_cents: input.costCents,
           vendor_id: input.vendorId,
+          container_size_ml: input.containerSizeMl ?? null,
         })
         .select("id")
         .single();
@@ -582,6 +614,7 @@ export type InventoryItemFieldsInput = {
   unit: string;
   vendorId: string | null;
   costCents: number | null;
+  containerSizeMl?: number | null;
 };
 
 export function useUpdateInventoryItem() {
@@ -596,6 +629,7 @@ export function useUpdateInventoryItem() {
           unit: input.unit,
           unit_cost_cents: input.costCents,
           vendor_id: input.vendorId,
+          container_size_ml: input.containerSizeMl ?? null,
         })
         .eq("id", id);
       if (error) throw error;
@@ -917,6 +951,7 @@ export type RecipeLine = {
   ingredientName: string | null;
   ingredientUnit: string | null;
   ingredientCostCents: number | null;
+  ingredientContainerSizeMl: number | null;
   prepRecipeId: string | null;
   prepRecipeName: string | null;
   prepRecipeCostPerYieldUnitCents: number | null;
@@ -935,7 +970,7 @@ export function useRecipeLinesForItem(menuItemPosId: string | undefined) {
         supabase
           .from("recipe_lines")
           .select(
-            "id, quantity, unit, ingredient_id, prep_recipe_id, ingredients (id, name, unit, unit_cost_cents), prep_recipes (id, name)",
+            "id, quantity, unit, ingredient_id, prep_recipe_id, ingredients (id, name, unit, unit_cost_cents, container_size_ml), prep_recipes (id, name)",
           )
           .eq("location_id", locationId!)
           .eq("menu_item_pos_id", menuItemPosId!),
@@ -948,6 +983,7 @@ export function useRecipeLinesForItem(menuItemPosId: string | undefined) {
         ingredientName: row.ingredients?.name ?? null,
         ingredientUnit: row.ingredients?.unit ?? null,
         ingredientCostCents: row.ingredients?.unit_cost_cents ?? null,
+        ingredientContainerSizeMl: row.ingredients?.container_size_ml ?? null,
         prepRecipeId: row.prep_recipe_id,
         prepRecipeName: row.prep_recipes?.name ?? null,
         prepRecipeCostPerYieldUnitCents: row.prep_recipe_id
@@ -955,7 +991,7 @@ export function useRecipeLinesForItem(menuItemPosId: string | undefined) {
               row.prep_recipe_id,
               ctx.prepRecipeLinesByPrepId,
               ctx.prepRecipeYieldById,
-              ctx.ingredientCostById,
+              ctx.ingredientById,
             )
           : null,
         quantity: Number(row.quantity),
@@ -1182,7 +1218,7 @@ export function usePrepRecipes() {
           r.id,
           ctx.prepRecipeLinesByPrepId,
           ctx.prepRecipeYieldById,
-          ctx.ingredientCostById,
+          ctx.ingredientById,
         ),
         usedByMenuItemNames: Array.from(ctx.menuItemsUsingPrepRecipe.get(r.id) ?? [])
           .map((posId) => menuItemNameById.get(posId))
@@ -1269,6 +1305,7 @@ export type PrepRecipeLine = {
   ingredientName: string | null;
   ingredientUnit: string | null;
   ingredientCostCents: number | null;
+  ingredientContainerSizeMl: number | null;
   subPrepRecipeId: string | null;
   subPrepRecipeName: string | null;
   subPrepRecipeCostPerYieldUnitCents: number | null;
@@ -1286,7 +1323,7 @@ export function usePrepRecipeLinesFor(prepRecipeId: string | undefined) {
         supabase
           .from("prep_recipe_lines")
           .select(
-            "id, quantity, unit, ingredient_id, sub_prep_recipe_id, ingredients (name, unit, unit_cost_cents), sub_recipe:prep_recipes!sub_prep_recipe_id (id, name)",
+            "id, quantity, unit, ingredient_id, sub_prep_recipe_id, ingredients (name, unit, unit_cost_cents, container_size_ml), sub_recipe:prep_recipes!sub_prep_recipe_id (id, name)",
           )
           .eq("prep_recipe_id", prepRecipeId!),
         fetchRecipeCostContext(locationIds!),
@@ -1298,6 +1335,7 @@ export function usePrepRecipeLinesFor(prepRecipeId: string | undefined) {
         ingredientName: row.ingredients?.name ?? null,
         ingredientUnit: row.ingredients?.unit ?? null,
         ingredientCostCents: row.ingredients?.unit_cost_cents ?? null,
+        ingredientContainerSizeMl: row.ingredients?.container_size_ml ?? null,
         subPrepRecipeId: row.sub_prep_recipe_id,
         subPrepRecipeName: row.sub_recipe?.name ?? null,
         subPrepRecipeCostPerYieldUnitCents: row.sub_prep_recipe_id
@@ -1305,7 +1343,7 @@ export function usePrepRecipeLinesFor(prepRecipeId: string | undefined) {
               row.sub_prep_recipe_id,
               ctx.prepRecipeLinesByPrepId,
               ctx.prepRecipeYieldById,
-              ctx.ingredientCostById,
+              ctx.ingredientById,
             )
           : null,
         quantity: Number(row.quantity),

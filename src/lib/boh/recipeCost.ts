@@ -10,27 +10,57 @@
 // *another* prep recipe, recursively — but never back at a menu item,
 // so the only cycle risk is within the prep-recipe graph itself.
 
+import { convertQuantityToIngredientUnit } from "@/lib/units";
+
 export type PrepRecipeLineRow = {
   prep_recipe_id: string;
   ingredient_id: string | null;
   sub_prep_recipe_id: string | null;
   quantity: number;
+  unit: string;
 };
 
 export type RecipeLineRow = {
   ingredient_id: string | null;
   prep_recipe_id: string | null;
   quantity: number;
+  unit: string;
 };
 
-// null = can't be costed yet (a line's ingredient has no cost, or a
-// sub-recipe couldn't be costed, or — via the memo pre-seed below — a
-// cycle was detected). Never silently treated as $0.
+export type IngredientCostInfo = {
+  unitCostCents: number | null;
+  unit: string;
+  containerSizeMl: number | null;
+};
+
+// A raw-ingredient line's quantity is in `line.unit`, which may differ
+// from the ingredient's own priced unit (`ingredients.unit`) — e.g. a
+// recipe written as "5 oz" of a wine bought "each" (a bottle). Convert
+// before multiplying so line cost is always quantity-in-native-unit ×
+// price-per-native-unit. null = can't be costed (no price, or units
+// that genuinely can't convert — no container size set) — never
+// silently treated as $0 or silently wrong.
+function resolveIngredientLineCostCents(
+  quantity: number,
+  unit: string,
+  info: IngredientCostInfo | undefined,
+): number | null {
+  if (!info || info.unitCostCents == null) return null;
+  const converted = convertQuantityToIngredientUnit(
+    quantity,
+    unit,
+    info.unit,
+    info.containerSizeMl,
+  );
+  if (converted == null) return null;
+  return converted * info.unitCostCents;
+}
+
 export function resolvePrepRecipeCostPerYieldUnit(
   prepRecipeId: string,
   prepRecipeLinesByPrepId: Map<string, PrepRecipeLineRow[]>,
   prepRecipeYieldById: Map<string, number>,
-  ingredientCostById: Map<string, number | null>,
+  ingredientById: Map<string, IngredientCostInfo | undefined>,
   memo: Map<string, number | null> = new Map(),
 ): number | null {
   if (memo.has(prepRecipeId)) return memo.get(prepRecipeId)!;
@@ -50,16 +80,24 @@ export function resolvePrepRecipeCostPerYieldUnit(
   let totalCents = 0;
   for (const line of ownLines) {
     const lineCost = line.ingredient_id
-      ? (ingredientCostById.get(line.ingredient_id) ?? null)
+      ? resolveIngredientLineCostCents(
+          line.quantity,
+          line.unit,
+          ingredientById.get(line.ingredient_id),
+        )
       : resolvePrepRecipeCostPerYieldUnit(
           line.sub_prep_recipe_id!,
           prepRecipeLinesByPrepId,
           prepRecipeYieldById,
-          ingredientCostById,
+          ingredientById,
           memo,
         );
     if (lineCost == null) return null;
-    totalCents += Number(line.quantity) * lineCost;
+    // A prep-recipe sub-line's cost is already per its own yield unit
+    // (no conversion — the AddLineForm locks a prep sub-line's unit to
+    // the sub-recipe's own yieldUnit, so line.quantity is already "how
+    // many yield units").
+    totalCents += line.ingredient_id ? lineCost : Number(line.quantity) * lineCost;
   }
 
   const yieldQty = prepRecipeYieldById.get(prepRecipeId) ?? 1;
@@ -72,23 +110,27 @@ export function resolveMenuItemRecipeCostCents(
   recipeLines: RecipeLineRow[],
   prepRecipeLinesByPrepId: Map<string, PrepRecipeLineRow[]>,
   prepRecipeYieldById: Map<string, number>,
-  ingredientCostById: Map<string, number | null>,
+  ingredientById: Map<string, IngredientCostInfo | undefined>,
 ): number | null {
   if (recipeLines.length === 0) return null;
   const memo = new Map<string, number | null>();
   let totalCents = 0;
   for (const line of recipeLines) {
     const lineCost = line.ingredient_id
-      ? (ingredientCostById.get(line.ingredient_id) ?? null)
+      ? resolveIngredientLineCostCents(
+          line.quantity,
+          line.unit,
+          ingredientById.get(line.ingredient_id),
+        )
       : resolvePrepRecipeCostPerYieldUnit(
           line.prep_recipe_id!,
           prepRecipeLinesByPrepId,
           prepRecipeYieldById,
-          ingredientCostById,
+          ingredientById,
           memo,
         );
     if (lineCost == null) return null;
-    totalCents += Number(line.quantity) * lineCost;
+    totalCents += line.ingredient_id ? lineCost : Number(line.quantity) * lineCost;
   }
   return Math.round(totalCents);
 }

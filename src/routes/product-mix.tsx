@@ -10,6 +10,7 @@ import {
   type RealMenuItem,
 } from "@/lib/pos/queries";
 import { useRecipeLinesForItem } from "@/lib/boh/queries";
+import { convertQuantityToIngredientUnit } from "@/lib/units";
 import {
   ArrowDownRight,
   ArrowUpDown,
@@ -1046,10 +1047,20 @@ function RecipeSummary({ menuItemPosId }: { menuItemPosId: string }) {
     if (lines.length === 0) return null;
     let sum = 0;
     for (const l of lines) {
-      const lineCost =
-        l.ingredientId != null ? l.ingredientCostCents : l.prepRecipeCostPerYieldUnitCents;
-      if (lineCost == null) return null;
-      sum += l.quantity * lineCost;
+      if (l.ingredientId != null) {
+        if (l.ingredientCostCents == null || l.ingredientUnit == null) return null;
+        const converted = convertQuantityToIngredientUnit(
+          l.quantity,
+          l.unit,
+          l.ingredientUnit,
+          l.ingredientContainerSizeMl,
+        );
+        if (converted == null) return null;
+        sum += converted * l.ingredientCostCents;
+      } else {
+        if (l.prepRecipeCostPerYieldUnitCents == null) return null;
+        sum += l.quantity * l.prepRecipeCostPerYieldUnitCents;
+      }
     }
     return Math.round(sum);
   }, [lines]);
@@ -1066,6 +1077,22 @@ function RecipeSummary({ menuItemPosId }: { menuItemPosId: string }) {
         const isPrep = l.prepRecipeId != null;
         const name = isPrep ? l.prepRecipeName : l.ingredientName;
         const unitCostCents = isPrep ? l.prepRecipeCostPerYieldUnitCents : l.ingredientCostCents;
+        const lineTotalCents =
+          unitCostCents == null
+            ? null
+            : isPrep
+              ? l.quantity * unitCostCents
+              : l.ingredientUnit == null
+                ? null
+                : (() => {
+                    const converted = convertQuantityToIngredientUnit(
+                      l.quantity,
+                      l.unit,
+                      l.ingredientUnit,
+                      l.ingredientContainerSizeMl,
+                    );
+                    return converted == null ? null : converted * unitCostCents;
+                  })();
         return (
           <div key={l.id} className="flex items-center justify-between px-3 py-2 text-sm">
             <div>
@@ -1077,7 +1104,7 @@ function RecipeSummary({ menuItemPosId }: { menuItemPosId: string }) {
               </div>
               <div className="text-xs text-muted-foreground">
                 {l.quantity} {l.unit}
-                {unitCostCents != null && ` · $${((l.quantity * unitCostCents) / 100).toFixed(2)}`}
+                {lineTotalCents != null && ` · $${(lineTotalCents / 100).toFixed(2)}`}
               </div>
             </div>
           </div>

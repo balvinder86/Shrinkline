@@ -6,11 +6,16 @@ import { useLocationIds } from "@/lib/supabase/scope";
 import { type DateRange, addDays, isoDate } from "@/lib/date-range";
 import {
   resolveMenuItemRecipeCostCents,
+  type IngredientCostInfo,
   type PrepRecipeLineRow,
   type RecipeLineRow,
 } from "@/lib/boh/recipeCost";
 
-type IngredientCostJoin = { unit_cost_cents: number | null } | null;
+type IngredientCostJoin = {
+  unit_cost_cents: number | null;
+  unit: string;
+  container_size_ml: number | null;
+} | null;
 
 // Shared by useProductMix and useFoodCostSummary — fetches everything
 // the recursive cost resolver needs (recipe_lines for these locations'
@@ -22,7 +27,7 @@ export async function fetchRecipeCostContext(locationIds: string[]) {
     supabase
       .from("recipe_lines")
       .select(
-        "menu_item_pos_id, ingredient_id, prep_recipe_id, quantity, ingredients (unit_cost_cents)",
+        "menu_item_pos_id, ingredient_id, prep_recipe_id, quantity, unit, ingredients (unit_cost_cents, unit, container_size_ml)",
       )
       .in("location_id", locationIds),
     // prep_recipe_lines has two FKs into prep_recipes (the owning
@@ -34,7 +39,7 @@ export async function fetchRecipeCostContext(locationIds: string[]) {
     supabase
       .from("prep_recipe_lines")
       .select(
-        "prep_recipe_id, ingredient_id, sub_prep_recipe_id, quantity, ingredients (unit_cost_cents), owner:prep_recipes!prep_recipe_id!inner(location_id)",
+        "prep_recipe_id, ingredient_id, sub_prep_recipe_id, quantity, unit, ingredients (unit_cost_cents, unit, container_size_ml), owner:prep_recipes!prep_recipe_id!inner(location_id)",
       )
       .in("owner.location_id", locationIds),
     supabase.from("prep_recipes").select("id, yield_qty").in("location_id", locationIds),
@@ -48,6 +53,7 @@ export async function fetchRecipeCostContext(locationIds: string[]) {
     ingredient_id: string | null;
     prep_recipe_id: string | null;
     quantity: number;
+    unit: string;
     ingredients: IngredientCostJoin;
   };
   type PrepRecipeLineDbRow = {
@@ -55,20 +61,29 @@ export async function fetchRecipeCostContext(locationIds: string[]) {
     ingredient_id: string | null;
     sub_prep_recipe_id: string | null;
     quantity: number;
+    unit: string;
     ingredients: IngredientCostJoin;
   };
 
   const recipeLinesData = (recipeLinesRes.data ?? []) as unknown as RecipeLineDbRow[];
   const prepRecipeLinesData = (prepRecipeLinesRes.data ?? []) as unknown as PrepRecipeLineDbRow[];
 
-  const ingredientCostById = new Map<string, number | null>();
+  const ingredientById = new Map<string, IngredientCostInfo | undefined>();
   for (const row of recipeLinesData) {
-    if (row.ingredient_id)
-      ingredientCostById.set(row.ingredient_id, row.ingredients?.unit_cost_cents ?? null);
+    if (row.ingredient_id && row.ingredients)
+      ingredientById.set(row.ingredient_id, {
+        unitCostCents: row.ingredients.unit_cost_cents,
+        unit: row.ingredients.unit,
+        containerSizeMl: row.ingredients.container_size_ml,
+      });
   }
   for (const row of prepRecipeLinesData) {
-    if (row.ingredient_id)
-      ingredientCostById.set(row.ingredient_id, row.ingredients?.unit_cost_cents ?? null);
+    if (row.ingredient_id && row.ingredients)
+      ingredientById.set(row.ingredient_id, {
+        unitCostCents: row.ingredients.unit_cost_cents,
+        unit: row.ingredients.unit,
+        containerSizeMl: row.ingredients.container_size_ml,
+      });
   }
 
   const prepRecipeLinesByPrepId = new Map<string, PrepRecipeLineRow[]>();
@@ -79,6 +94,7 @@ export async function fetchRecipeCostContext(locationIds: string[]) {
       ingredient_id: row.ingredient_id,
       sub_prep_recipe_id: row.sub_prep_recipe_id,
       quantity: Number(row.quantity),
+      unit: row.unit,
     });
     prepRecipeLinesByPrepId.set(row.prep_recipe_id, list);
   }
@@ -94,6 +110,7 @@ export async function fetchRecipeCostContext(locationIds: string[]) {
       ingredient_id: row.ingredient_id,
       prep_recipe_id: row.prep_recipe_id,
       quantity: Number(row.quantity),
+      unit: row.unit,
     });
     recipeLinesByMenuItem.set(row.menu_item_pos_id, list);
   }
@@ -121,7 +138,7 @@ export async function fetchRecipeCostContext(locationIds: string[]) {
     recipeLinesByMenuItem,
     prepRecipeLinesByPrepId,
     prepRecipeYieldById,
-    ingredientCostById,
+    ingredientById,
     menuItemsUsingPrepRecipe,
     prepRecipesUsingPrepRecipe,
   };
@@ -135,7 +152,7 @@ function resolveItemCostCents(
     ctx.recipeLinesByMenuItem.get(menuItemPosId) ?? [],
     ctx.prepRecipeLinesByPrepId,
     ctx.prepRecipeYieldById,
-    ctx.ingredientCostById,
+    ctx.ingredientById,
   );
 }
 

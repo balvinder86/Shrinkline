@@ -36,6 +36,12 @@ import {
 import { quadrant, QUAD_COLOR, formatItemPrice } from "@/lib/boh/menuEngineering";
 import { classifyMenuItemCategory, CATEGORIES } from "@/lib/boh/menu-category";
 import { matchBeverageLine } from "@/lib/boh/beverageMatch";
+import {
+  MEASURE_UNITS,
+  compatibleLineUnits,
+  convertQuantityToIngredientUnit,
+  unitLabel,
+} from "@/lib/units";
 import { Card } from "@/components/ui/card";
 import { AiRecommendationsPanel } from "@/components/insights/AiRecommendationsPanel";
 import { Badge } from "@/components/ui/badge";
@@ -952,20 +958,7 @@ function PrepUsageBadge({ prep }: { prep: PrepRecipe }) {
 // quart or gallon, batters/doughs by the pound, portioned items by
 // count). "Other" falls back to free text for anything not listed
 // rather than blocking a real, valid unit this list didn't anticipate.
-const PREP_YIELD_UNITS = [
-  { value: "oz", label: "oz (fl oz)" },
-  { value: "cup", label: "cup" },
-  { value: "pt", label: "pint" },
-  { value: "qt", label: "quart" },
-  { value: "gal", label: "gallon" },
-  { value: "ml", label: "ml" },
-  { value: "L", label: "liter" },
-  { value: "lb", label: "lb" },
-  { value: "g", label: "gram" },
-  { value: "each", label: "each" },
-  { value: "portion", label: "portion" },
-  { value: "serving", label: "serving" },
-] as const;
+const PREP_YIELD_UNITS = MEASURE_UNITS;
 const OTHER_YIELD_UNIT = "__other__";
 const OTHER_CATEGORY = "__other__";
 
@@ -1243,10 +1236,20 @@ function MenuItemRecipeSheet({
     if (lines.length === 0) return null;
     let sum = 0;
     for (const l of lines) {
-      const lineCost =
-        l.ingredientId != null ? l.ingredientCostCents : l.prepRecipeCostPerYieldUnitCents;
-      if (lineCost == null) return null;
-      sum += l.quantity * lineCost;
+      if (l.ingredientId != null) {
+        if (l.ingredientCostCents == null || l.ingredientUnit == null) return null;
+        const converted = convertQuantityToIngredientUnit(
+          l.quantity,
+          l.unit,
+          l.ingredientUnit,
+          l.ingredientContainerSizeMl,
+        );
+        if (converted == null) return null;
+        sum += converted * l.ingredientCostCents;
+      } else {
+        if (l.prepRecipeCostPerYieldUnitCents == null) return null;
+        sum += l.quantity * l.prepRecipeCostPerYieldUnitCents;
+      }
     }
     return Math.round(sum);
   }, [lines]);
@@ -1534,6 +1537,7 @@ function PrepRecipeSheet({
     ingredientName: l.ingredientName,
     ingredientUnit: l.ingredientUnit,
     ingredientCostCents: l.ingredientCostCents,
+    ingredientContainerSizeMl: l.ingredientContainerSizeMl,
     prepRecipeId: l.subPrepRecipeId,
     prepRecipeName: l.subPrepRecipeName,
     prepRecipeCostPerYieldUnitCents: l.subPrepRecipeCostPerYieldUnitCents,
@@ -1768,6 +1772,26 @@ function RecipeLineList({
         const isPrep = l.prepRecipeId != null;
         const name = isPrep ? l.prepRecipeName : l.ingredientName;
         const unitCostCents = isPrep ? l.prepRecipeCostPerYieldUnitCents : l.ingredientCostCents;
+        // A prep-recipe sub-line's unit IS its cost basis directly
+        // (locked to the sub-recipe's own yield unit); an ingredient
+        // line's unit may differ from what the ingredient is priced
+        // per (5 oz of a bottle priced "each"), so convert first.
+        const lineTotalCents =
+          unitCostCents == null
+            ? null
+            : isPrep
+              ? l.quantity * unitCostCents
+              : l.ingredientUnit == null
+                ? null
+                : (() => {
+                    const converted = convertQuantityToIngredientUnit(
+                      l.quantity,
+                      l.unit,
+                      l.ingredientUnit,
+                      l.ingredientContainerSizeMl,
+                    );
+                    return converted == null ? null : converted * unitCostCents;
+                  })();
         return (
           <div key={l.id} className="flex items-center justify-between px-3 py-2 text-sm">
             <div>
@@ -1781,7 +1805,7 @@ function RecipeLineList({
               </div>
               <div className="text-xs text-muted-foreground">
                 {l.quantity} {l.unit}
-                {unitCostCents != null && ` · ${formatMoney(l.quantity * unitCostCents)}`}
+                {lineTotalCents != null && ` · ${formatMoney(lineTotalCents)}`}
               </div>
             </div>
             <Button
@@ -1809,7 +1833,7 @@ function AddLineForm({
   pending,
   error,
 }: {
-  ingredients: { id: string; name: string; unit: string }[];
+  ingredients: { id: string; name: string; unit: string; containerSizeMl: number | null }[];
   prepRecipes: PrepRecipe[];
   onAdd: (target: LineTarget, quantity: number, unit: string) => void;
   pending: boolean;
@@ -1818,11 +1842,22 @@ function AddLineForm({
   const [mode, setMode] = useState<"ingredient" | "prep">("ingredient");
   const [targetId, setTargetId] = useState("");
   const [quantity, setQuantity] = useState("");
+  // Only meaningful in ingredient mode — which unit the typed quantity
+  // is in, which may differ from the ingredient's own priced unit
+  // (5 oz of a wine bought "each"). Prep-recipe lines always stay
+  // locked to the sub-recipe's own yield unit — there's no ambiguity
+  // to pick from there.
+  const [lineUnit, setLineUnit] = useState("");
 
   const selectedIngredient = ingredients.find((i) => i.id === targetId);
   const selectedPrep = prepRecipes.find((p) => p.id === targetId);
+  const compatibleUnits = selectedIngredient
+    ? compatibleLineUnits(selectedIngredient.unit, selectedIngredient.containerSizeMl)
+    : [];
   const unit =
-    mode === "ingredient" ? (selectedIngredient?.unit ?? "") : (selectedPrep?.yieldUnit ?? "");
+    mode === "ingredient"
+      ? lineUnit || selectedIngredient?.unit || ""
+      : (selectedPrep?.yieldUnit ?? "");
 
   return (
     <div className="mt-3 space-y-2">
@@ -1849,6 +1884,7 @@ function AddLineForm({
           value={targetId}
           onValueChange={(id) => {
             setTargetId(id);
+            setLineUnit("");
             // A prep recipe's own yield is a reasonable starting guess
             // for "how much of it goes into one serving" — most
             // house-made batches (a lemonade batch, a single sauce
@@ -1885,7 +1921,22 @@ function AddLineForm({
           onChange={(e) => setQuantity(e.target.value)}
           className="h-8 w-20"
         />
-        <span className="w-12 text-xs text-muted-foreground">{unit}</span>
+        {mode === "ingredient" && selectedIngredient && compatibleUnits.length > 1 ? (
+          <Select value={unit} onValueChange={setLineUnit}>
+            <SelectTrigger className="h-8 w-24">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {compatibleUnits.map((u) => (
+                <SelectItem key={u} value={u}>
+                  {unitLabel(u)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : (
+          <span className="w-12 text-xs text-muted-foreground">{unit}</span>
+        )}
         <Button
           size="sm"
           variant="outline"
@@ -1929,7 +1980,7 @@ function GeneratedRecipeReview({
 }: {
   target: DraftTarget;
   lines: DraftLine[];
-  ingredients: { id: string; name: string; unit: string }[];
+  ingredients: { id: string; name: string; unit: string; containerSizeMl: number | null }[];
   prepRecipes: PrepRecipe[];
   onLineResolved: (key: string) => void;
 }) {
@@ -2018,7 +2069,7 @@ function GeneratedLineRow({
   pending,
 }: {
   line: GeneratedRecipeLine;
-  ingredients: { id: string; name: string; unit: string }[];
+  ingredients: { id: string; name: string; unit: string; containerSizeMl: number | null }[];
   prepRecipes: PrepRecipe[];
   onAdd: (target: LineTarget, quantity: number, unit: string) => void;
   onDismiss: () => void;
@@ -2035,14 +2086,20 @@ function GeneratedLineRow({
         : "",
   );
   const [quantity, setQuantity] = useState(line.quantity != null ? String(line.quantity) : "");
+  // Defaults to the matched ingredient's own unit (never trusted from
+  // Claude's own output — same discipline as the rest of this row) but
+  // still overridable, same as AddLineForm.
+  const [lineUnit, setLineUnit] = useState("");
 
   const selectedIngredient = ingredients.find((i) => i.id === targetId);
   const selectedPrep = prepRecipes.find((p) => p.id === targetId);
-  // Unit is always re-derived from the selected row, never trusted from
-  // Claude's own output — same discipline AddLineForm already applies
-  // to manual entry.
+  const compatibleUnits = selectedIngredient
+    ? compatibleLineUnits(selectedIngredient.unit, selectedIngredient.containerSizeMl)
+    : [];
   const unit =
-    mode === "ingredient" ? (selectedIngredient?.unit ?? "") : (selectedPrep?.yieldUnit ?? "");
+    mode === "ingredient"
+      ? lineUnit || selectedIngredient?.unit || ""
+      : (selectedPrep?.yieldUnit ?? "");
   const isMatched = (line.kind === "ingredient" || line.kind === "prep_recipe") && !!targetId;
 
   return (
@@ -2074,6 +2131,7 @@ function GeneratedLineRow({
             onClick={() => {
               setMode(m);
               setTargetId("");
+              setLineUnit("");
             }}
             className={`rounded-full border px-3 py-1 transition ${
               mode === m
@@ -2086,7 +2144,13 @@ function GeneratedLineRow({
         ))}
       </div>
       <div className="flex items-center gap-2">
-        <Select value={targetId} onValueChange={setTargetId}>
+        <Select
+          value={targetId}
+          onValueChange={(id) => {
+            setTargetId(id);
+            setLineUnit("");
+          }}
+        >
           <SelectTrigger className="h-8 flex-1">
             <SelectValue
               placeholder={mode === "ingredient" ? "Pick ingredient…" : "Pick prep recipe…"}
@@ -2109,7 +2173,22 @@ function GeneratedLineRow({
           onChange={(e) => setQuantity(e.target.value)}
           className="h-8 w-20"
         />
-        <span className="w-12 text-xs text-muted-foreground">{unit}</span>
+        {mode === "ingredient" && selectedIngredient && compatibleUnits.length > 1 ? (
+          <Select value={unit} onValueChange={setLineUnit}>
+            <SelectTrigger className="h-8 w-24">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {compatibleUnits.map((u) => (
+                <SelectItem key={u} value={u}>
+                  {unitLabel(u)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : (
+          <span className="w-12 text-xs text-muted-foreground">{unit}</span>
+        )}
         <Button
           size="sm"
           variant="outline"

@@ -198,6 +198,10 @@ type ItemDraft = {
   vendor: string;
   cost: number;
   weeklyUsage: number;
+  // How much volume (ml) is in one purchase unit — e.g. 750 for a
+  // standard wine bottle bought "each." Only relevant for items also
+  // used in recipes by the oz/ml/L; 0 means "not set."
+  containerSizeMl: number;
 };
 
 function InventoryPage() {
@@ -258,6 +262,7 @@ function InventoryPage() {
     vendor: vendors[0]?.name ?? "",
     cost: 0,
     weeklyUsage: 0,
+    containerSizeMl: 0,
   });
   const [itemToDelete, setItemToDelete] = useState<Item | null>(null);
 
@@ -501,6 +506,7 @@ function InventoryPage() {
       vendor: vendorNames[0] ?? "",
       cost: 0,
       weeklyUsage: 0,
+      containerSizeMl: 0,
     });
     setItemDialogOpen(true);
   };
@@ -515,6 +521,7 @@ function InventoryPage() {
       vendor: item.vendor,
       cost: item.cost,
       weeklyUsage: item.weeklyUsage,
+      containerSizeMl: item.containerSizeMl ?? 0,
     });
     setItemDialogOpen(true);
   };
@@ -522,6 +529,7 @@ function InventoryPage() {
     if (!itemDraft.name.trim()) return;
     const vendorId = vendors.find((v) => v.name === itemDraft.vendor)?.id ?? null;
     const costCents = itemDraft.cost ? Math.round(itemDraft.cost * 100) : null;
+    const containerSizeMl = itemDraft.containerSizeMl > 0 ? itemDraft.containerSizeMl : null;
     if (itemEditingId) {
       updateItem.mutate({
         id: itemEditingId,
@@ -530,6 +538,7 @@ function InventoryPage() {
         unit: itemDraft.unit,
         vendorId,
         costCents,
+        containerSizeMl,
       });
       updateOnHand(itemEditingId, itemDraft.onHand);
       updatePar(itemEditingId, itemDraft.par);
@@ -542,6 +551,7 @@ function InventoryPage() {
         par: itemDraft.par,
         vendorId,
         costCents,
+        containerSizeMl,
       });
     }
     setItemDialogOpen(false);
@@ -1688,6 +1698,24 @@ function InventoryPage() {
                 onChange={(e) => setItemDraft({ ...itemDraft, unit: e.target.value })}
                 placeholder="btl, case, lb…"
               />
+            </div>
+            <div>
+              <Label htmlFor="item-container-size">Container size (ml)</Label>
+              <Input
+                id="item-container-size"
+                type="number"
+                min="0"
+                step="1"
+                value={itemDraft.containerSizeMl || ""}
+                onChange={(e) =>
+                  setItemDraft({ ...itemDraft, containerSizeMl: parseFloat(e.target.value) || 0 })
+                }
+                placeholder="e.g. 750"
+              />
+              <p className="mt-1 text-xs text-stone-500">
+                Optional — set this so recipes can measure this item by the oz/ml/L even though
+                you buy it as "{itemDraft.unit || "each"}."
+              </p>
             </div>
             <div>
               <Label htmlFor="item-cost">Cost / unit ($)</Label>
