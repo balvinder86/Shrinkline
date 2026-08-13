@@ -274,7 +274,25 @@ function InvoicesPage() {
   // date range in the Topbar affects everything on this page
   // consistently.
   const dateFilteredInvoices = useMemo(
-    () => realInvoices.filter((i) => dateInRange(i.invoiceDate ?? i.createdAt, dateRange)),
+    () =>
+      realInvoices.filter((i) => {
+        if (!dateInRange(i.invoiceDate ?? i.createdAt, dateRange)) return false;
+        // Once extraction finishes "ready", Mindee either found a real
+        // invoice with a price or it didn't — a completed extraction
+        // with no total (or explicitly flagged not_an_invoice, meaning
+        // it found no invoice number/date/total/line items at all) is
+        // junk — a receipt confirmation email, a random attachment —
+        // not something worth cluttering this page with. Still
+        // processing/failed extractions are left alone: those need a
+        // human to actually see them, to wait it out or hit Retry.
+        if (
+          i.ocrStatus === "ready" &&
+          (i.flags.includes("not_an_invoice") || i.totalCents == null)
+        ) {
+          return false;
+        }
+        return true;
+      }),
     [realInvoices, dateRange],
   );
 
