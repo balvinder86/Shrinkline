@@ -239,7 +239,12 @@ async function findDuplicateInvoice(
 
 export type ReadyResult = Extract<JobCheckResult, { status: "ready" }>;
 
-export type PersistOutcome = { flags: string[]; documentType: string | null; vendorId: string | null };
+export type PersistOutcome = {
+  flags: string[];
+  documentType: string | null;
+  vendorId: string | null;
+  deleted?: boolean;
+};
 
 // Invoice-check → classify → validate → attribution fallback → dedupe,
 // replacing the old unconditional field write. Always reaches
@@ -280,7 +285,25 @@ export async function persistResult(invoice: Invoice, result: ReadyResult): Prom
     result.date != null ||
     result.totalAmount != null ||
     result.lineItems.length > 0;
-  if (!hasAnyMarker) flags.add("not_an_invoice");
+
+  // Mindee found literally nothing invoice-like — no number, date,
+  // total, or line items. Not a real invoice, so there's nothing worth
+  // keeping a row around for (a receipt confirmation email, a stray
+  // attachment, etc.) — delete it and its uploaded file outright
+  // rather than leaving a permanent null-value row that would just
+  // need hiding from the UI forever. Skips classification/dedupe
+  // entirely, since none of that matters for zero extracted content.
+  if (!hasAnyMarker) {
+    if (invoice.source_file_url) {
+      const { error: storageErr } = await supabase.storage
+        .from("invoice-uploads")
+        .remove([invoice.source_file_url]);
+      if (storageErr) console.error(`[ocr] failed to delete file for ${invoice.id}:`, storageErr.message);
+    }
+    const { error: deleteErr } = await supabase.from("invoices").delete().eq("id", invoice.id);
+    if (deleteErr) throw new Error(`delete failed: ${deleteErr.message}`);
+    return { flags: [], documentType: null, vendorId: null, deleted: true };
+  }
 
   const mimeType = mimeTypeFromPath(invoice.source_file_url ?? "");
   const fileBuffer = invoice.source_file_url ? await downloadInvoiceFile(invoice.source_file_url) : null;

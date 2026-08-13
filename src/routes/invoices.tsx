@@ -1782,7 +1782,17 @@ function InvoiceOcrSheet({
   useEffect(() => {
     if (!activeId || invoice?.ocrStatus !== "processing") return;
     const t = setTimeout(() => {
-      checkOcr.mutate(activeId);
+      checkOcr.mutate(activeId, {
+        // Mindee found nothing invoice-like at all — the row (and its
+        // file) is already gone server-side. Nothing left to show;
+        // close rather than leave the sheet stuck on the extracting
+        // spinner forever (invoice would never come back from
+        // useRealInvoices, so isExtracting's `!invoice` case would
+        // otherwise read as "still loading" indefinitely).
+        onSuccess: (result) => {
+          if (result.deleted) onClose();
+        },
+      });
     }, 3000);
     return () => clearTimeout(t);
     // checkOcr's identity changes every render; only isPending should re-arm the poll

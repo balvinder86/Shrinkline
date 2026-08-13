@@ -219,6 +219,25 @@ export async function handleEnqueue(invoiceId: string) {
 async function processReadyResult(invoice: Invoice, result: ReadyResult) {
   const outcome = await persistResult(invoice, result);
 
+  // persistResult already deleted the row (nothing invoice-like was
+  // found at all) — nothing left to attach line items or flags to.
+  if (outcome.deleted) {
+    return {
+      status: "ready" as const,
+      invoiceId: invoice.id,
+      deleted: true,
+      supplierName: null,
+      invoiceNumber: null,
+      date: null,
+      totalAmount: null,
+      lineItemsExtracted: 0,
+      lineItemsAutoMatched: 0,
+      flags: [],
+      documentType: null,
+      vendorId: null,
+    };
+  }
+
   // Case/bottle resolution is a food-and-beverage-distributor concept
   // (cases of bottles/cans) — a maintenance, utilities, or SaaS/POS
   // vendor never has it, so skip the whole branch for anything else

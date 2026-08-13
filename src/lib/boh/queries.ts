@@ -2307,6 +2307,11 @@ export function useCreateManualExpense() {
 
 export type OcrCheckResult = {
   status: "processing" | "ready" | "failed";
+  // Set when Mindee found nothing invoice-like at all (no number,
+  // date, total, or line items) — the ocr/ service deletes the row
+  // and its uploaded file outright rather than leaving a permanent
+  // empty invoice around, so there's nothing left to fetch afterward.
+  deleted?: boolean;
   supplierName?: string | null;
   invoiceNumber?: string | null;
   date?: string | null;
