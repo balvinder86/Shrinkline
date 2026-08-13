@@ -27,6 +27,7 @@ import {
 } from "@/lib/boh/queries";
 import { isFreeEmailProviderDomain } from "@/lib/boh/emailDomains";
 import { VENDOR_CATEGORIES } from "@/lib/boh/vendor-categories";
+import { VOLUME_UNITS, convertQuantityToIngredientUnit, unitLabel } from "@/lib/units";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   AlertTriangle,
@@ -198,10 +199,14 @@ type ItemDraft = {
   vendor: string;
   cost: number;
   weeklyUsage: number;
-  // How much volume (ml) is in one purchase unit — e.g. 750 for a
-  // standard wine bottle bought "each." Only relevant for items also
-  // used in recipes by the oz/ml/L; 0 means "not set."
-  containerSizeMl: number;
+  // How much volume is in one purchase unit — e.g. 750ml for a
+  // standard wine bottle bought "each." Entered in whatever unit is
+  // most natural (oz, gallon, liter…) and converted to ml on save,
+  // since that's the one stable unit everything else converts through.
+  // Only relevant for items also used in recipes by the oz/ml/L;
+  // containerSizeValue 0 means "not set."
+  containerSizeValue: number;
+  containerSizeUnit: string;
 };
 
 function InventoryPage() {
@@ -262,7 +267,8 @@ function InventoryPage() {
     vendor: vendors[0]?.name ?? "",
     cost: 0,
     weeklyUsage: 0,
-    containerSizeMl: 0,
+    containerSizeValue: 0,
+    containerSizeUnit: "ml",
   });
   const [itemToDelete, setItemToDelete] = useState<Item | null>(null);
 
@@ -506,7 +512,8 @@ function InventoryPage() {
       vendor: vendorNames[0] ?? "",
       cost: 0,
       weeklyUsage: 0,
-      containerSizeMl: 0,
+      containerSizeValue: 0,
+      containerSizeUnit: "ml",
     });
     setItemDialogOpen(true);
   };
@@ -521,7 +528,11 @@ function InventoryPage() {
       vendor: item.vendor,
       cost: item.cost,
       weeklyUsage: item.weeklyUsage,
-      containerSizeMl: item.containerSizeMl ?? 0,
+      // Always shown in ml on open — that's the one form actually
+      // stored, so there's no original entry unit to restore. Still
+      // freely switchable to whatever unit is easier to re-enter in.
+      containerSizeValue: item.containerSizeMl ?? 0,
+      containerSizeUnit: "ml",
     });
     setItemDialogOpen(true);
   };
@@ -529,7 +540,15 @@ function InventoryPage() {
     if (!itemDraft.name.trim()) return;
     const vendorId = vendors.find((v) => v.name === itemDraft.vendor)?.id ?? null;
     const costCents = itemDraft.cost ? Math.round(itemDraft.cost * 100) : null;
-    const containerSizeMl = itemDraft.containerSizeMl > 0 ? itemDraft.containerSizeMl : null;
+    const containerSizeMl =
+      itemDraft.containerSizeValue > 0
+        ? convertQuantityToIngredientUnit(
+            itemDraft.containerSizeValue,
+            itemDraft.containerSizeUnit,
+            "ml",
+            null,
+          )
+        : null;
     if (itemEditingId) {
       updateItem.mutate({
         id: itemEditingId,
@@ -1700,21 +1719,40 @@ function InventoryPage() {
               />
             </div>
             <div>
-              <Label htmlFor="item-container-size">Container size (ml)</Label>
-              <Input
-                id="item-container-size"
-                type="number"
-                min="0"
-                step="1"
-                value={itemDraft.containerSizeMl || ""}
-                onChange={(e) =>
-                  setItemDraft({ ...itemDraft, containerSizeMl: parseFloat(e.target.value) || 0 })
-                }
-                placeholder="e.g. 750"
-              />
+              <Label htmlFor="item-container-size">Container size</Label>
+              <div className="flex gap-1.5">
+                <Input
+                  id="item-container-size"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={itemDraft.containerSizeValue || ""}
+                  onChange={(e) =>
+                    setItemDraft({
+                      ...itemDraft,
+                      containerSizeValue: parseFloat(e.target.value) || 0,
+                    })
+                  }
+                  placeholder="e.g. 750"
+                  className="flex-1"
+                />
+                <select
+                  value={itemDraft.containerSizeUnit}
+                  onChange={(e) =>
+                    setItemDraft({ ...itemDraft, containerSizeUnit: e.target.value })
+                  }
+                  className="h-10 rounded-md border border-stone-200 bg-white px-2 text-sm"
+                >
+                  {VOLUME_UNITS.map((u) => (
+                    <option key={u} value={u}>
+                      {unitLabel(u)}
+                    </option>
+                  ))}
+                </select>
+              </div>
               <p className="mt-1 text-xs text-stone-500">
-                Optional — set this so recipes can measure this item by the oz/ml/L even though
-                you buy it as "{itemDraft.unit || "each"}."
+                Optional — set this so recipes can measure this item by the oz/ml/L even though you
+                buy it as "{itemDraft.unit || "each"}."
               </p>
             </div>
             <div>
