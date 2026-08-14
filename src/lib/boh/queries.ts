@@ -976,21 +976,66 @@ export type RecipeLine = {
   unit: string;
 };
 
-export function useRecipeLinesForItem(menuItemPosId: string | undefined) {
+// A menu item that sells at more than one real price (Bottle/Pint/
+// Pitcher, well-liquor Single/Double, a Happy Hour variant...) gets
+// one row per distinct size actually observed in Toast sales — see
+// db/phase2/63_menu_item_price_tiers.sql. Most items have none of
+// these at all, in which case the item just keeps its one plain
+// recipe like before (priceTierId null throughout).
+export type MenuItemPriceTier = {
+  id: string;
+  tierName: string;
+  lastPriceCents: number | null;
+};
+
+export function useMenuItemPriceTiers(menuItemPosId: string | undefined) {
+  const locationId = useCurrentLocationId();
+  return useQuery({
+    queryKey: ["menu-item-price-tiers", locationId, menuItemPosId],
+    enabled: !!locationId && !!menuItemPosId,
+    queryFn: async (): Promise<MenuItemPriceTier[]> => {
+      const { data, error } = await supabase
+        .from("menu_item_price_tiers")
+        .select("id, tier_name, last_price_cents")
+        .eq("location_id", locationId!)
+        .eq("menu_item_pos_id", menuItemPosId!)
+        .order("tier_name");
+      if (error) throw error;
+      return (data ?? []).map((r) => ({
+        id: r.id,
+        tierName: r.tier_name,
+        lastPriceCents: r.last_price_cents,
+      }));
+    },
+  });
+}
+
+// priceTierId: null (the default) means "the" recipe for this item —
+// exactly today's behavior, matching every existing real recipe_lines
+// row. Pass a real tier id to read/write that specific size's own
+// recipe instead.
+export function useRecipeLinesForItem(
+  menuItemPosId: string | undefined,
+  priceTierId: string | null = null,
+) {
   const locationId = useCurrentLocationId();
   const { data: locationIds } = useLocationIds();
   return useQuery({
-    queryKey: ["recipe-lines", locationId, menuItemPosId],
+    queryKey: ["recipe-lines", locationId, menuItemPosId, priceTierId],
     enabled: !!locationId && !!menuItemPosId,
     queryFn: async (): Promise<RecipeLine[]> => {
+      let linesQuery = supabase
+        .from("recipe_lines")
+        .select(
+          "id, quantity, unit, ingredient_id, prep_recipe_id, ingredients (id, name, unit, unit_cost_cents, container_size_ml, container_size_g), prep_recipes (id, name)",
+        )
+        .eq("location_id", locationId!)
+        .eq("menu_item_pos_id", menuItemPosId!);
+      linesQuery = priceTierId
+        ? linesQuery.eq("price_tier_id", priceTierId)
+        : linesQuery.is("price_tier_id", null);
       const [linesRes, ctx] = await Promise.all([
-        supabase
-          .from("recipe_lines")
-          .select(
-            "id, quantity, unit, ingredient_id, prep_recipe_id, ingredients (id, name, unit, unit_cost_cents, container_size_ml, container_size_g), prep_recipes (id, name)",
-          )
-          .eq("location_id", locationId!)
-          .eq("menu_item_pos_id", menuItemPosId!),
+        linesQuery,
         fetchRecipeCostContext(locationIds ?? []),
       ]);
       if (linesRes.error) throw linesRes.error;
@@ -1029,6 +1074,7 @@ export function useAddRecipeLine() {
         menuItemPosId: string;
         quantity: number;
         unit: string;
+        priceTierId?: string | null;
       } & (
         | { ingredientId: string; prepRecipeId?: never }
         | { prepRecipeId: string; ingredientId?: never }
@@ -1043,6 +1089,7 @@ export function useAddRecipeLine() {
         prep_recipe_id: input.prepRecipeId ?? null,
         quantity: input.quantity,
         unit: input.unit,
+        price_tier_id: input.priceTierId ?? null,
       });
       if (error) throw error;
     },

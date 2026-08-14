@@ -97,6 +97,74 @@ export async function replacePmixForDate(
   if (error) throw new Error(`upsert pmix_sales failed: ${error.message}`);
 }
 
+export type PriceTierUpsert = {
+  menuItemPosId: string;
+  toastModifierItemGuid: string;
+  tierName: string;
+  lastPriceCents: number | null;
+};
+
+// Returns a lookup keyed by "menuItemPosId::toastModifierItemGuid" to
+// each tier's stable row id, so replacePmixByTierForDate can attach
+// its rows to the right tier without a second round trip.
+export async function upsertMenuItemPriceTiers(
+  cred: PosCredential,
+  tiers: PriceTierUpsert[],
+): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  if (tiers.length === 0) return map;
+  const { data, error } = await supabase
+    .from("menu_item_price_tiers")
+    .upsert(
+      tiers.map((t) => ({
+        restaurant_id: cred.restaurant_id,
+        location_id: cred.location_id,
+        menu_item_pos_id: t.menuItemPosId,
+        toast_modifier_item_guid: t.toastModifierItemGuid,
+        tier_name: t.tierName,
+        last_price_cents: t.lastPriceCents,
+        updated_at: new Date().toISOString(),
+      })),
+      { onConflict: "location_id,menu_item_pos_id,toast_modifier_item_guid" },
+    )
+    .select("id, menu_item_pos_id, toast_modifier_item_guid");
+  if (error) throw new Error(`upsert menu_item_price_tiers failed: ${error.message}`);
+  for (const row of data ?? []) {
+    map.set(`${row.menu_item_pos_id}::${row.toast_modifier_item_guid}`, row.id);
+  }
+  return map;
+}
+
+export type PmixByTierRow = {
+  menuItemPosId: string;
+  priceTierId: string;
+  quantitySold: number;
+  netSalesCents: number;
+};
+
+export async function replacePmixByTierForDate(
+  cred: PosCredential,
+  businessDate: string,
+  rows: PmixByTierRow[],
+) {
+  const isoDate = `${businessDate.slice(0, 4)}-${businessDate.slice(4, 6)}-${businessDate.slice(6, 8)}`;
+  if (rows.length === 0) return;
+  const { error } = await supabase.from("pmix_sales_by_tier").upsert(
+    rows.map((r) => ({
+      restaurant_id: cred.restaurant_id,
+      location_id: cred.location_id,
+      business_date: isoDate,
+      menu_item_pos_id: r.menuItemPosId,
+      price_tier_id: r.priceTierId,
+      quantity_sold: r.quantitySold,
+      net_sales_cents: r.netSalesCents,
+      updated_at: new Date().toISOString(),
+    })),
+    { onConflict: "location_id,business_date,menu_item_pos_id,price_tier_id" },
+  );
+  if (error) throw new Error(`upsert pmix_sales_by_tier failed: ${error.message}`);
+}
+
 export async function upsertMenuItems(
   cred: PosCredential,
   items: {

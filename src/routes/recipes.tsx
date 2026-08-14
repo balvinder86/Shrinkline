@@ -12,6 +12,7 @@ import {
 } from "@/lib/pos/queries";
 import {
   useIngredients,
+  useMenuItemPriceTiers,
   useRecipeLinesForItem,
   useAddRecipeLine,
   useDeleteRecipeLine,
@@ -1222,7 +1223,17 @@ function MenuItemRecipeSheet({
   allCategories: string[];
   initialDraftLines?: DraftLine[];
 }) {
-  const { data: lines = [], isLoading } = useRecipeLinesForItem(item.id);
+  // A menu item sold at more than one real price (Bottle/Pint/
+  // Pitcher, a Happy Hour variant...) gets its own tab per size here,
+  // each with a completely separate recipe — a pint pour costs
+  // differently than a pitcher, so one shared recipe can't represent
+  // both. Items with no observed tiers (the vast majority) never show
+  // this row at all and behave exactly as before.
+  const { data: priceTiers = [] } = useMenuItemPriceTiers(item.id);
+  const [activeTierId, setActiveTierId] = useState<string | null | undefined>(undefined);
+  const resolvedTierId = activeTierId !== undefined ? activeTierId : (priceTiers[0]?.id ?? null);
+
+  const { data: lines = [], isLoading } = useRecipeLinesForItem(item.id, resolvedTierId);
   const { data: ingredients = [] } = useIngredients();
   const { data: prepRecipes = [] } = usePrepRecipes();
   const addLine = useAddRecipeLine();
@@ -1255,10 +1266,19 @@ function MenuItemRecipeSheet({
     return Math.round(sum);
   }, [lines]);
 
-  const margin = totalCents != null ? item.price * 100 - totalCents : null;
-  const marginPct = margin != null && item.price > 0 ? (margin / (item.price * 100)) * 100 : null;
-  const foodCostPct =
-    totalCents != null && item.price > 0 ? (totalCents / (item.price * 100)) * 100 : null;
+  // Margin has to compare against THIS tier's real price, not
+  // item.price — that's the item's overall (often cheapest-tier)
+  // display price, which would understate margin on every pricier
+  // tier the same way the raw sales data used to before price tiers
+  // existed.
+  const activeTierPriceCents = priceTiers.find((t) => t.id === resolvedTierId)?.lastPriceCents;
+  const priceCents =
+    resolvedTierId != null && activeTierPriceCents != null
+      ? activeTierPriceCents
+      : Math.round(item.price * 100);
+  const margin = totalCents != null ? priceCents - totalCents : null;
+  const marginPct = margin != null && priceCents > 0 ? (margin / priceCents) * 100 : null;
+  const foodCostPct = totalCents != null && priceCents > 0 ? (totalCents / priceCents) * 100 : null;
 
   const [categoryChoice, setCategoryChoice] = useState(item.category);
   const [customCategory, setCustomCategory] = useState("");
@@ -1280,6 +1300,27 @@ function MenuItemRecipeSheet({
         <SheetTitle className="font-serif text-2xl">{item.name}</SheetTitle>
         <SheetDescription>{item.rawCategory}</SheetDescription>
       </SheetHeader>
+
+      {priceTiers.length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-1.5 text-xs">
+          {priceTiers.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => setActiveTierId(t.id)}
+              className={`rounded-full border px-3 py-1 transition ${
+                resolvedTierId === t.id
+                  ? "border-foreground bg-foreground text-background"
+                  : "border-border bg-card hover:border-foreground/30"
+              }`}
+            >
+              {t.tierName}
+              {t.lastPriceCents != null && (
+                <span className="ml-1 opacity-70">{formatMoney(t.lastPriceCents / 100)}</span>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="mt-4 space-y-3 rounded-xl border p-4 text-sm">
         <div>
@@ -1392,8 +1433,12 @@ function MenuItemRecipeSheet({
         {totalCents != null && marginPct != null && foodCostPct != null ? (
           <>
             Costs <span className="font-medium">{formatMoney(totalCents)}</span> · Sells{" "}
-            <span className="font-medium">{formatItemPrice(item, { lowercase: true })}</span> ·{" "}
-            Margin <span className="font-medium">{marginPct.toFixed(0)}%</span> (food cost{" "}
+            <span className="font-medium">
+              {resolvedTierId != null && activeTierPriceCents != null
+                ? formatMoney(activeTierPriceCents / 100)
+                : formatItemPrice(item, { lowercase: true })}
+            </span>{" "}
+            · Margin <span className="font-medium">{marginPct.toFixed(0)}%</span> (food cost{" "}
             {foodCostPct.toFixed(0)}%)
           </>
         ) : (
@@ -1416,7 +1461,10 @@ function MenuItemRecipeSheet({
         />
       </div>
 
-      {lines.length === 0 && draftLines == null && (
+      {/* AI generation doesn't know about size tiers — offered only for
+          the base/no-tier recipe so a drafted line never lands somewhere
+          other than the tab currently being viewed. */}
+      {lines.length === 0 && draftLines == null && resolvedTierId == null && (
         <div className="mt-3">
           <Button
             size="sm"
@@ -1442,7 +1490,7 @@ function MenuItemRecipeSheet({
         </div>
       )}
 
-      {draftLines != null && (
+      {draftLines != null && resolvedTierId == null && (
         <div className="mt-4">
           <div className="mb-2 flex items-center justify-between">
             <div className="flex items-center gap-1.5 text-xs uppercase tracking-widest text-muted-foreground">
@@ -1475,6 +1523,7 @@ function MenuItemRecipeSheet({
             menuItemPosId: item.id,
             quantity,
             unit,
+            priceTierId: resolvedTierId,
             ...(target.kind === "ingredient"
               ? { ingredientId: target.id }
               : { prepRecipeId: target.id }),

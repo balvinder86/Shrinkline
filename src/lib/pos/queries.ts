@@ -28,7 +28,7 @@ export async function fetchRecipeCostContext(locationIds: string[]) {
     supabase
       .from("recipe_lines")
       .select(
-        "menu_item_pos_id, ingredient_id, prep_recipe_id, quantity, unit, ingredients (unit_cost_cents, unit, container_size_ml, container_size_g)",
+        "menu_item_pos_id, ingredient_id, prep_recipe_id, price_tier_id, quantity, unit, ingredients (unit_cost_cents, unit, container_size_ml, container_size_g)",
       )
       .in("location_id", locationIds),
     // prep_recipe_lines has two FKs into prep_recipes (the owning
@@ -53,6 +53,7 @@ export async function fetchRecipeCostContext(locationIds: string[]) {
     menu_item_pos_id: string;
     ingredient_id: string | null;
     prep_recipe_id: string | null;
+    price_tier_id: string | null;
     quantity: number;
     unit: string;
     ingredients: IngredientCostJoin;
@@ -106,16 +107,32 @@ export async function fetchRecipeCostContext(locationIds: string[]) {
     (prepRecipesRes.data ?? []).map((r) => [r.id as string, Number(r.yield_qty)]),
   );
 
+  // "The" recipe for an item — null price_tier_id, exactly what every
+  // existing real row already is. Deliberately excludes tiered rows
+  // (a bottle/pint/pitcher each have their own separate recipe now)
+  // so this map's meaning is unchanged for the vast majority of items
+  // that have no tiers at all.
   const recipeLinesByMenuItem = new Map<string, RecipeLineRow[]>();
+  // One recipe PER size tier — keyed "posId::tierId" — for items that
+  // sell at more than one real price (see 63_menu_item_price_tiers.sql).
+  const recipeLinesByMenuItemAndTier = new Map<string, RecipeLineRow[]>();
   for (const row of recipeLinesData) {
-    const list = recipeLinesByMenuItem.get(row.menu_item_pos_id) ?? [];
-    list.push({
+    const line: RecipeLineRow = {
       ingredient_id: row.ingredient_id,
       prep_recipe_id: row.prep_recipe_id,
       quantity: Number(row.quantity),
       unit: row.unit,
-    });
-    recipeLinesByMenuItem.set(row.menu_item_pos_id, list);
+    };
+    if (row.price_tier_id == null) {
+      const list = recipeLinesByMenuItem.get(row.menu_item_pos_id) ?? [];
+      list.push(line);
+      recipeLinesByMenuItem.set(row.menu_item_pos_id, list);
+    } else {
+      const key = `${row.menu_item_pos_id}::${row.price_tier_id}`;
+      const list = recipeLinesByMenuItemAndTier.get(key) ?? [];
+      list.push(line);
+      recipeLinesByMenuItemAndTier.set(key, list);
+    }
   }
 
   // Reverse indexes — "which menu items / prep recipes actually use
@@ -139,6 +156,7 @@ export async function fetchRecipeCostContext(locationIds: string[]) {
 
   return {
     recipeLinesByMenuItem,
+    recipeLinesByMenuItemAndTier,
     prepRecipeLinesByPrepId,
     prepRecipeYieldById,
     ingredientById,
@@ -147,7 +165,11 @@ export async function fetchRecipeCostContext(locationIds: string[]) {
   };
 }
 
-function resolveItemCostCents(
+// Base cost — the item's single, untiered recipe (recipe_lines rows
+// with price_tier_id null). Used as-is for the vast majority of items,
+// and as the fallback for a tiered item whose per-tier recipes aren't
+// fully built out yet (see resolveItemCostCents).
+function resolveBaseCostCents(
   menuItemPosId: string,
   ctx: Awaited<ReturnType<typeof fetchRecipeCostContext>>,
 ): number | null {
@@ -157,6 +179,56 @@ function resolveItemCostCents(
     ctx.prepRecipeYieldById,
     ctx.ingredientById,
   );
+}
+
+// Weighted-average cost across a menu item's actually-sold tiers for
+// whatever period tierQtyById was built from — e.g. Coors Lt sold as
+// 40 bottles + 15 pints + 3 pitchers gets a cost that reflects that mix,
+// instead of one flat number based on whichever tier happens to be
+// cheapest. Per the "never silently wrong" rule used throughout this
+// feature: if ANY tier with sold quantity > 0 lacks its own costed
+// recipe, this returns null rather than a partial/misleading blend —
+// callers fall back to resolveBaseCostCents in that case.
+function resolveBlendedTierCostCents(
+  menuItemPosId: string,
+  tierQtyById: Map<string, number>,
+  ctx: Awaited<ReturnType<typeof fetchRecipeCostContext>>,
+): number | null {
+  let totalQty = 0;
+  let totalCostCents = 0;
+  for (const [tierId, qty] of tierQtyById) {
+    if (qty <= 0) continue;
+    const lines = ctx.recipeLinesByMenuItemAndTier.get(`${menuItemPosId}::${tierId}`);
+    if (!lines || lines.length === 0) return null;
+    const tierCostCents = resolveMenuItemRecipeCostCents(
+      lines,
+      ctx.prepRecipeLinesByPrepId,
+      ctx.prepRecipeYieldById,
+      ctx.ingredientById,
+    );
+    if (tierCostCents == null) return null;
+    totalQty += qty;
+    totalCostCents += tierCostCents * qty;
+  }
+  if (totalQty === 0) return null;
+  return Math.round(totalCostCents / totalQty);
+}
+
+// Prefers the blended per-tier cost (the accurate figure) whenever the
+// item actually sold across tiers in this period AND every one of
+// those tiers has its own recipe; otherwise falls back to the item's
+// base/untiered recipe — better than showing nothing while a tiered
+// item's per-size recipes are still being built out.
+function resolveItemCostCents(
+  menuItemPosId: string,
+  ctx: Awaited<ReturnType<typeof fetchRecipeCostContext>>,
+  tierQtyById?: Map<string, number>,
+): number | null {
+  if (tierQtyById && tierQtyById.size > 0) {
+    const blended = resolveBlendedTierCostCents(menuItemPosId, tierQtyById, ctx);
+    if (blended != null) return blended;
+  }
+  return resolveBaseCostCents(menuItemPosId, ctx);
 }
 
 // PostgREST caps an unpaginated read at 1000 rows. pmix_sales and
@@ -276,7 +348,7 @@ export function useProductMix(range: DateRange) {
       const prevFromIso = isoDate(prevFrom);
       const prevToIso = isoDate(prevTo);
 
-      const [menuItemsRes, currentRows, prevRows, recipeCostCtx] = await Promise.all([
+      const [menuItemsRes, currentRows, prevRows, tierRows, recipeCostCtx] = await Promise.all([
         supabase
           .from("menu_items")
           .select(
@@ -304,9 +376,25 @@ export function useProductMix(range: DateRange) {
             .order("business_date", { ascending: true })
             .range(from, to),
         ),
+        fetchAllRows((from, to) =>
+          supabase
+            .from("pmix_sales_by_tier")
+            .select("menu_item_pos_id, price_tier_id, quantity_sold")
+            .in("location_id", locationIds!)
+            .gte("business_date", fromIso)
+            .lte("business_date", toIso)
+            .range(from, to),
+        ),
         fetchRecipeCostContext(locationIds!),
       ]);
       if (menuItemsRes.error) throw menuItemsRes.error;
+
+      const tierQtyByItem = new Map<string, Map<string, number>>();
+      for (const r of tierRows) {
+        const byTier = tierQtyByItem.get(r.menu_item_pos_id) ?? new Map<string, number>();
+        byTier.set(r.price_tier_id, (byTier.get(r.price_tier_id) ?? 0) + Number(r.quantity_sold));
+        tierQtyByItem.set(r.menu_item_pos_id, byTier);
+      }
 
       const sumQtyBy = (rows: { menu_item_pos_id: string; quantity_sold: number }[]) => {
         const map = new Map<string, number>();
@@ -329,7 +417,11 @@ export function useProductMix(range: DateRange) {
       const prevRevenueCents = sumRevenueBy(prevRows);
 
       return (menuItemsRes.data ?? []).map((m) => {
-        const recipeCents = resolveItemCostCents(m.pos_id, recipeCostCtx);
+        const recipeCents = resolveItemCostCents(
+          m.pos_id,
+          recipeCostCtx,
+          tierQtyByItem.get(m.pos_id),
+        );
         const costCents = recipeCents ?? m.cost_cents ?? undefined;
         return {
           id: m.pos_id,
@@ -433,7 +525,7 @@ export function useFoodCostSummary(range: DateRange) {
     queryFn: async (): Promise<FoodCostSummary> => {
       const days = Math.round((range.to.getTime() - range.from.getTime()) / 86_400_000) + 1;
 
-      const [salesData, recipeCostCtx, invoicesRes] = await Promise.all([
+      const [salesData, tierRows, recipeCostCtx, invoicesRes] = await Promise.all([
         fetchAllRows((from, to) =>
           supabase
             .from("pmix_sales")
@@ -442,6 +534,15 @@ export function useFoodCostSummary(range: DateRange) {
             .gte("business_date", fromIso)
             .lte("business_date", toIso)
             .order("business_date", { ascending: true })
+            .range(from, to),
+        ),
+        fetchAllRows((from, to) =>
+          supabase
+            .from("pmix_sales_by_tier")
+            .select("menu_item_pos_id, price_tier_id, quantity_sold")
+            .in("location_id", locationIds!)
+            .gte("business_date", fromIso)
+            .lte("business_date", toIso)
             .range(from, to),
         ),
         fetchRecipeCostContext(locationIds!),
@@ -460,11 +561,24 @@ export function useFoodCostSummary(range: DateRange) {
       ]);
       if (invoicesRes.error) throw invoicesRes.error;
 
-      // Resolved once per menu item (recursing through any prep
-      // recipes it uses), then reused for every sold unit of that item.
+      const tierQtyByItem = new Map<string, Map<string, number>>();
+      for (const r of tierRows) {
+        const byTier = tierQtyByItem.get(r.menu_item_pos_id) ?? new Map<string, number>();
+        byTier.set(r.price_tier_id, (byTier.get(r.price_tier_id) ?? 0) + Number(r.quantity_sold));
+        tierQtyByItem.set(r.menu_item_pos_id, byTier);
+      }
+
+      // Resolved once per menu item actually sold this period (recursing
+      // through any prep recipes it uses, and blending per-tier costs
+      // when the item sold across multiple sizes) — then reused for
+      // every sold unit of that item below.
+      const soldItemPosIds = new Set(salesData.map((r) => r.menu_item_pos_id));
       const itemCostCentsById = new Map<string, number | null>();
-      for (const menuItemPosId of recipeCostCtx.recipeLinesByMenuItem.keys()) {
-        itemCostCentsById.set(menuItemPosId, resolveItemCostCents(menuItemPosId, recipeCostCtx));
+      for (const menuItemPosId of soldItemPosIds) {
+        itemCostCentsById.set(
+          menuItemPosId,
+          resolveItemCostCents(menuItemPosId, recipeCostCtx, tierQtyByItem.get(menuItemPosId)),
+        );
       }
 
       let theoreticalCostCents = 0;

@@ -6,6 +6,7 @@ import {
   fetchEmployees,
   fetchJobs,
   fetchTimeEntriesForDate,
+  findPriceTierModifier,
   type ToastOrder,
   type ToastEmployee,
   type ToastJob,
@@ -15,12 +16,15 @@ import {
   getSecret,
   upsertRawEvents,
   replacePmixForDate,
+  upsertMenuItemPriceTiers,
+  replacePmixByTierForDate,
   upsertMenuItems,
   upsertRevenueCenters,
   upsertLaborShifts,
   updateLastSyncedAt,
   type PosCredential,
   type LaborShiftRow,
+  type PriceTierUpsert,
 } from "./db.js";
 
 // Time-and-a-half — US federal OT standard, matches WA state law (no
@@ -97,6 +101,49 @@ function aggregatePmix(orders: ToastOrder[]) {
   }));
 }
 
+// A second, more granular pass over the same orders — only for
+// selections that actually carry a real price-tier modifier (see
+// findPriceTierModifier). Deliberately separate from aggregatePmix
+// rather than folded into it: the vast majority of items have no
+// tiers at all, and this keeps that whole path untouched.
+function aggregatePmixByTier(orders: ToastOrder[]) {
+  const map = new Map<
+    string,
+    {
+      menuItemPosId: string;
+      toastModifierItemGuid: string;
+      tierName: string;
+      qty: number;
+      netCents: number;
+    }
+  >();
+  for (const order of orders) {
+    if (order.deleted || order.voided) continue;
+    for (const check of order.checks ?? []) {
+      if (check.deleted || check.voided) continue;
+      for (const sel of check.selections ?? []) {
+        if (sel.voided || sel.deleted) continue;
+        const tierMod = findPriceTierModifier(sel);
+        const tierItemGuid = tierMod?.item?.guid;
+        if (!tierItemGuid) continue;
+        const posId = sel.item?.guid ?? sel.guid;
+        const key = `${posId}::${tierItemGuid}`;
+        const cur = map.get(key) ?? {
+          menuItemPosId: posId,
+          toastModifierItemGuid: tierItemGuid,
+          tierName: tierMod.displayName ?? "Size",
+          qty: 0,
+          netCents: 0,
+        };
+        cur.qty += sel.quantity ?? 1;
+        cur.netCents += Math.round((sel.price ?? 0) * 100);
+        map.set(key, cur);
+      }
+    }
+  }
+  return Array.from(map.values());
+}
+
 async function syncCredential(cred: PosCredential) {
   console.log(`[toast-sync] ${cred.location_id}: starting`);
   const { clientId, clientSecret } = await getSecret(cred.vault_secret_name);
@@ -135,8 +182,29 @@ async function syncCredential(cred: PosCredential) {
     const pmixRows = aggregatePmix(orders);
     await replacePmixForDate(cred, businessDate, pmixRows);
 
+    const tierRows = aggregatePmixByTier(orders);
+    if (tierRows.length > 0) {
+      const tierUpserts: PriceTierUpsert[] = tierRows.map((r) => ({
+        menuItemPosId: r.menuItemPosId,
+        toastModifierItemGuid: r.toastModifierItemGuid,
+        tierName: r.tierName,
+        lastPriceCents: r.qty > 0 ? Math.round(r.netCents / r.qty) : null,
+      }));
+      const tierIdByKey = await upsertMenuItemPriceTiers(cred, tierUpserts);
+      await replacePmixByTierForDate(
+        cred,
+        businessDate,
+        tierRows.map((r) => ({
+          menuItemPosId: r.menuItemPosId,
+          priceTierId: tierIdByKey.get(`${r.menuItemPosId}::${r.toastModifierItemGuid}`)!,
+          quantitySold: r.qty,
+          netSalesCents: r.netCents,
+        })),
+      );
+    }
+
     console.log(
-      `[toast-sync] ${cred.location_id}: ${businessDate} — ${orders.length} orders, ${pmixRows.length} pmix rows`,
+      `[toast-sync] ${cred.location_id}: ${businessDate} — ${orders.length} orders, ${pmixRows.length} pmix rows, ${tierRows.length} tier rows`,
     );
     await new Promise((r) => setTimeout(r, 150));
   }

@@ -24,6 +24,23 @@ export type ToastSelection = {
   voided?: boolean;
   deleted?: boolean;
   item?: { guid: string };
+  modifiers?: ToastModifierSelection[];
+};
+
+// A selection's own chosen modifiers — e.g. a size ("BTL"/"PINT"/
+// "PITCHER") or a flavor ("Reposado"). Confirmed against a real, live
+// order payload: `optionGroupPricingMode === "REPLACES_PRICE"` is
+// Toast's own signal that a modifier is the one setting the real
+// price (a size choice), as opposed to a $0 descriptive one (a flavor
+// choice) — both can appear in the same selection's modifiers array.
+export type ToastModifierSelection = {
+  guid: string;
+  displayName?: string;
+  price?: number | null;
+  optionGroupPricingMode?: string;
+  voided?: boolean;
+  deleted?: boolean;
+  item?: { guid: string };
 };
 
 export type ToastMenuItemFlat = {
@@ -173,6 +190,17 @@ function resolveSizePriceCents(
     }
   }
   return minPriceDollars != null ? Math.round(minPriceDollars * 100) : null;
+}
+
+// The modifier (if any) that actually determines a selection's real
+// served size/price — see ToastModifierSelection's comment. Ignores
+// voided/deleted modifiers and any that don't carry their own item
+// guid (that guid is the stable tier identity, since a tier can be
+// renamed on Toast's side without changing it).
+export function findPriceTierModifier(sel: ToastSelection): ToastModifierSelection | undefined {
+  return (sel.modifiers ?? []).find(
+    (m) => !m.voided && !m.deleted && m.optionGroupPricingMode === "REPLACES_PRICE" && m.item?.guid,
+  );
 }
 
 function flattenMenuGroup(
