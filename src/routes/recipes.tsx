@@ -1315,7 +1315,7 @@ function MenuItemRecipeSheet({
             >
               {t.tierName}
               {t.lastPriceCents != null && (
-                <span className="ml-1 opacity-70">{formatMoney(t.lastPriceCents / 100)}</span>
+                <span className="ml-1 opacity-70">{formatMoney(t.lastPriceCents)}</span>
               )}
             </button>
           ))}
@@ -1435,7 +1435,7 @@ function MenuItemRecipeSheet({
             Costs <span className="font-medium">{formatMoney(totalCents)}</span> · Sells{" "}
             <span className="font-medium">
               {resolvedTierId != null && activeTierPriceCents != null
-                ? formatMoney(activeTierPriceCents / 100)
+                ? formatMoney(activeTierPriceCents)
                 : formatItemPrice(item, { lowercase: true })}
             </span>{" "}
             · Margin <span className="font-medium">{marginPct.toFixed(0)}%</span> (food cost{" "}
