@@ -1054,6 +1054,7 @@ function RecipeSummary({ menuItemPosId }: { menuItemPosId: string }) {
           l.unit,
           l.ingredientUnit,
           l.ingredientContainerSizeMl,
+          l.ingredientContainerSizeG,
         );
         if (converted == null) return null;
         sum += converted * l.ingredientCostCents;
@@ -1090,6 +1091,7 @@ function RecipeSummary({ menuItemPosId }: { menuItemPosId: string }) {
                       l.unit,
                       l.ingredientUnit,
                       l.ingredientContainerSizeMl,
+                      l.ingredientContainerSizeG,
                     );
                     return converted == null ? null : converted * unitCostCents;
                   })();

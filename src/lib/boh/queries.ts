@@ -154,6 +154,7 @@ export type Ingredient = {
   unitCostCents: number | null;
   category: string | null;
   containerSizeMl: number | null;
+  containerSizeG: number | null;
 };
 
 export function useIngredients() {
@@ -175,6 +176,7 @@ export function useIngredients() {
         unitCostCents: row.unit_cost_cents,
         category: row.category,
         containerSizeMl: row.container_size_ml,
+        containerSizeG: row.container_size_g,
       }));
     },
   });
@@ -185,6 +187,7 @@ export type IngredientInput = {
   unit: string;
   unitCostCents?: number | null;
   containerSizeMl?: number | null;
+  containerSizeG?: number | null;
 };
 
 export function useCreateIngredient() {
@@ -199,6 +202,7 @@ export function useCreateIngredient() {
         unit: input.unit,
         unit_cost_cents: input.unitCostCents ?? null,
         container_size_ml: input.containerSizeMl ?? null,
+        container_size_g: input.containerSizeG ?? null,
       });
       if (error) throw error;
     },
@@ -217,6 +221,7 @@ export function useUpdateIngredient() {
           unit: input.unit,
           unit_cost_cents: input.unitCostCents ?? null,
           container_size_ml: input.containerSizeMl ?? null,
+          container_size_g: input.containerSizeG ?? null,
         })
         .eq("id", id);
       if (error) throw error;
@@ -259,11 +264,15 @@ export type InventoryItem = {
   weeklyUsage: number;
   suggestedPar: number | null;
   lastOrdered: string;
-  // How much volume (ml) is in one purchase unit — e.g. 750 for a
-  // standard wine bottle bought "each." Only meaningful/set for
-  // count-purchased ingredients also used in recipes by the oz/ml/L;
-  // lets recipe lines convert between the two. Null when not set.
+  // How much volume (ml) or weight (g) is in one purchase unit — e.g.
+  // 750 for a standard wine bottle bought "each," or 20000 for a case
+  // of chicken. Only meaningful/set for count-purchased ingredients
+  // also used in recipes by the oz/ml/L or lb/kg/oz; lets recipe lines
+  // convert between the two. Exactly one of these two is ever set for
+  // a given ingredient — Inventory's own form only lets you pick one
+  // unit family at a time.
   containerSizeMl: number | null;
+  containerSizeG: number | null;
 };
 
 function formatLastOrdered(iso: string | null): string {
@@ -312,6 +321,7 @@ export function useInventoryItems() {
             par?.suggested_par_quantity != null ? Number(par.suggested_par_quantity) : null,
           lastOrdered: formatLastOrdered(stock?.last_ordered_at ?? null),
           containerSizeMl: ing.container_size_ml != null ? Number(ing.container_size_ml) : null,
+          containerSizeG: ing.container_size_g != null ? Number(ing.container_size_g) : null,
         };
       });
     },
@@ -370,7 +380,7 @@ export function useUsageTrend(weeks = 8) {
         supabase
           .from("recipe_lines")
           .select(
-            "menu_item_pos_id, quantity, unit, ingredients(unit_cost_cents, unit, container_size_ml)",
+            "menu_item_pos_id, quantity, unit, ingredients(unit_cost_cents, unit, container_size_ml, container_size_g)",
           )
           .eq("location_id", locationId!),
       ]);
@@ -385,6 +395,7 @@ export function useUsageTrend(weeks = 8) {
           unit_cost_cents: number | null;
           unit: string;
           container_size_ml: number | null;
+          container_size_g: number | null;
         } | null;
       };
       const costPerUnit = new Map<string, number>();
@@ -396,6 +407,7 @@ export function useUsageTrend(weeks = 8) {
           row.unit,
           row.ingredients.unit,
           row.ingredients.container_size_ml,
+          row.ingredients.container_size_g,
         );
         if (converted == null) continue;
         const cur = costPerUnit.get(row.menu_item_pos_id) ?? 0;
@@ -434,6 +446,7 @@ export type InventoryItemInput = {
   vendorId: string | null;
   costCents: number | null;
   containerSizeMl?: number | null;
+  containerSizeG?: number | null;
 };
 
 export function useCreateInventoryItem() {
@@ -453,6 +466,7 @@ export function useCreateInventoryItem() {
           unit_cost_cents: input.costCents,
           vendor_id: input.vendorId,
           container_size_ml: input.containerSizeMl ?? null,
+          container_size_g: input.containerSizeG ?? null,
         })
         .select("id")
         .single();
@@ -615,6 +629,7 @@ export type InventoryItemFieldsInput = {
   vendorId: string | null;
   costCents: number | null;
   containerSizeMl?: number | null;
+  containerSizeG?: number | null;
 };
 
 export function useUpdateInventoryItem() {
@@ -630,6 +645,7 @@ export function useUpdateInventoryItem() {
           unit_cost_cents: input.costCents,
           vendor_id: input.vendorId,
           container_size_ml: input.containerSizeMl ?? null,
+          container_size_g: input.containerSizeG ?? null,
         })
         .eq("id", id);
       if (error) throw error;
@@ -952,6 +968,7 @@ export type RecipeLine = {
   ingredientUnit: string | null;
   ingredientCostCents: number | null;
   ingredientContainerSizeMl: number | null;
+  ingredientContainerSizeG: number | null;
   prepRecipeId: string | null;
   prepRecipeName: string | null;
   prepRecipeCostPerYieldUnitCents: number | null;
@@ -970,7 +987,7 @@ export function useRecipeLinesForItem(menuItemPosId: string | undefined) {
         supabase
           .from("recipe_lines")
           .select(
-            "id, quantity, unit, ingredient_id, prep_recipe_id, ingredients (id, name, unit, unit_cost_cents, container_size_ml), prep_recipes (id, name)",
+            "id, quantity, unit, ingredient_id, prep_recipe_id, ingredients (id, name, unit, unit_cost_cents, container_size_ml, container_size_g), prep_recipes (id, name)",
           )
           .eq("location_id", locationId!)
           .eq("menu_item_pos_id", menuItemPosId!),
@@ -984,6 +1001,7 @@ export function useRecipeLinesForItem(menuItemPosId: string | undefined) {
         ingredientUnit: row.ingredients?.unit ?? null,
         ingredientCostCents: row.ingredients?.unit_cost_cents ?? null,
         ingredientContainerSizeMl: row.ingredients?.container_size_ml ?? null,
+        ingredientContainerSizeG: row.ingredients?.container_size_g ?? null,
         prepRecipeId: row.prep_recipe_id,
         prepRecipeName: row.prep_recipes?.name ?? null,
         prepRecipeCostPerYieldUnitCents: row.prep_recipe_id
@@ -1306,6 +1324,7 @@ export type PrepRecipeLine = {
   ingredientUnit: string | null;
   ingredientCostCents: number | null;
   ingredientContainerSizeMl: number | null;
+  ingredientContainerSizeG: number | null;
   subPrepRecipeId: string | null;
   subPrepRecipeName: string | null;
   subPrepRecipeCostPerYieldUnitCents: number | null;
@@ -1323,7 +1342,7 @@ export function usePrepRecipeLinesFor(prepRecipeId: string | undefined) {
         supabase
           .from("prep_recipe_lines")
           .select(
-            "id, quantity, unit, ingredient_id, sub_prep_recipe_id, ingredients (name, unit, unit_cost_cents, container_size_ml), sub_recipe:prep_recipes!sub_prep_recipe_id (id, name)",
+            "id, quantity, unit, ingredient_id, sub_prep_recipe_id, ingredients (name, unit, unit_cost_cents, container_size_ml, container_size_g), sub_recipe:prep_recipes!sub_prep_recipe_id (id, name)",
           )
           .eq("prep_recipe_id", prepRecipeId!),
         fetchRecipeCostContext(locationIds!),
@@ -1336,6 +1355,7 @@ export function usePrepRecipeLinesFor(prepRecipeId: string | undefined) {
         ingredientUnit: row.ingredients?.unit ?? null,
         ingredientCostCents: row.ingredients?.unit_cost_cents ?? null,
         ingredientContainerSizeMl: row.ingredients?.container_size_ml ?? null,
+        ingredientContainerSizeG: row.ingredients?.container_size_g ?? null,
         subPrepRecipeId: row.sub_prep_recipe_id,
         subPrepRecipeName: row.sub_recipe?.name ?? null,
         subPrepRecipeCostPerYieldUnitCents: row.sub_prep_recipe_id

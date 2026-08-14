@@ -1243,6 +1243,7 @@ function MenuItemRecipeSheet({
           l.unit,
           l.ingredientUnit,
           l.ingredientContainerSizeMl,
+          l.ingredientContainerSizeG,
         );
         if (converted == null) return null;
         sum += converted * l.ingredientCostCents;
@@ -1538,6 +1539,7 @@ function PrepRecipeSheet({
     ingredientUnit: l.ingredientUnit,
     ingredientCostCents: l.ingredientCostCents,
     ingredientContainerSizeMl: l.ingredientContainerSizeMl,
+    ingredientContainerSizeG: l.ingredientContainerSizeG,
     prepRecipeId: l.subPrepRecipeId,
     prepRecipeName: l.subPrepRecipeName,
     prepRecipeCostPerYieldUnitCents: l.subPrepRecipeCostPerYieldUnitCents,
@@ -1789,6 +1791,7 @@ function RecipeLineList({
                       l.unit,
                       l.ingredientUnit,
                       l.ingredientContainerSizeMl,
+                      l.ingredientContainerSizeG,
                     );
                     return converted == null ? null : converted * unitCostCents;
                   })();
@@ -1833,7 +1836,13 @@ function AddLineForm({
   pending,
   error,
 }: {
-  ingredients: { id: string; name: string; unit: string; containerSizeMl: number | null }[];
+  ingredients: {
+    id: string;
+    name: string;
+    unit: string;
+    containerSizeMl: number | null;
+    containerSizeG: number | null;
+  }[];
   prepRecipes: PrepRecipe[];
   onAdd: (target: LineTarget, quantity: number, unit: string) => void;
   pending: boolean;
@@ -1852,7 +1861,11 @@ function AddLineForm({
   const selectedIngredient = ingredients.find((i) => i.id === targetId);
   const selectedPrep = prepRecipes.find((p) => p.id === targetId);
   const compatibleUnits = selectedIngredient
-    ? compatibleLineUnits(selectedIngredient.unit, selectedIngredient.containerSizeMl)
+    ? compatibleLineUnits(
+        selectedIngredient.unit,
+        selectedIngredient.containerSizeMl,
+        selectedIngredient.containerSizeG,
+      )
     : [];
   const unit =
     mode === "ingredient"
@@ -1980,7 +1993,13 @@ function GeneratedRecipeReview({
 }: {
   target: DraftTarget;
   lines: DraftLine[];
-  ingredients: { id: string; name: string; unit: string; containerSizeMl: number | null }[];
+  ingredients: {
+    id: string;
+    name: string;
+    unit: string;
+    containerSizeMl: number | null;
+    containerSizeG: number | null;
+  }[];
   prepRecipes: PrepRecipe[];
   onLineResolved: (key: string) => void;
 }) {
@@ -2069,7 +2088,13 @@ function GeneratedLineRow({
   pending,
 }: {
   line: GeneratedRecipeLine;
-  ingredients: { id: string; name: string; unit: string; containerSizeMl: number | null }[];
+  ingredients: {
+    id: string;
+    name: string;
+    unit: string;
+    containerSizeMl: number | null;
+    containerSizeG: number | null;
+  }[];
   prepRecipes: PrepRecipe[];
   onAdd: (target: LineTarget, quantity: number, unit: string) => void;
   onDismiss: () => void;
@@ -2094,7 +2119,11 @@ function GeneratedLineRow({
   const selectedIngredient = ingredients.find((i) => i.id === targetId);
   const selectedPrep = prepRecipes.find((p) => p.id === targetId);
   const compatibleUnits = selectedIngredient
-    ? compatibleLineUnits(selectedIngredient.unit, selectedIngredient.containerSizeMl)
+    ? compatibleLineUnits(
+        selectedIngredient.unit,
+        selectedIngredient.containerSizeMl,
+        selectedIngredient.containerSizeG,
+      )
     : [];
   const unit =
     mode === "ingredient"

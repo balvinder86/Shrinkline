@@ -15,6 +15,7 @@ type IngredientCostJoin = {
   unit_cost_cents: number | null;
   unit: string;
   container_size_ml: number | null;
+  container_size_g: number | null;
 } | null;
 
 // Shared by useProductMix and useFoodCostSummary — fetches everything
@@ -27,7 +28,7 @@ export async function fetchRecipeCostContext(locationIds: string[]) {
     supabase
       .from("recipe_lines")
       .select(
-        "menu_item_pos_id, ingredient_id, prep_recipe_id, quantity, unit, ingredients (unit_cost_cents, unit, container_size_ml)",
+        "menu_item_pos_id, ingredient_id, prep_recipe_id, quantity, unit, ingredients (unit_cost_cents, unit, container_size_ml, container_size_g)",
       )
       .in("location_id", locationIds),
     // prep_recipe_lines has two FKs into prep_recipes (the owning
@@ -39,7 +40,7 @@ export async function fetchRecipeCostContext(locationIds: string[]) {
     supabase
       .from("prep_recipe_lines")
       .select(
-        "prep_recipe_id, ingredient_id, sub_prep_recipe_id, quantity, unit, ingredients (unit_cost_cents, unit, container_size_ml), owner:prep_recipes!prep_recipe_id!inner(location_id)",
+        "prep_recipe_id, ingredient_id, sub_prep_recipe_id, quantity, unit, ingredients (unit_cost_cents, unit, container_size_ml, container_size_g), owner:prep_recipes!prep_recipe_id!inner(location_id)",
       )
       .in("owner.location_id", locationIds),
     supabase.from("prep_recipes").select("id, yield_qty").in("location_id", locationIds),
@@ -75,6 +76,7 @@ export async function fetchRecipeCostContext(locationIds: string[]) {
         unitCostCents: row.ingredients.unit_cost_cents,
         unit: row.ingredients.unit,
         containerSizeMl: row.ingredients.container_size_ml,
+        containerSizeG: row.ingredients.container_size_g,
       });
   }
   for (const row of prepRecipeLinesData) {
@@ -83,6 +85,7 @@ export async function fetchRecipeCostContext(locationIds: string[]) {
         unitCostCents: row.ingredients.unit_cost_cents,
         unit: row.ingredients.unit,
         containerSizeMl: row.ingredients.container_size_ml,
+        containerSizeG: row.ingredients.container_size_g,
       });
   }
 

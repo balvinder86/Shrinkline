@@ -31,6 +31,7 @@ export type IngredientCostInfo = {
   unitCostCents: number | null;
   unit: string;
   containerSizeMl: number | null;
+  containerSizeG: number | null;
 };
 
 // A raw-ingredient line's quantity is in `line.unit`, which may differ
@@ -51,6 +52,7 @@ function resolveIngredientLineCostCents(
     unit,
     info.unit,
     info.containerSizeMl,
+    info.containerSizeG,
   );
   if (converted == null) return null;
   return converted * info.unitCostCents;
