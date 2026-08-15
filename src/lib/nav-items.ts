@@ -15,6 +15,7 @@ import {
   Settings,
   Trash2,
   Truck,
+  ClipboardCheck,
   type LucideIcon,
 } from "lucide-react";
 
@@ -52,10 +53,17 @@ export const NAV_OVERVIEW: NavItem[] = [
     url: "/inventory",
     icon: Package,
     permission: "inventory",
-    // Vendors and Waste Log both reuse "inventory" — same domain
-    // (ingredients, vendors, stock), no new permission needed.
+    // Inventory Count, Vendors, and Waste Log all reuse "inventory" —
+    // same domain (ingredients, vendors, stock), no new permission
+    // plumbing needed for any of them.
     children: [
       { titleKey: "inventoryItems", url: "/inventory", icon: Package, permission: "inventory" },
+      {
+        titleKey: "inventoryCount",
+        url: "/inventory-count",
+        icon: ClipboardCheck,
+        permission: "inventory",
+      },
       { titleKey: "vendors", url: "/vendors", icon: Truck, permission: "inventory" },
       { titleKey: "wasteLog", url: "/waste-log", icon: Trash2, permission: "inventory" },
     ],

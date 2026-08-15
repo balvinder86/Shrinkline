@@ -99,6 +99,15 @@ export function compatibleLineUnits(
 // Full measure-unit list with display labels — used for a prep
 // recipe's own yield unit and (via compatibleLineUnits) a recipe
 // line's unit picker.
+//
+// The count-family entries below (case/bottle/keg/box/package/can) are
+// display labels only — there's no fixed ratio between two count units
+// (a "case" isn't reliably N "bottles" without knowing the pack size,
+// a concept handled elsewhere, not here). They only ever show up as a
+// selectable option when they ARE an ingredient's own literal purchase
+// unit (compatibleLineUnits always includes an ingredient's own unit);
+// picking a different count unit than the ingredient's own is not
+// possible through this system, same as before this list grew.
 export const MEASURE_UNITS = [
   { value: "oz", label: "oz (fl oz)" },
   { value: "cup", label: "cup" },
@@ -114,6 +123,12 @@ export const MEASURE_UNITS = [
   { value: "each", label: "each" },
   { value: "portion", label: "portion" },
   { value: "serving", label: "serving" },
+  { value: "case", label: "case" },
+  { value: "bottle", label: "bottle" },
+  { value: "keg", label: "keg" },
+  { value: "box", label: "box" },
+  { value: "package", label: "package" },
+  { value: "can", label: "can" },
 ] as const;
 
 export function unitLabel(unit: string): string {

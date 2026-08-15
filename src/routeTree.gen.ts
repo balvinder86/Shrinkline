@@ -25,6 +25,7 @@ import { Route as LoyaltyRouteImport } from './routes/loyalty'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as LaborRouteImport } from './routes/labor'
 import { Route as InvoicesRouteImport } from './routes/invoices'
+import { Route as InventoryCountRouteImport } from './routes/inventory-count'
 import { Route as InventoryRouteImport } from './routes/inventory'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
@@ -109,6 +110,11 @@ const InvoicesRoute = InvoicesRouteImport.update({
   path: '/invoices',
   getParentRoute: () => rootRouteImport,
 } as any)
+const InventoryCountRoute = InventoryCountRouteImport.update({
+  id: '/inventory-count',
+  path: '/inventory-count',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const InventoryRoute = InventoryRouteImport.update({
   id: '/inventory',
   path: '/inventory',
@@ -129,6 +135,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/inventory': typeof InventoryRoute
+  '/inventory-count': typeof InventoryCountRoute
   '/invoices': typeof InvoicesRoute
   '/labor': typeof LaborRoute
   '/login': typeof LoginRoute
@@ -150,6 +157,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/inventory': typeof InventoryRoute
+  '/inventory-count': typeof InventoryCountRoute
   '/invoices': typeof InvoicesRoute
   '/labor': typeof LaborRoute
   '/login': typeof LoginRoute
@@ -172,6 +180,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/inventory': typeof InventoryRoute
+  '/inventory-count': typeof InventoryCountRoute
   '/invoices': typeof InvoicesRoute
   '/labor': typeof LaborRoute
   '/login': typeof LoginRoute
@@ -195,6 +204,7 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/inventory'
+    | '/inventory-count'
     | '/invoices'
     | '/labor'
     | '/login'
@@ -216,6 +226,7 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/inventory'
+    | '/inventory-count'
     | '/invoices'
     | '/labor'
     | '/login'
@@ -237,6 +248,7 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/inventory'
+    | '/inventory-count'
     | '/invoices'
     | '/labor'
     | '/login'
@@ -259,6 +271,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminRoute: typeof AdminRoute
   InventoryRoute: typeof InventoryRoute
+  InventoryCountRoute: typeof InventoryCountRoute
   InvoicesRoute: typeof InvoicesRoute
   LaborRoute: typeof LaborRoute
   LoginRoute: typeof LoginRoute
@@ -391,6 +404,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof InvoicesRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/inventory-count': {
+      id: '/inventory-count'
+      path: '/inventory-count'
+      fullPath: '/inventory-count'
+      preLoaderRoute: typeof InventoryCountRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/inventory': {
       id: '/inventory'
       path: '/inventory'
@@ -419,6 +439,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRoute,
   InventoryRoute: InventoryRoute,
+  InventoryCountRoute: InventoryCountRoute,
   InvoicesRoute: InvoicesRoute,
   LaborRoute: LaborRoute,
   LoginRoute: LoginRoute,

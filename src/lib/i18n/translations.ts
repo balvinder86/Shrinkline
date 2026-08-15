@@ -22,6 +22,7 @@ export type TranslationDict = {
     recipes: string;
     inventory: string;
     inventoryItems: string;
+    inventoryCount: string;
     vendors: string;
     wasteLog: string;
     invoices: string;
@@ -61,6 +62,7 @@ export const translations: Record<Language, TranslationDict> = {
       recipes: "Recipes",
       inventory: "Inventory & Ordering",
       inventoryItems: "Items & Orders",
+      inventoryCount: "Count Inventory",
       vendors: "Vendors",
       wasteLog: "Waste Log",
       invoices: "Invoices",
@@ -107,6 +109,7 @@ export const translations: Record<Language, TranslationDict> = {
       recipes: "Recetas",
       inventory: "Inventario y pedidos",
       inventoryItems: "Artículos y pedidos",
+      inventoryCount: "Contar inventario",
       vendors: "Proveedores",
       wasteLog: "Registro de desperdicio",
       invoices: "Facturas",

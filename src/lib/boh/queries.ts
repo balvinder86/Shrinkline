@@ -825,6 +825,143 @@ export function useUpdateOnHand() {
   });
 }
 
+// ------------------------------------------------------------
+// Inventory Counts — a dated, historical physical-count record with
+// its own priced-out total value, separate from ingredient_stock's
+// day-to-day running on-hand number. See db/phase2/65_inventory_counts.sql.
+// ------------------------------------------------------------
+export type InventoryCountSummary = {
+  id: string;
+  countedAt: string;
+  totalValueCents: number;
+  itemCount: number;
+  notes: string | null;
+};
+
+export function useInventoryCounts() {
+  const restaurantId = useCurrentRestaurantId();
+  return useQuery({
+    queryKey: ["inventory-counts", restaurantId],
+    enabled: !!restaurantId,
+    queryFn: async (): Promise<InventoryCountSummary[]> => {
+      const { data, error } = await supabase
+        .from("inventory_counts")
+        .select("id, counted_at, total_value_cents, item_count, notes")
+        .eq("restaurant_id", restaurantId!)
+        .order("counted_at", { ascending: false })
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      return (data ?? []).map((row) => ({
+        id: row.id,
+        countedAt: row.counted_at,
+        totalValueCents: row.total_value_cents,
+        itemCount: row.item_count,
+        notes: row.notes,
+      }));
+    },
+  });
+}
+
+export type SaveInventoryCountLine = {
+  ingredientId: string;
+  // Exactly what was typed and which unit it was typed in — a keg
+  // counted in oz, a case-purchased item counted directly in cases,
+  // etc. — kept as-entered for the historical record, same convention
+  // recipe_lines/waste_log already use.
+  quantity: number;
+  unit: string;
+  // `quantity` converted to the ingredient's own priced unit (via
+  // convertQuantityToIngredientUnit, computed by the caller — it
+  // already has every ingredient's unit/container-size loaded). Null
+  // when the entered unit can't convert to the ingredient's own unit
+  // — the line still gets recorded, but contributes nothing to the
+  // total value and its on-hand isn't synced, rather than silently
+  // syncing a wrong number.
+  nativeQuantity: number | null;
+  // Passed straight from the count page's already-loaded ingredient
+  // list rather than re-fetched — avoids a redundant round trip and a
+  // race against a cost that could change between page load and save.
+  unitCostCents: number | null;
+};
+
+export function useSaveInventoryCount() {
+  const restaurantId = useCurrentRestaurantId();
+  const locationId = useCurrentLocationId();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      lines,
+      notes,
+    }: {
+      lines: SaveInventoryCountLine[];
+      notes: string | null;
+    }) => {
+      if (!restaurantId || !locationId) throw new Error("no current restaurant/location");
+      const totalValueCents = lines.reduce(
+        (sum, l) =>
+          sum +
+          (l.nativeQuantity != null && l.unitCostCents != null
+            ? Math.round(l.nativeQuantity * l.unitCostCents)
+            : 0),
+        0,
+      );
+      const { data: countRow, error: countErr } = await supabase
+        .from("inventory_counts")
+        .insert({
+          restaurant_id: restaurantId,
+          location_id: locationId,
+          total_value_cents: totalValueCents,
+          item_count: lines.length,
+          notes,
+        })
+        .select("id")
+        .single();
+      if (countErr) throw countErr;
+
+      const { error: linesErr } = await supabase.from("inventory_count_lines").insert(
+        lines.map((l) => ({
+          restaurant_id: restaurantId,
+          inventory_count_id: countRow.id,
+          ingredient_id: l.ingredientId,
+          quantity: l.quantity,
+          unit: l.unit,
+          unit_cost_cents: l.unitCostCents,
+          value_cents:
+            l.nativeQuantity != null && l.unitCostCents != null
+              ? Math.round(l.nativeQuantity * l.unitCostCents)
+              : null,
+        })),
+      );
+      if (linesErr) throw linesErr;
+
+      // A real physical count is the most authoritative on-hand number
+      // available — becomes the new baseline for par-level/reorder math
+      // too, not just its own historical record. Only for lines that
+      // actually converted to the ingredient's own unit — never write
+      // a number that isn't really in that unit.
+      const convertible = lines.filter((l) => l.nativeQuantity != null);
+      const { error: stockErr } =
+        convertible.length === 0
+          ? { error: null }
+          : await supabase.from("ingredient_stock").upsert(
+              convertible.map((l) => ({
+                restaurant_id: restaurantId,
+                location_id: locationId,
+                ingredient_id: l.ingredientId,
+                on_hand_quantity: l.nativeQuantity,
+                updated_at: new Date().toISOString(),
+              })),
+              { onConflict: "location_id,ingredient_id" },
+            );
+      if (stockErr) throw stockErr;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["inventory-counts"] });
+      queryClient.invalidateQueries({ queryKey: ["inventory-items"] });
+    },
+  });
+}
+
 // Marks ingredients as just-ordered (PO dispatched) — separate from
 // on-hand count, which only changes when stock is actually counted or
 // a delivery is received.
