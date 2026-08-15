@@ -13,6 +13,8 @@ import {
   Landmark,
   Shield,
   Settings,
+  Trash2,
+  Truck,
   type LucideIcon,
 } from "lucide-react";
 
@@ -24,6 +26,14 @@ export type NavItem = {
   url: string;
   icon: LucideIcon;
   permission: PermissionKey;
+  // Sub-pages shown nested under this item (e.g. Vendors and Waste Log
+  // under Inventory & Ordering). When present, AppSidebar renders the
+  // parent as a pure expand/collapse toggle rather than a link — never
+  // nesting one clickable element inside another — so the parent's own
+  // `url` only matters for deciding whether the group should default
+  // to expanded (i.e. a child, or the parent's own base page, is the
+  // active route).
+  children?: NavItem[];
 };
 
 // Single source of truth for every gated nav destination — shared by
@@ -37,7 +47,19 @@ export const NAV_OVERVIEW: NavItem[] = [
   // Reuses "product_mix" — Recipes is the cost/recipe side of Product
   // Mix's real menu items, same domain, no new permission needed.
   { titleKey: "recipes", url: "/recipes", icon: ChefHat, permission: "product_mix" },
-  { titleKey: "inventory", url: "/inventory", icon: Package, permission: "inventory" },
+  {
+    titleKey: "inventory",
+    url: "/inventory",
+    icon: Package,
+    permission: "inventory",
+    // Vendors and Waste Log both reuse "inventory" — same domain
+    // (ingredients, vendors, stock), no new permission needed.
+    children: [
+      { titleKey: "inventoryItems", url: "/inventory", icon: Package, permission: "inventory" },
+      { titleKey: "vendors", url: "/vendors", icon: Truck, permission: "inventory" },
+      { titleKey: "wasteLog", url: "/waste-log", icon: Trash2, permission: "inventory" },
+    ],
+  },
   { titleKey: "invoices", url: "/invoices", icon: Receipt, permission: "invoices" },
   // Rolls up Sales + COGS + Labor + Operating Expenses — spans every
   // Overview-section page rather than belonging to one, so it lives

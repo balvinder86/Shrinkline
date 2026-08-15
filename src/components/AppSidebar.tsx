@@ -1,5 +1,5 @@
 import { Link, useRouterState } from "@tanstack/react-router";
-import { LogOut, UtensilsCrossed } from "lucide-react";
+import { ChevronRight, LogOut, UtensilsCrossed } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -11,8 +11,12 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarMenuSub,
+  SidebarMenuSubButton,
+  SidebarMenuSubItem,
   useSidebar,
 } from "@/components/ui/sidebar";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -24,7 +28,13 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { hasAccess, useCurrentMembership, type PermissionKey } from "@/lib/permissions";
-import { NAV_OVERVIEW, NAV_GROWTH, NAV_OPERATIONS, NAV_UNGATED } from "@/lib/nav-items";
+import {
+  NAV_OVERVIEW,
+  NAV_GROWTH,
+  NAV_OPERATIONS,
+  NAV_UNGATED,
+  type NavItem,
+} from "@/lib/nav-items";
 import { useAuth } from "@/lib/supabase/auth-context";
 import { useCurrentRestaurant } from "@/lib/restaurant-context";
 import { useLanguage } from "@/lib/i18n/language-context";
@@ -51,7 +61,7 @@ export function AppSidebar() {
   const visibleGrowth = visibleFor(NAV_GROWTH, membership);
   const visibleOperations = visibleFor(NAV_OPERATIONS, membership);
 
-  const renderGroup = (label: string, items: (typeof NAV_UNGATED)[number][]) => {
+  const renderGroup = (label: string, items: (NavItem | (typeof NAV_UNGATED)[number])[]) => {
     if (items.length === 0) return null;
     return (
       <SidebarGroup>
@@ -60,24 +70,58 @@ export function AppSidebar() {
         </SidebarGroupLabel>
         <SidebarGroupContent>
           <SidebarMenu>
-            {items.map((item) => (
-              <SidebarMenuItem key={item.url}>
-                <SidebarMenuButton
-                  asChild
-                  isActive={isActive(item.url)}
-                  className="h-10 rounded-lg data-[active=true]:bg-primary/10 data-[active=true]:text-primary data-[active=true]:font-medium"
-                >
-                  <Link
-                    to={item.url}
-                    onClick={() => setOpenMobile(false)}
-                    className="flex items-center gap-3"
+            {items.map((item) => {
+              const children =
+                "children" in item ? visibleFor(item.children ?? [], membership) : [];
+              if (children.length > 0) {
+                const groupOpen = isActive(item.url) || children.some((c) => isActive(c.url));
+                return (
+                  <Collapsible key={item.url} defaultOpen={groupOpen} className="group/collapsible">
+                    <SidebarMenuItem>
+                      <CollapsibleTrigger asChild>
+                        <SidebarMenuButton className="h-10 rounded-lg">
+                          <item.icon className="h-[18px] w-[18px]" />
+                          <span className="text-sm">{t.nav[item.titleKey]}</span>
+                          <ChevronRight className="ml-auto h-4 w-4 shrink-0 transition-transform group-data-[state=open]/collapsible:rotate-90" />
+                        </SidebarMenuButton>
+                      </CollapsibleTrigger>
+                      <CollapsibleContent>
+                        <SidebarMenuSub>
+                          {children.map((child) => (
+                            <SidebarMenuSubItem key={child.url}>
+                              <SidebarMenuSubButton asChild isActive={isActive(child.url)}>
+                                <Link to={child.url} onClick={() => setOpenMobile(false)}>
+                                  <child.icon className="h-4 w-4" />
+                                  <span>{t.nav[child.titleKey]}</span>
+                                </Link>
+                              </SidebarMenuSubButton>
+                            </SidebarMenuSubItem>
+                          ))}
+                        </SidebarMenuSub>
+                      </CollapsibleContent>
+                    </SidebarMenuItem>
+                  </Collapsible>
+                );
+              }
+              return (
+                <SidebarMenuItem key={item.url}>
+                  <SidebarMenuButton
+                    asChild
+                    isActive={isActive(item.url)}
+                    className="h-10 rounded-lg data-[active=true]:bg-primary/10 data-[active=true]:text-primary data-[active=true]:font-medium"
                   >
-                    <item.icon className="h-[18px] w-[18px]" />
-                    <span className="text-sm">{t.nav[item.titleKey]}</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            ))}
+                    <Link
+                      to={item.url}
+                      onClick={() => setOpenMobile(false)}
+                      className="flex items-center gap-3"
+                    >
+                      <item.icon className="h-[18px] w-[18px]" />
+                      <span className="text-sm">{t.nav[item.titleKey]}</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              );
+            })}
           </SidebarMenu>
         </SidebarGroupContent>
       </SidebarGroup>

@@ -20,7 +20,12 @@ const SEARCH_ITEM_WINDOW = (() => {
   return { from: addDays(today, -6), to: today };
 })();
 
-const ALL_FEATURES = [...NAV_OVERVIEW, ...NAV_GROWTH, ...NAV_OPERATIONS];
+// Flattened one level — a nested item (e.g. Vendors/Waste Log under
+// Inventory & Ordering) must stay searchable by its own name, not just
+// reachable by first finding its parent in the sidebar.
+const ALL_FEATURES = [...NAV_OVERVIEW, ...NAV_GROWTH, ...NAV_OPERATIONS].flatMap((item) =>
+  item.children ? [item, ...item.children] : [item],
+);
 
 // Lower groupRank wins ties — a page you can navigate to by name
 // ("invoices") should beat a same-scoring item match, and within

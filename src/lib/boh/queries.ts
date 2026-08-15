@@ -3,9 +3,15 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase/client";
 import { useLocationIds, useRestaurantIds } from "@/lib/supabase/scope";
 import { VENDOR_CATEGORIES, type VendorCategory } from "@/lib/boh/vendor-categories";
+import { type WasteReason } from "@/lib/boh/waste-reasons";
 import { fetchRecipeCostContext } from "@/lib/pos/queries";
 import { resolvePrepRecipeCostPerYieldUnit, wouldCreateCycle } from "@/lib/boh/recipeCost";
 import { convertQuantityToIngredientUnit } from "@/lib/units";
+// Aliased — this file already exports its own string-based DateRange
+// (see dateInRange below) for the Invoices dashboard's date filter;
+// this is the app-wide Date-based range from the global date picker
+// (useDateRange()), which is what Waste Log's period filter uses.
+import { type DateRange as GlobalDateRange, isoDate } from "@/lib/date-range";
 
 // A user's dashboard today only ever shows one location — same
 // simplification as useCurrentRestaurantId, revisit when multi-location
@@ -238,6 +244,136 @@ export function useDeleteIngredient() {
       if (error) throw error;
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["ingredients"] }),
+  });
+}
+
+// ------------------------------------------------------------
+// Waste Log — record ingredient waste (spoilage, over-production,
+// breakage, spills, expired stock, prep errors) with its dollar cost.
+// Ingredient-only (no menu items) and cost-only — doesn't touch
+// ingredient_stock.on_hand_quantity. See db/phase2/64_waste_log.sql.
+// ------------------------------------------------------------
+export type WasteLogEntry = {
+  id: string;
+  ingredientId: string;
+  ingredientName: string;
+  quantity: number;
+  unit: string;
+  reason: WasteReason;
+  // Resolved and stored at log time, not recomputed live — see the
+  // migration's comment on why. Null means the ingredient had no cost
+  // yet, or the logged unit couldn't convert to its priced unit.
+  costCents: number | null;
+  notes: string | null;
+  loggedAt: string;
+};
+
+type WasteLogDbRow = {
+  id: string;
+  ingredient_id: string;
+  quantity: number;
+  unit: string;
+  reason: string;
+  cost_cents: number | null;
+  notes: string | null;
+  logged_at: string;
+  ingredients: { name: string } | null;
+};
+
+export function useWasteLog(range: GlobalDateRange) {
+  const { data: locationIds } = useLocationIds();
+  const fromIso = isoDate(range.from);
+  const toIso = isoDate(range.to);
+  return useQuery({
+    queryKey: ["waste-log", locationIds, fromIso, toIso],
+    enabled: !!locationIds && locationIds.length > 0,
+    queryFn: async (): Promise<WasteLogEntry[]> => {
+      const { data, error } = await supabase
+        .from("waste_log")
+        .select(
+          "id, ingredient_id, quantity, unit, reason, cost_cents, notes, logged_at, ingredients (name)",
+        )
+        .in("location_id", locationIds!)
+        .gte("logged_at", fromIso)
+        .lte("logged_at", toIso)
+        .order("logged_at", { ascending: false })
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      return ((data ?? []) as unknown as WasteLogDbRow[]).map((row) => ({
+        id: row.id,
+        ingredientId: row.ingredient_id,
+        ingredientName: row.ingredients?.name ?? "Unknown ingredient",
+        quantity: Number(row.quantity),
+        unit: row.unit,
+        reason: row.reason as WasteReason,
+        costCents: row.cost_cents,
+        notes: row.notes,
+        loggedAt: row.logged_at,
+      }));
+    },
+  });
+}
+
+export type AddWasteEntryInput = {
+  ingredientId: string;
+  quantity: number;
+  unit: string;
+  reason: WasteReason;
+  notes: string | null;
+  loggedAt: string;
+};
+
+export function useAddWasteEntry() {
+  const restaurantId = useCurrentRestaurantId();
+  const locationId = useCurrentLocationId();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: AddWasteEntryInput) => {
+      if (!restaurantId || !locationId) throw new Error("no current restaurant/location");
+      const { data: ingredient, error: ingredientErr } = await supabase
+        .from("ingredients")
+        .select("unit, unit_cost_cents, container_size_ml, container_size_g")
+        .eq("id", input.ingredientId)
+        .single();
+      if (ingredientErr) throw ingredientErr;
+
+      let costCents: number | null = null;
+      if (ingredient.unit_cost_cents != null) {
+        const converted = convertQuantityToIngredientUnit(
+          input.quantity,
+          input.unit,
+          ingredient.unit,
+          ingredient.container_size_ml,
+          ingredient.container_size_g,
+        );
+        if (converted != null) costCents = Math.round(converted * ingredient.unit_cost_cents);
+      }
+
+      const { error } = await supabase.from("waste_log").insert({
+        restaurant_id: restaurantId,
+        location_id: locationId,
+        ingredient_id: input.ingredientId,
+        quantity: input.quantity,
+        unit: input.unit,
+        reason: input.reason,
+        cost_cents: costCents,
+        notes: input.notes,
+        logged_at: input.loggedAt,
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["waste-log"] }),
+  });
+}
+
+export function useDeleteWasteEntry() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("waste_log").delete().eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["waste-log"] }),
   });
 }
 

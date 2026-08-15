@@ -47,6 +47,8 @@ export const ROUTE_PERMISSION: Record<string, PermissionKey> = {
   "/": "sales_overview",
   "/product-mix": "product_mix",
   "/inventory": "inventory",
+  "/vendors": "inventory",
+  "/waste-log": "inventory",
   "/invoices": "invoices",
   "/reviews": "reviews",
   "/seo": "seo",
