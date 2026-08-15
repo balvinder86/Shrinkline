@@ -9,9 +9,9 @@ import Anthropic from "@anthropic-ai/sdk";
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-export type DocumentType = "invoice" | "credit_memo" | "statement" | "unclear";
+export type DocumentType = "invoice" | "credit_memo" | "statement" | "payroll" | "unclear";
 
-const VALID_TYPES: DocumentType[] = ["invoice", "credit_memo", "statement", "unclear"];
+const VALID_TYPES: DocumentType[] = ["invoice", "credit_memo", "statement", "payroll", "unclear"];
 
 const CLASSIFY_TOOL = {
   name: "classify_document",
@@ -26,6 +26,9 @@ const CLASSIFY_TOOL = {
           "invoice: a bill for goods/services owed to a vendor, with a single invoice number and total due. " +
           "credit_memo: a document that reduces an amount owed (a refund, credit, or return), not a new bill. " +
           "statement: a summary/recap of multiple invoices or transactions over a period — not a single bill. " +
+          "payroll: a paycheck/pay stub, payroll register or journal, employee earnings/check record, direct " +
+          "deposit or depository totals report, or any other payroll-processor/accountant document about " +
+          "employee pay — never a bill owed to a vendor, even though it has dollar totals and reference numbers. " +
           "unclear: none of the above, illegible, or not a business billing document at all.",
       },
     },

@@ -311,6 +311,27 @@ export async function persistResult(invoice: Invoice, result: ReadyResult): Prom
     ? await classifyDocument(fileBuffer, mimeType)
     : { documentType: "unclear" as const };
 
+  // Payroll documents (paychecks, payroll registers, employee earnings
+  // reports, etc. — typically from an accountant, not a vendor) often
+  // have their own dollar totals and reference numbers, so Mindee's
+  // invoice-shaped extraction finds "invoice-like" content on them even
+  // though they're never a bill owed to a vendor. Real example: a
+  // 14-page payroll-checks PDF created 14 separate pending invoices.
+  // Delete outright, same as the !hasAnyMarker case above — these
+  // aren't invoices worth a human ever reviewing on this page.
+  if (documentType === "payroll") {
+    if (invoice.source_file_url) {
+      const { error: storageErr } = await supabase.storage
+        .from("invoice-uploads")
+        .remove([invoice.source_file_url]);
+      if (storageErr)
+        console.error(`[ocr] failed to delete file for ${invoice.id}:`, storageErr.message);
+    }
+    const { error: deleteErr } = await supabase.from("invoices").delete().eq("id", invoice.id);
+    if (deleteErr) throw new Error(`delete failed: ${deleteErr.message}`);
+    return { flags: [], documentType: null, vendorId: null, deleted: true };
+  }
+
   // Totals validation — folded into low_confidence rather than a
   // false totals_mismatch when there's nothing to sum or nothing to
   // compare against (zero line items, or Mindee didn't find a total).
