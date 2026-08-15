@@ -1815,7 +1815,20 @@ function InvoiceOcrSheet({
     setStartError(null);
     try {
       const id = await uploadInvoice.mutateAsync({ vendorId: vendorId || null, file: fileToUpload });
-      await enqueueOcr.mutateAsync(id);
+      const enqueueResult = await enqueueOcr.mutateAsync(id);
+      // Classified as payroll before Mindee ever ran — the row's
+      // already gone server-side, so there's nothing to switch the
+      // sheet to view. Surface why instead of silently doing nothing
+      // (or, without this check, showing an extracting spinner that
+      // would never resolve — the invoice can never come back from
+      // useRealInvoices, and the "processing" poll only ever arms once
+      // an invoice is loaded with ocr_status === "processing").
+      if (enqueueResult.deleted) {
+        setStartError(
+          "This looks like a payroll document (a paycheck or payroll report), not a vendor invoice — nothing to review.",
+        );
+        return;
+      }
       setUploadedId(id);
     } catch (e) {
       setStartError(e instanceof Error ? e.message : String(e));

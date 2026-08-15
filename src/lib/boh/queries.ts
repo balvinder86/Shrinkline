@@ -2562,16 +2562,26 @@ export type OcrCheckResult = {
   error?: unknown;
 };
 
+export type OcrEnqueueResult = {
+  // Set when the document is classified as payroll (a paycheck,
+  // payroll register, employee earnings report, etc.) BEFORE Mindee is
+  // ever called — the ocr/ service deletes the row and its uploaded
+  // file outright rather than paying for an extraction (and, for a
+  // multi-page PDF, a whole batch of them) on something that was never
+  // going to be a real vendor invoice.
+  deleted?: boolean;
+};
+
 export function useEnqueueOcr() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (invoiceId: string) => {
+    mutationFn: async (invoiceId: string): Promise<OcrEnqueueResult> => {
       const { data, error } = await supabase.functions.invoke("invoice-ocr", {
         body: { invoice_id: invoiceId, action: "enqueue" },
       });
       if (error) throw error;
       if (!data?.ok) throw new Error(data?.error ?? "enqueue failed");
-      return data;
+      return data as OcrEnqueueResult;
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["real-invoices"] }),
   });

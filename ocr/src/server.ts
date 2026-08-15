@@ -22,6 +22,7 @@ import {
   setEnqueuedMultiPage,
   setFailed,
   persistResult,
+  deleteInvoiceAndFile,
   insertInvoiceLine,
   addInvoiceFlag,
   getVendorCategory,
@@ -43,6 +44,7 @@ import {
   type ReadyResult,
 } from "./db.js";
 import { enqueue, checkJob } from "./mindee.js";
+import { classifyDocument } from "./classify.js";
 import { processRecipeImport } from "./recipeImport.js";
 
 // Distributor invoices routinely print line items at CASE level
@@ -185,6 +187,22 @@ export async function handleEnqueue(invoiceId: string) {
   const fileBuffer = await downloadInvoiceFile(invoice.source_file_url);
   const filename = invoice.source_file_url.split("/").pop() ?? "invoice.pdf";
   const mimeType = mimeTypeFromPath(invoice.source_file_url);
+
+  // Classify BEFORE ever calling Mindee, not just after — Mindee is a
+  // pure field extractor with no concept of "is this even an invoice",
+  // so left ungated it happily runs (and, worse, page-splits into one
+  // job per page) on a payroll document just because it has dollar
+  // totals and reference numbers. A real 14-page payroll-checks PDF
+  // triggered 14 separate paid Mindee jobs before this existed. This
+  // classification call is a single cheap Haiku vision call against
+  // the whole original file (page count doesn't matter to it), so it's
+  // worth paying even for the common case where the document turns out
+  // to be a real invoice and persistResult classifies it again anyway.
+  const { documentType: preDocumentType } = await classifyDocument(fileBuffer, mimeType);
+  if (preDocumentType === "payroll") {
+    await deleteInvoiceAndFile(invoice);
+    return { jobId: null, deleted: true };
+  }
 
   // A vendor sometimes batches multiple separate real invoices into
   // one emailed PDF attachment (confirmed real on an FSI invoice —
@@ -618,8 +636,10 @@ async function recheckStuckInvoices() {
   }
   for (const { id } of neverEnqueued) {
     try {
-      await handleEnqueue(id);
-      console.log(`[background-recheck] ${id}: enqueued (was never started)`);
+      const result = await handleEnqueue(id);
+      console.log(
+        `[background-recheck] ${id}: ${"deleted" in result && result.deleted ? "deleted (payroll, not a real invoice)" : "enqueued (was never started)"}`,
+      );
     } catch (e) {
       console.error(`[background-recheck] ${id} enqueue retry failed:`, e);
     }

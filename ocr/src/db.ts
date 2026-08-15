@@ -246,6 +246,22 @@ export type PersistOutcome = {
   deleted?: boolean;
 };
 
+// Shared by every "this was never a real invoice" path — no
+// invoice-like content at all, or a document that Mindee finds
+// invoice-shaped fields on anyway (payroll) — so there's nothing left
+// worth a human reviewing.
+export async function deleteInvoiceAndFile(invoice: Pick<Invoice, "id" | "source_file_url">) {
+  if (invoice.source_file_url) {
+    const { error: storageErr } = await supabase.storage
+      .from("invoice-uploads")
+      .remove([invoice.source_file_url]);
+    if (storageErr)
+      console.error(`[ocr] failed to delete file for ${invoice.id}:`, storageErr.message);
+  }
+  const { error: deleteErr } = await supabase.from("invoices").delete().eq("id", invoice.id);
+  if (deleteErr) throw new Error(`delete failed: ${deleteErr.message}`);
+}
+
 // Invoice-check → classify → validate → attribution fallback → dedupe,
 // replacing the old unconditional field write. Always reaches
 // ocr_status='ready' — only a genuine Mindee job failure (handled
@@ -294,14 +310,7 @@ export async function persistResult(invoice: Invoice, result: ReadyResult): Prom
   // need hiding from the UI forever. Skips classification/dedupe
   // entirely, since none of that matters for zero extracted content.
   if (!hasAnyMarker) {
-    if (invoice.source_file_url) {
-      const { error: storageErr } = await supabase.storage
-        .from("invoice-uploads")
-        .remove([invoice.source_file_url]);
-      if (storageErr) console.error(`[ocr] failed to delete file for ${invoice.id}:`, storageErr.message);
-    }
-    const { error: deleteErr } = await supabase.from("invoices").delete().eq("id", invoice.id);
-    if (deleteErr) throw new Error(`delete failed: ${deleteErr.message}`);
+    await deleteInvoiceAndFile(invoice);
     return { flags: [], documentType: null, vendorId: null, deleted: true };
   }
 
@@ -315,20 +324,12 @@ export async function persistResult(invoice: Invoice, result: ReadyResult): Prom
   // reports, etc. — typically from an accountant, not a vendor) often
   // have their own dollar totals and reference numbers, so Mindee's
   // invoice-shaped extraction finds "invoice-like" content on them even
-  // though they're never a bill owed to a vendor. Real example: a
-  // 14-page payroll-checks PDF created 14 separate pending invoices.
-  // Delete outright, same as the !hasAnyMarker case above — these
-  // aren't invoices worth a human ever reviewing on this page.
+  // though they're never a bill owed to a vendor. handleEnqueue already
+  // classifies and rejects payroll BEFORE calling Mindee at all now —
+  // this is a safety net for anything enqueued before that existed, or
+  // that the earlier, single-page-only classification call missed.
   if (documentType === "payroll") {
-    if (invoice.source_file_url) {
-      const { error: storageErr } = await supabase.storage
-        .from("invoice-uploads")
-        .remove([invoice.source_file_url]);
-      if (storageErr)
-        console.error(`[ocr] failed to delete file for ${invoice.id}:`, storageErr.message);
-    }
-    const { error: deleteErr } = await supabase.from("invoices").delete().eq("id", invoice.id);
-    if (deleteErr) throw new Error(`delete failed: ${deleteErr.message}`);
+    await deleteInvoiceAndFile(invoice);
     return { flags: [], documentType: null, vendorId: null, deleted: true };
   }
 
