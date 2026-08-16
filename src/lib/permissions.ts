@@ -49,6 +49,7 @@ export const ROUTE_PERMISSION: Record<string, PermissionKey> = {
   "/inventory": "inventory",
   "/inventory-count": "inventory",
   "/vendors": "inventory",
+  "/purchase-orders": "inventory",
   "/waste-log": "inventory",
   "/invoices": "invoices",
   "/reviews": "reviews",

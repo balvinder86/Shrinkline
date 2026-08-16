@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import {
   useVendors,
@@ -13,8 +13,6 @@ import {
   useRecomputeParLevels,
   useUsageTrend,
   useCreatePurchaseOrders,
-  usePurchaseOrders,
-  useSendPurchaseOrderEmail,
   useExtractInventoryItems,
   useBulkCreateInventoryItems,
   type Vendor,
@@ -130,7 +128,6 @@ type Category = string;
 type Item = InventoryItem;
 
 const CATEGORIES: Category[] = [...SHARED_CATEGORIES];
-const ORDERS_PAGE_SIZE = 50;
 const ITEMS_PAGE_SIZE = 50;
 
 // Editable review row for the bulk-import dialog — one per real item
@@ -218,10 +215,8 @@ function InventoryPage() {
   const bulkAssignVendor = useBulkAssignVendor();
   const { data: usageTrend = [] } = useUsageTrend();
   const createPurchaseOrders = useCreatePurchaseOrders();
-  const { data: purchaseOrders = [] } = usePurchaseOrders();
-  const sendEmail = useSendPurchaseOrderEmail();
   const { data: vendors = [] } = useVendors();
-  const [view, setView] = useState<"items" | "orders">("items");
+  const navigate = useNavigate();
   const [tab, setTab] = useState<Category | "All">("All");
   const [query, setQuery] = useState("");
   const [vendorFilter, setVendorFilter] = useState<string>("All");
@@ -235,12 +230,6 @@ function InventoryPage() {
   const [qtyOverrides, setQtyOverrides] = useState<Record<string, number>>({});
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkVendorId, setBulkVendorId] = useState("");
-  const [ordersPage, setOrdersPage] = useState(1);
-  const ordersTotalPages = Math.max(1, Math.ceil(purchaseOrders.length / ORDERS_PAGE_SIZE));
-  const pagedPurchaseOrders = useMemo(
-    () => purchaseOrders.slice((ordersPage - 1) * ORDERS_PAGE_SIZE, ordersPage * ORDERS_PAGE_SIZE),
-    [purchaseOrders, ordersPage],
-  );
   const [itemsPage, setItemsPage] = useState(1);
 
   const [agentOpen, setAgentOpen] = useState(false);
@@ -569,7 +558,6 @@ function InventoryPage() {
     setItemToDelete(null);
   };
 
-
   const autoFillCart = () => {
     const next: Record<string, number> = { ...cart };
     items.forEach((i) => {
@@ -686,9 +674,7 @@ function InventoryPage() {
             <p className="text-xs uppercase tracking-[0.18em] text-terracotta font-semibold">
               Stock & purchasing
             </p>
-            <h1 className="font-serif text-4xl text-ink mt-2">
-              Inventory & Ordering
-            </h1>
+            <h1 className="font-serif text-4xl text-ink mt-2">Inventory & Ordering</h1>
             <p className="text-sm text-stone-600 mt-2 max-w-xl">
               Live counts across beverages, alcohol, food and dry goods. Update par levels, build a
               cart from AI suggestions, and dispatch POs to vendors automatically.
@@ -802,137 +788,119 @@ function InventoryPage() {
           </div>
         </Card>
 
-        {/* Items vs Purchase orders — Vendors moved to its own page
-            (/vendors), listed as a sibling under Inventory & Ordering
-            in the sidebar rather than buried in a tab. */}
-        <Tabs value={view} onValueChange={(v) => setView(v as "items" | "orders")}>
-          <div className="max-w-full overflow-x-auto">
-            <TabsList className="bg-cream border border-stone-200">
-              <TabsTrigger value="items">
-                <Package className="h-3.5 w-3.5" /> Items
-                <Badge variant="outline" className="ml-2 font-normal">
-                  {items.length}
-                </Badge>
-              </TabsTrigger>
-              <TabsTrigger value="orders">
-                <ClipboardList className="h-3.5 w-3.5" /> Purchase orders
-                <Badge variant="outline" className="ml-2 font-normal">
-                  {purchaseOrders.length}
-                </Badge>
-              </TabsTrigger>
-            </TabsList>
+        {/* Vendors and Purchase Orders both moved to their own pages
+            (/vendors, /purchase-orders), listed as siblings under
+            Inventory & Ordering in the sidebar rather than buried in a
+            tab here. */}
+        <div className="space-y-5">
+          {/* Filters */}
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="max-w-full overflow-x-auto">
+              <Tabs value={tab} onValueChange={(v) => setTab(v as Category | "All")}>
+                <TabsList className="bg-cream border border-stone-200">
+                  <TabsTrigger value="All">All</TabsTrigger>
+                  {CATEGORIES.map((c) => (
+                    <TabsTrigger key={c} value={c}>
+                      {c}
+                    </TabsTrigger>
+                  ))}
+                </TabsList>
+              </Tabs>
+            </div>
+            <div className="relative flex-1 min-w-[220px] max-w-md">
+              <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-stone-400" />
+              <Input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search items"
+                className="pl-9 bg-white"
+              />
+            </div>
+            <div className="flex items-center gap-2 text-sm">
+              <Filter className="h-4 w-4 text-stone-500" />
+              <select
+                value={vendorFilter}
+                onChange={(e) => setVendorFilter(e.target.value)}
+                className="h-9 rounded-md border border-stone-200 bg-white px-2 text-sm"
+              >
+                <option value="All">All vendors</option>
+                {vendorNames.map((v) => (
+                  <option key={v} value={v}>
+                    {v}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
+              <Button
+                variant="outline"
+                onClick={() => recomputeParLevels.mutate()}
+                disabled={recomputeParLevels.isPending}
+              >
+                <RefreshCw
+                  className={`h-4 w-4 ${recomputeParLevels.isPending ? "animate-spin" : ""}`}
+                />
+                Recompute par levels
+              </Button>
+              <Button variant="outline" onClick={openAddItem}>
+                <Plus className="h-4 w-4" /> Add item
+              </Button>
+              <Button variant="outline" onClick={openBulkImport}>
+                <Upload className="h-4 w-4" /> Bulk import
+              </Button>
+              <Button variant="outline" onClick={() => setAgentOpen(true)}>
+                <Settings2 className="h-4 w-4" /> AI agent
+              </Button>
+              <Button variant="outline" onClick={autoFillCart}>
+                <Wand2 className="h-4 w-4" /> Auto-fill cart
+              </Button>
+              <Button onClick={() => setCartOpen(true)} className="relative">
+                <ShoppingCart className="h-4 w-4" /> Cart
+                {cartCount > 0 && (
+                  <span className="ml-1 inline-flex items-center justify-center rounded-full bg-white/25 px-2 text-xs">
+                    {cartCount}
+                  </span>
+                )}
+              </Button>
+            </div>
           </div>
 
-          {/* ITEMS TAB */}
-          <TabsContent value="items" className="space-y-5 mt-5">
-            {/* Filters */}
-            <div className="flex items-center gap-3 flex-wrap">
-              <div className="max-w-full overflow-x-auto">
-                <Tabs value={tab} onValueChange={(v) => setTab(v as Category | "All")}>
-                  <TabsList className="bg-cream border border-stone-200">
-                    <TabsTrigger value="All">All</TabsTrigger>
-                    {CATEGORIES.map((c) => (
-                      <TabsTrigger key={c} value={c}>
-                        {c}
-                      </TabsTrigger>
-                    ))}
-                  </TabsList>
-                </Tabs>
-              </div>
-              <div className="relative flex-1 min-w-[220px] max-w-md">
-                <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-stone-400" />
-                <Input
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Search items"
-                  className="pl-9 bg-white"
-                />
-              </div>
-              <div className="flex items-center gap-2 text-sm">
-                <Filter className="h-4 w-4 text-stone-500" />
+          {/* Bulk vendor assignment */}
+          {selectedIds.size > 0 && (
+            <Card className="border-stone-200 bg-cream p-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-sm font-medium text-ink">
+                  {selectedIds.size} item{selectedIds.size === 1 ? "" : "s"} selected
+                </span>
                 <select
-                  value={vendorFilter}
-                  onChange={(e) => setVendorFilter(e.target.value)}
+                  value={bulkVendorId}
+                  onChange={(e) => setBulkVendorId(e.target.value)}
                   className="h-9 rounded-md border border-stone-200 bg-white px-2 text-sm"
                 >
-                  <option value="All">All vendors</option>
-                  {vendorNames.map((v) => (
-                    <option key={v} value={v}>
-                      {v}
+                  <option value="">Assign vendor…</option>
+                  {foodBeverageVendors.map((v) => (
+                    <option key={v.id} value={v.id}>
+                      {v.name}
                     </option>
                   ))}
                 </select>
-              </div>
-              <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
                 <Button
-                  variant="outline"
-                  onClick={() => recomputeParLevels.mutate()}
-                  disabled={recomputeParLevels.isPending}
+                  size="sm"
+                  disabled={!bulkVendorId || bulkAssignVendor.isPending}
+                  onClick={applyBulkVendor}
                 >
-                  <RefreshCw
-                    className={`h-4 w-4 ${recomputeParLevels.isPending ? "animate-spin" : ""}`}
-                  />
-                  Recompute par levels
+                  {bulkAssignVendor.isPending ? "Assigning…" : "Assign"}
                 </Button>
-                <Button variant="outline" onClick={openAddItem}>
-                  <Plus className="h-4 w-4" /> Add item
-                </Button>
-                <Button variant="outline" onClick={openBulkImport}>
-                  <Upload className="h-4 w-4" /> Bulk import
-                </Button>
-                <Button variant="outline" onClick={() => setAgentOpen(true)}>
-                  <Settings2 className="h-4 w-4" /> AI agent
-                </Button>
-                <Button variant="outline" onClick={autoFillCart}>
-                  <Wand2 className="h-4 w-4" /> Auto-fill cart
-                </Button>
-                <Button onClick={() => setCartOpen(true)} className="relative">
-                  <ShoppingCart className="h-4 w-4" /> Cart
-                  {cartCount > 0 && (
-                    <span className="ml-1 inline-flex items-center justify-center rounded-full bg-white/25 px-2 text-xs">
-                      {cartCount}
-                    </span>
-                  )}
+                <Button size="sm" variant="ghost" onClick={() => setSelectedIds(new Set())}>
+                  Clear selection
                 </Button>
               </div>
-            </div>
+            </Card>
+          )}
 
-            {/* Bulk vendor assignment */}
-            {selectedIds.size > 0 && (
-              <Card className="border-stone-200 bg-cream p-3">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-sm font-medium text-ink">
-                    {selectedIds.size} item{selectedIds.size === 1 ? "" : "s"} selected
-                  </span>
-                  <select
-                    value={bulkVendorId}
-                    onChange={(e) => setBulkVendorId(e.target.value)}
-                    className="h-9 rounded-md border border-stone-200 bg-white px-2 text-sm"
-                  >
-                    <option value="">Assign vendor…</option>
-                    {foodBeverageVendors.map((v) => (
-                      <option key={v.id} value={v.id}>
-                        {v.name}
-                      </option>
-                    ))}
-                  </select>
-                  <Button
-                    size="sm"
-                    disabled={!bulkVendorId || bulkAssignVendor.isPending}
-                    onClick={applyBulkVendor}
-                  >
-                    {bulkAssignVendor.isPending ? "Assigning…" : "Assign"}
-                  </Button>
-                  <Button size="sm" variant="ghost" onClick={() => setSelectedIds(new Set())}>
-                    Clear selection
-                  </Button>
-                </div>
-              </Card>
-            )}
-
-            {/* Items table */}
-            <Card className="border-stone-200 overflow-hidden">
-              <div className="overflow-x-auto">
+          {/* Items table */}
+          <Card className="border-stone-200 overflow-hidden">
+            <div className="overflow-x-auto">
               <Table className="[&_th]:px-4 [&_th]:py-3 [&_td]:px-4 [&_td]:py-4">
                 <TableHeader>
                   <TableRow className="bg-stone-50/60">
@@ -1066,166 +1034,41 @@ function InventoryPage() {
                   )}
                 </TableBody>
               </Table>
-              </div>
-              <div className="flex flex-wrap items-center justify-between gap-2 border-t bg-stone-50/60 px-4 py-3 text-sm">
-                <span className="text-stone-500">
-                  {filtered.length === 0
-                    ? "0 items"
-                    : `Showing ${(itemsPage - 1) * ITEMS_PAGE_SIZE + 1}–${Math.min(itemsPage * ITEMS_PAGE_SIZE, filtered.length)} of ${filtered.length} item${filtered.length === 1 ? "" : "s"}`}
-                </span>
-                {itemsTotalPages > 1 && (
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-7 w-7 p-0"
-                      disabled={itemsPage <= 1}
-                      onClick={() => setItemsPage((p) => Math.max(1, p - 1))}
-                    >
-                      <ChevronLeft className="h-3.5 w-3.5" />
-                    </Button>
-                    <span className="text-xs text-stone-500">
-                      Page {itemsPage} of {itemsTotalPages}
-                    </span>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-7 w-7 p-0"
-                      disabled={itemsPage >= itemsTotalPages}
-                      onClick={() => setItemsPage((p) => Math.min(itemsTotalPages, p + 1))}
-                    >
-                      <ChevronRight className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
-                )}
-              </div>
-            </Card>
-          </TabsContent>
-
-          {/* ORDERS TAB — real purchase order history. Creating a PO
-              also attempts a real vendor email (see sendToVendors);
-              this tab shows exactly what happened and lets you retry
-              a failed or not-yet-sent email. */}
-          <TabsContent value="orders" className="space-y-5 mt-5">
-            <Card className="border-stone-200 overflow-hidden">
-              <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow className="bg-stone-50/60">
-                    <TableHead>Vendor</TableHead>
-                    <TableHead>Created</TableHead>
-                    <TableHead className="text-center">Items</TableHead>
-                    <TableHead className="text-right">Total</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Email</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {pagedPurchaseOrders.map((po) => (
-                    <TableRow key={po.id} className="hover:bg-stone-50/50">
-                      <TableCell className="font-medium text-ink">
-                        {po.vendorName}
-                      </TableCell>
-                      <TableCell className="text-sm text-stone-700">
-                        {new Date(po.createdAt).toLocaleDateString("en-US", {
-                          month: "short",
-                          day: "numeric",
-                          year: "numeric",
-                        })}
-                      </TableCell>
-                      <TableCell className="text-center text-sm">{po.lineCount}</TableCell>
-                      <TableCell className="text-right font-medium">
-                        {po.totalCents != null ? `$${(po.totalCents / 100).toFixed(2)}` : "—"}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="outline" className="capitalize font-normal">
-                          {po.status}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        {po.emailedAt ? (
-                          <span className="inline-flex items-center gap-1 text-xs text-emerald-700">
-                            <CheckCircle2 className="h-3.5 w-3.5" />
-                            Emailed{" "}
-                            {new Date(po.emailedAt).toLocaleDateString("en-US", {
-                              month: "short",
-                              day: "numeric",
-                            })}
-                          </span>
-                        ) : !po.vendorEmail ? (
-                          <span className="text-xs text-stone-400">No email on file</span>
-                        ) : (
-                          <div className="flex items-center gap-2">
-                            {po.emailError && (
-                              <span
-                                className="text-xs text-terracotta"
-                                title={po.emailError}
-                              >
-                                Failed
-                              </span>
-                            )}
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              disabled={sendEmail.isPending && sendEmail.variables === po.id}
-                              onClick={() => sendEmail.mutate(po.id)}
-                            >
-                              {sendEmail.isPending && sendEmail.variables === po.id
-                                ? "Sending…"
-                                : po.emailError
-                                  ? "Retry"
-                                  : "Send"}
-                            </Button>
-                          </div>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                  {purchaseOrders.length === 0 && (
-                    <TableRow>
-                      <TableCell colSpan={6} className="text-center py-10 text-sm text-stone-500">
-                        No purchase orders yet — build a cart and create one from the Items tab.
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
-              </div>
-              <div className="flex flex-wrap items-center justify-between gap-2 border-t bg-stone-50/60 px-4 py-3 text-sm">
-                <span className="text-stone-500">
-                  {purchaseOrders.length === 0
-                    ? "0 purchase orders"
-                    : `Showing ${(ordersPage - 1) * ORDERS_PAGE_SIZE + 1}–${Math.min(ordersPage * ORDERS_PAGE_SIZE, purchaseOrders.length)} of ${purchaseOrders.length} purchase order${purchaseOrders.length === 1 ? "" : "s"}`}
-                </span>
-                {ordersTotalPages > 1 && (
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-7 w-7 p-0"
-                      disabled={ordersPage <= 1}
-                      onClick={() => setOrdersPage((p) => Math.max(1, p - 1))}
-                    >
-                      <ChevronLeft className="h-3.5 w-3.5" />
-                    </Button>
-                    <span className="text-xs text-stone-500">
-                      Page {ordersPage} of {ordersTotalPages}
-                    </span>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-7 w-7 p-0"
-                      disabled={ordersPage >= ordersTotalPages}
-                      onClick={() => setOrdersPage((p) => Math.min(ordersTotalPages, p + 1))}
-                    >
-                      <ChevronRight className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
-                )}
-              </div>
-            </Card>
-          </TabsContent>
-        </Tabs>
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-2 border-t bg-stone-50/60 px-4 py-3 text-sm">
+              <span className="text-stone-500">
+                {filtered.length === 0
+                  ? "0 items"
+                  : `Showing ${(itemsPage - 1) * ITEMS_PAGE_SIZE + 1}–${Math.min(itemsPage * ITEMS_PAGE_SIZE, filtered.length)} of ${filtered.length} item${filtered.length === 1 ? "" : "s"}`}
+              </span>
+              {itemsTotalPages > 1 && (
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 w-7 p-0"
+                    disabled={itemsPage <= 1}
+                    onClick={() => setItemsPage((p) => Math.max(1, p - 1))}
+                  >
+                    <ChevronLeft className="h-3.5 w-3.5" />
+                  </Button>
+                  <span className="text-xs text-stone-500">
+                    Page {itemsPage} of {itemsTotalPages}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 w-7 p-0"
+                    disabled={itemsPage >= itemsTotalPages}
+                    onClick={() => setItemsPage((p) => Math.min(itemsTotalPages, p + 1))}
+                  >
+                    <ChevronRight className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              )}
+            </div>
+          </Card>
+        </div>
       </main>
 
       {/* Cart drawer */}
@@ -1355,16 +1198,16 @@ function InventoryPage() {
               </p>
               <ul className="text-sm space-y-1.5 text-stone-700">
                 <li className="flex items-center gap-2">
-                  <Sparkles className="h-3 w-3 text-terracotta" /> Current par level
-                  minus current on-hand count
+                  <Sparkles className="h-3 w-3 text-terracotta" /> Current par level minus current
+                  on-hand count
                 </li>
                 <li className="flex items-center gap-2">
-                  <Sparkles className="h-3 w-3 text-terracotta" /> Weekly usage, from
-                  real POS sales mapped through each item's recipe
+                  <Sparkles className="h-3 w-3 text-terracotta" /> Weekly usage, from real POS sales
+                  mapped through each item's recipe
                 </li>
                 <li className="flex items-center gap-2">
-                  <Sparkles className="h-3 w-3 text-terracotta" /> +15% padded on top
-                  as safety stock
+                  <Sparkles className="h-3 w-3 text-terracotta" /> +15% padded on top as safety
+                  stock
                 </li>
               </ul>
             </div>
@@ -1400,7 +1243,7 @@ function InventoryPage() {
               className="w-full"
               onClick={() => {
                 setAgentOpen(false);
-                setView("orders");
+                navigate({ to: "/purchase-orders" });
               }}
             >
               <ClipboardList className="h-4 w-4" /> View purchase order history
@@ -1672,118 +1515,118 @@ function InventoryPage() {
               </Card>
 
               <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-8"></TableHead>
-                    <TableHead>Name</TableHead>
-                    <TableHead>Category</TableHead>
-                    <TableHead>Vendor</TableHead>
-                    <TableHead>Unit</TableHead>
-                    <TableHead>On hand</TableHead>
-                    <TableHead>Par</TableHead>
-                    <TableHead>Cost/unit ($)</TableHead>
-                    <TableHead className="w-8"></TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {bulkImportRows.map((row, i) => (
-                    <TableRow key={i} className={row.include ? "" : "opacity-40"}>
-                      <TableCell>
-                        <Checkbox
-                          checked={row.include}
-                          onCheckedChange={(v) => updateBulkImportRow(i, { include: !!v })}
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Input
-                          className="h-8 min-w-[160px]"
-                          value={row.name}
-                          onChange={(e) => updateBulkImportRow(i, { name: e.target.value })}
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <select
-                          value={row.category}
-                          onChange={(e) => updateBulkImportRow(i, { category: e.target.value })}
-                          className="h-8 rounded-md border border-stone-200 bg-white px-2 text-sm"
-                        >
-                          {CATEGORIES.map((c) => (
-                            <option key={c} value={c}>
-                              {c}
-                            </option>
-                          ))}
-                        </select>
-                      </TableCell>
-                      <TableCell>
-                        <select
-                          value={row.vendorId ?? ""}
-                          onChange={(e) =>
-                            updateBulkImportRow(i, { vendorId: e.target.value || null })
-                          }
-                          className="h-8 rounded-md border border-stone-200 bg-white px-2 text-sm"
-                        >
-                          <option value="">No vendor</option>
-                          {foodBeverageVendors.map((v) => (
-                            <option key={v.id} value={v.id}>
-                              {v.name}
-                            </option>
-                          ))}
-                        </select>
-                      </TableCell>
-                      <TableCell>
-                        <Input
-                          className="h-8 w-20"
-                          value={row.unit}
-                          placeholder="case, lb…"
-                          onChange={(e) => updateBulkImportRow(i, { unit: e.target.value })}
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Input
-                          className="h-8 w-16"
-                          type="number"
-                          value={row.onHand}
-                          onChange={(e) =>
-                            updateBulkImportRow(i, { onHand: parseInt(e.target.value) || 0 })
-                          }
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Input
-                          className="h-8 w-16"
-                          type="number"
-                          value={row.par}
-                          onChange={(e) =>
-                            updateBulkImportRow(i, { par: parseInt(e.target.value) || 0 })
-                          }
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Input
-                          className="h-8 w-20"
-                          type="number"
-                          step="0.01"
-                          value={row.cost}
-                          onChange={(e) =>
-                            updateBulkImportRow(i, { cost: parseFloat(e.target.value) || 0 })
-                          }
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8"
-                          onClick={() => removeBulkImportRow(i)}
-                        >
-                          <X className="h-4 w-4" />
-                        </Button>
-                      </TableCell>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-8"></TableHead>
+                      <TableHead>Name</TableHead>
+                      <TableHead>Category</TableHead>
+                      <TableHead>Vendor</TableHead>
+                      <TableHead>Unit</TableHead>
+                      <TableHead>On hand</TableHead>
+                      <TableHead>Par</TableHead>
+                      <TableHead>Cost/unit ($)</TableHead>
+                      <TableHead className="w-8"></TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {bulkImportRows.map((row, i) => (
+                      <TableRow key={i} className={row.include ? "" : "opacity-40"}>
+                        <TableCell>
+                          <Checkbox
+                            checked={row.include}
+                            onCheckedChange={(v) => updateBulkImportRow(i, { include: !!v })}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Input
+                            className="h-8 min-w-[160px]"
+                            value={row.name}
+                            onChange={(e) => updateBulkImportRow(i, { name: e.target.value })}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <select
+                            value={row.category}
+                            onChange={(e) => updateBulkImportRow(i, { category: e.target.value })}
+                            className="h-8 rounded-md border border-stone-200 bg-white px-2 text-sm"
+                          >
+                            {CATEGORIES.map((c) => (
+                              <option key={c} value={c}>
+                                {c}
+                              </option>
+                            ))}
+                          </select>
+                        </TableCell>
+                        <TableCell>
+                          <select
+                            value={row.vendorId ?? ""}
+                            onChange={(e) =>
+                              updateBulkImportRow(i, { vendorId: e.target.value || null })
+                            }
+                            className="h-8 rounded-md border border-stone-200 bg-white px-2 text-sm"
+                          >
+                            <option value="">No vendor</option>
+                            {foodBeverageVendors.map((v) => (
+                              <option key={v.id} value={v.id}>
+                                {v.name}
+                              </option>
+                            ))}
+                          </select>
+                        </TableCell>
+                        <TableCell>
+                          <Input
+                            className="h-8 w-20"
+                            value={row.unit}
+                            placeholder="case, lb…"
+                            onChange={(e) => updateBulkImportRow(i, { unit: e.target.value })}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Input
+                            className="h-8 w-16"
+                            type="number"
+                            value={row.onHand}
+                            onChange={(e) =>
+                              updateBulkImportRow(i, { onHand: parseInt(e.target.value) || 0 })
+                            }
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Input
+                            className="h-8 w-16"
+                            type="number"
+                            value={row.par}
+                            onChange={(e) =>
+                              updateBulkImportRow(i, { par: parseInt(e.target.value) || 0 })
+                            }
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Input
+                            className="h-8 w-20"
+                            type="number"
+                            step="0.01"
+                            value={row.cost}
+                            onChange={(e) =>
+                              updateBulkImportRow(i, { cost: parseFloat(e.target.value) || 0 })
+                            }
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            onClick={() => removeBulkImportRow(i)}
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
               </div>
             </div>
           ) : (
