@@ -84,7 +84,7 @@ function LaborPage() {
 
   return (
     <>
-      <Topbar eyebrow="Operations" title="Labor Cost" />
+      <Topbar eyebrow="Financials" title="Labor Cost" />
       <main className="space-y-6 px-6 py-6">
         {/* KPI row */}
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">

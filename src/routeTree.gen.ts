@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as WasteLogRouteImport } from './routes/waste-log'
 import { Route as VendorsRouteImport } from './routes/vendors'
+import { Route as VarianceRouteImport } from './routes/variance'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as SetPasswordRouteImport } from './routes/set-password'
 import { Route as SeoRouteImport } from './routes/seo'
@@ -26,8 +27,10 @@ import { Route as LoyaltyRouteImport } from './routes/loyalty'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as LaborRouteImport } from './routes/labor'
 import { Route as InvoicesRouteImport } from './routes/invoices'
+import { Route as InventoryVarianceRouteImport } from './routes/inventory-variance'
 import { Route as InventoryCountRouteImport } from './routes/inventory-count'
 import { Route as InventoryRouteImport } from './routes/inventory'
+import { Route as IngredientPriceTrendsRouteImport } from './routes/ingredient-price-trends'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
 
@@ -39,6 +42,11 @@ const WasteLogRoute = WasteLogRouteImport.update({
 const VendorsRoute = VendorsRouteImport.update({
   id: '/vendors',
   path: '/vendors',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const VarianceRoute = VarianceRouteImport.update({
+  id: '/variance',
+  path: '/variance',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SettingsRoute = SettingsRouteImport.update({
@@ -116,6 +124,11 @@ const InvoicesRoute = InvoicesRouteImport.update({
   path: '/invoices',
   getParentRoute: () => rootRouteImport,
 } as any)
+const InventoryVarianceRoute = InventoryVarianceRouteImport.update({
+  id: '/inventory-variance',
+  path: '/inventory-variance',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const InventoryCountRoute = InventoryCountRouteImport.update({
   id: '/inventory-count',
   path: '/inventory-count',
@@ -124,6 +137,11 @@ const InventoryCountRoute = InventoryCountRouteImport.update({
 const InventoryRoute = InventoryRouteImport.update({
   id: '/inventory',
   path: '/inventory',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const IngredientPriceTrendsRoute = IngredientPriceTrendsRouteImport.update({
+  id: '/ingredient-price-trends',
+  path: '/ingredient-price-trends',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AdminRoute = AdminRouteImport.update({
@@ -140,8 +158,10 @@ const IndexRoute = IndexRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
+  '/ingredient-price-trends': typeof IngredientPriceTrendsRoute
   '/inventory': typeof InventoryRoute
   '/inventory-count': typeof InventoryCountRoute
+  '/inventory-variance': typeof InventoryVarianceRoute
   '/invoices': typeof InvoicesRoute
   '/labor': typeof LaborRoute
   '/login': typeof LoginRoute
@@ -157,14 +177,17 @@ export interface FileRoutesByFullPath {
   '/seo': typeof SeoRoute
   '/set-password': typeof SetPasswordRoute
   '/settings': typeof SettingsRoute
+  '/variance': typeof VarianceRoute
   '/vendors': typeof VendorsRoute
   '/waste-log': typeof WasteLogRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
+  '/ingredient-price-trends': typeof IngredientPriceTrendsRoute
   '/inventory': typeof InventoryRoute
   '/inventory-count': typeof InventoryCountRoute
+  '/inventory-variance': typeof InventoryVarianceRoute
   '/invoices': typeof InvoicesRoute
   '/labor': typeof LaborRoute
   '/login': typeof LoginRoute
@@ -180,6 +203,7 @@ export interface FileRoutesByTo {
   '/seo': typeof SeoRoute
   '/set-password': typeof SetPasswordRoute
   '/settings': typeof SettingsRoute
+  '/variance': typeof VarianceRoute
   '/vendors': typeof VendorsRoute
   '/waste-log': typeof WasteLogRoute
 }
@@ -187,8 +211,10 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
+  '/ingredient-price-trends': typeof IngredientPriceTrendsRoute
   '/inventory': typeof InventoryRoute
   '/inventory-count': typeof InventoryCountRoute
+  '/inventory-variance': typeof InventoryVarianceRoute
   '/invoices': typeof InvoicesRoute
   '/labor': typeof LaborRoute
   '/login': typeof LoginRoute
@@ -204,6 +230,7 @@ export interface FileRoutesById {
   '/seo': typeof SeoRoute
   '/set-password': typeof SetPasswordRoute
   '/settings': typeof SettingsRoute
+  '/variance': typeof VarianceRoute
   '/vendors': typeof VendorsRoute
   '/waste-log': typeof WasteLogRoute
 }
@@ -212,8 +239,10 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/admin'
+    | '/ingredient-price-trends'
     | '/inventory'
     | '/inventory-count'
+    | '/inventory-variance'
     | '/invoices'
     | '/labor'
     | '/login'
@@ -229,14 +258,17 @@ export interface FileRouteTypes {
     | '/seo'
     | '/set-password'
     | '/settings'
+    | '/variance'
     | '/vendors'
     | '/waste-log'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/admin'
+    | '/ingredient-price-trends'
     | '/inventory'
     | '/inventory-count'
+    | '/inventory-variance'
     | '/invoices'
     | '/labor'
     | '/login'
@@ -252,14 +284,17 @@ export interface FileRouteTypes {
     | '/seo'
     | '/set-password'
     | '/settings'
+    | '/variance'
     | '/vendors'
     | '/waste-log'
   id:
     | '__root__'
     | '/'
     | '/admin'
+    | '/ingredient-price-trends'
     | '/inventory'
     | '/inventory-count'
+    | '/inventory-variance'
     | '/invoices'
     | '/labor'
     | '/login'
@@ -275,6 +310,7 @@ export interface FileRouteTypes {
     | '/seo'
     | '/set-password'
     | '/settings'
+    | '/variance'
     | '/vendors'
     | '/waste-log'
   fileRoutesById: FileRoutesById
@@ -282,8 +318,10 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminRoute: typeof AdminRoute
+  IngredientPriceTrendsRoute: typeof IngredientPriceTrendsRoute
   InventoryRoute: typeof InventoryRoute
   InventoryCountRoute: typeof InventoryCountRoute
+  InventoryVarianceRoute: typeof InventoryVarianceRoute
   InvoicesRoute: typeof InvoicesRoute
   LaborRoute: typeof LaborRoute
   LoginRoute: typeof LoginRoute
@@ -299,6 +337,7 @@ export interface RootRouteChildren {
   SeoRoute: typeof SeoRoute
   SetPasswordRoute: typeof SetPasswordRoute
   SettingsRoute: typeof SettingsRoute
+  VarianceRoute: typeof VarianceRoute
   VendorsRoute: typeof VendorsRoute
   WasteLogRoute: typeof WasteLogRoute
 }
@@ -317,6 +356,13 @@ declare module '@tanstack/react-router' {
       path: '/vendors'
       fullPath: '/vendors'
       preLoaderRoute: typeof VendorsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/variance': {
+      id: '/variance'
+      path: '/variance'
+      fullPath: '/variance'
+      preLoaderRoute: typeof VarianceRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/settings': {
@@ -424,6 +470,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof InvoicesRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/inventory-variance': {
+      id: '/inventory-variance'
+      path: '/inventory-variance'
+      fullPath: '/inventory-variance'
+      preLoaderRoute: typeof InventoryVarianceRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/inventory-count': {
       id: '/inventory-count'
       path: '/inventory-count'
@@ -436,6 +489,13 @@ declare module '@tanstack/react-router' {
       path: '/inventory'
       fullPath: '/inventory'
       preLoaderRoute: typeof InventoryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/ingredient-price-trends': {
+      id: '/ingredient-price-trends'
+      path: '/ingredient-price-trends'
+      fullPath: '/ingredient-price-trends'
+      preLoaderRoute: typeof IngredientPriceTrendsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/admin': {
@@ -458,8 +518,10 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRoute,
+  IngredientPriceTrendsRoute: IngredientPriceTrendsRoute,
   InventoryRoute: InventoryRoute,
   InventoryCountRoute: InventoryCountRoute,
+  InventoryVarianceRoute: InventoryVarianceRoute,
   InvoicesRoute: InvoicesRoute,
   LaborRoute: LaborRoute,
   LoginRoute: LoginRoute,
@@ -475,6 +537,7 @@ const rootRouteChildren: RootRouteChildren = {
   SeoRoute: SeoRoute,
   SetPasswordRoute: SetPasswordRoute,
   SettingsRoute: SettingsRoute,
+  VarianceRoute: VarianceRoute,
   VendorsRoute: VendorsRoute,
   WasteLogRoute: WasteLogRoute,
 }

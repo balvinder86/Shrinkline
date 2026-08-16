@@ -17,6 +17,10 @@ import {
   Truck,
   ClipboardCheck,
   ClipboardList,
+  TrendingUp,
+  Scale,
+  PackageSearch,
+  LineChart,
   type LucideIcon,
 } from "lucide-react";
 
@@ -29,7 +33,7 @@ export type NavItem = {
   icon: LucideIcon;
   permission: PermissionKey;
   // Sub-pages shown nested under this item (e.g. Vendors and Waste Log
-  // under Inventory & Ordering). When present, AppSidebar renders the
+  // under Stock & Purchasing). When present, AppSidebar renders the
   // parent as a pure expand/collapse toggle rather than a link — never
   // nesting one clickable element inside another — so the parent's own
   // `url` only matters for deciding whether the group should default
@@ -49,14 +53,16 @@ export const NAV_OVERVIEW: NavItem[] = [
   // Reuses "product_mix" — Recipes is the cost/recipe side of Product
   // Mix's real menu items, same domain, no new permission needed.
   { titleKey: "recipes", url: "/recipes", icon: ChefHat, permission: "product_mix" },
+  { titleKey: "invoices", url: "/invoices", icon: Receipt, permission: "invoices" },
   {
     titleKey: "inventory",
     url: "/inventory",
     icon: Package,
     permission: "inventory",
-    // Inventory Count, Vendors, Purchase Orders, and Waste Log all
-    // reuse "inventory" — same domain (ingredients, vendors, stock,
-    // orders), no new permission plumbing needed for any of them.
+    // Inventory Count, Vendors, Purchase Orders, Waste Log, and
+    // Inventory Variance all reuse "inventory" — same domain
+    // (ingredients, vendors, stock, orders), no new permission
+    // plumbing needed for any of them.
     children: [
       { titleKey: "inventoryItems", url: "/inventory", icon: Package, permission: "inventory" },
       {
@@ -73,13 +79,40 @@ export const NAV_OVERVIEW: NavItem[] = [
         permission: "inventory",
       },
       { titleKey: "wasteLog", url: "/waste-log", icon: Trash2, permission: "inventory" },
+      {
+        titleKey: "inventoryVariance",
+        url: "/inventory-variance",
+        icon: PackageSearch,
+        permission: "inventory",
+      },
     ],
   },
-  { titleKey: "invoices", url: "/invoices", icon: Receipt, permission: "invoices" },
-  // Rolls up Sales + COGS + Labor + Operating Expenses — spans every
-  // Overview-section page rather than belonging to one, so it lives
-  // here rather than in Growth/Operations.
-  { titleKey: "pnl", url: "/pnl", icon: Landmark, permission: "pnl" },
+  {
+    titleKey: "performance",
+    url: "/pnl",
+    icon: TrendingUp,
+    permission: "pnl",
+    // P&L rolls up Sales + COGS + Labor + Operating Expenses — spans
+    // every Overview-section page rather than belonging to one, so it
+    // lives under its own "Performance" group rather than in
+    // Growth/Operations. Variance reuses "pnl" too — same financial
+    // domain, just decomposing P&L's one aggregate food cost gap into
+    // a per-ingredient breakdown. Labor Cost keeps its own
+    // "scheduling" permission (it's workforce data, not financial
+    // data an owner would gate the same way as P&L) even though it
+    // now lives in this group.
+    children: [
+      { titleKey: "pnl", url: "/pnl", icon: Landmark, permission: "pnl" },
+      { titleKey: "variance", url: "/variance", icon: Scale, permission: "pnl" },
+      { titleKey: "laborCost", url: "/labor", icon: Wallet, permission: "scheduling" },
+      {
+        titleKey: "ingredientPriceTrends",
+        url: "/ingredient-price-trends",
+        icon: LineChart,
+        permission: "pnl",
+      },
+    ],
+  },
 ];
 
 export const NAV_GROWTH: NavItem[] = [
@@ -91,9 +124,6 @@ export const NAV_GROWTH: NavItem[] = [
 
 export const NAV_OPERATIONS: NavItem[] = [
   { titleKey: "scheduling", url: "/scheduling", icon: CalendarClock, permission: "scheduling" },
-  // Reuses the "scheduling" permission — same workforce-operations
-  // bucket, no new permission plumbing needed for this one page.
-  { titleKey: "laborCost", url: "/labor", icon: Wallet, permission: "scheduling" },
 ];
 
 // Not permission-gated — Admin is owner-only (enforced by manage-team

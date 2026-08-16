@@ -29,7 +29,7 @@ export type PermissionKey = (typeof PERMISSION_KEYS)[number];
 export const PERMISSION_LABEL: Record<PermissionKey, string> = {
   sales_overview: "Home",
   product_mix: "Product Mix",
-  inventory: "Inventory & Ordering",
+  inventory: "Stock & Purchasing",
   invoices: "Invoices",
   reviews: "Reviews",
   seo: "SEO",
@@ -51,6 +51,7 @@ export const ROUTE_PERMISSION: Record<string, PermissionKey> = {
   "/vendors": "inventory",
   "/purchase-orders": "inventory",
   "/waste-log": "inventory",
+  "/inventory-variance": "inventory",
   "/invoices": "invoices",
   "/reviews": "reviews",
   "/seo": "seo",
@@ -59,6 +60,8 @@ export const ROUTE_PERMISSION: Record<string, PermissionKey> = {
   "/scheduling": "scheduling",
   "/labor": "scheduling",
   "/pnl": "pnl",
+  "/variance": "pnl",
+  "/ingredient-price-trends": "pnl",
 };
 
 // Owners always have full access, independent of what's stored — a

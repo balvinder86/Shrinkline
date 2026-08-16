@@ -2,14 +2,17 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { PostgrestError } from "@supabase/supabase-js";
 
 import { supabase } from "@/lib/supabase/client";
-import { useLocationIds } from "@/lib/supabase/scope";
+import { useLocationIds, useRestaurantIds } from "@/lib/supabase/scope";
 import { type DateRange, addDays, isoDate } from "@/lib/date-range";
 import {
   resolveMenuItemRecipeCostCents,
+  accumulateMenuItemIngredientUsage,
+  accumulateMenuItemIngredientQuantity,
   type IngredientCostInfo,
   type PrepRecipeLineRow,
   type RecipeLineRow,
 } from "@/lib/boh/recipeCost";
+import { convertQuantityToIngredientUnit } from "@/lib/units";
 
 type IngredientCostJoin = {
   unit_cost_cents: number | null;
@@ -624,6 +627,530 @@ export function useFoodCostSummary(range: DateRange) {
         varianceCents: actualSpendCents - theoreticalCostCents,
         hasRecipeData,
         itemsMissingRecipeCount: itemsMissing.size,
+      };
+    },
+  });
+}
+
+// Decomposes useFoodCostSummary's one aggregate theoretical-vs-actual
+// gap into a per-ingredient breakdown — which specific ingredients
+// explain the gap, not just that a gap exists. Theoretical: each sold
+// item's recipe walked via accumulateMenuItemIngredientUsage (same
+// underlying cost data as useFoodCostSummary, decomposed instead of
+// summed) — items with no recipe or an uncostable line are excluded
+// per-item, same as useFoodCostSummary's itemsMissingRecipeCount.
+// Actual: real approved food/bev invoice_lines summed by their
+// matched ingredient_id — lines never matched to an ingredient can't
+// contribute to any row, so their total is surfaced separately
+// (unmatchedActualSpendCents) rather than silently dropped. Does not
+// account for price tiers — see accumulateMenuItemIngredientUsage's
+// own comment.
+export type IngredientVarianceRow = {
+  ingredientId: string;
+  ingredientName: string;
+  category: string | null;
+  theoreticalCostCents: number;
+  actualSpendCents: number;
+  varianceCents: number;
+};
+
+export type FoodCostVariance = {
+  rows: IngredientVarianceRow[];
+  totalTheoreticalCents: number;
+  totalActualCents: number;
+  // Approved food/bev invoice spend that couldn't be attributed to any
+  // ingredient row above (its invoice_lines.ingredient_id was never
+  // matched) — real spend the table below understates without this.
+  unmatchedActualSpendCents: number;
+  itemsMissingRecipeCount: number;
+};
+
+type InvoiceLineActualRow = {
+  ingredient_id: string;
+  line_total_cents: number | null;
+  invoices: { status: string; vendors: { category: string } | null } | null;
+};
+
+export function useFoodCostVariance(range: DateRange) {
+  const { data: locationIds } = useLocationIds();
+  const restaurantId = useRestaurantIds()[0];
+  const fromIso = isoDate(range.from);
+  const toIso = isoDate(range.to);
+
+  return useQuery({
+    queryKey: ["food-cost-variance", locationIds, restaurantId, fromIso, toIso],
+    enabled: !!locationIds && locationIds.length > 0 && !!restaurantId,
+    queryFn: async (): Promise<FoodCostVariance> => {
+      const [salesData, recipeCostCtx, ingredientsRes, invoiceLineRows, totalInvoicesRes] =
+        await Promise.all([
+          fetchAllRows((from, to) =>
+            supabase
+              .from("pmix_sales")
+              .select("menu_item_pos_id, quantity_sold")
+              .in("location_id", locationIds!)
+              .gte("business_date", fromIso)
+              .lte("business_date", toIso)
+              .order("business_date", { ascending: true })
+              .range(from, to),
+          ),
+          fetchRecipeCostContext(locationIds!),
+          supabase
+            .from("ingredients")
+            .select("id, name, category")
+            .eq("restaurant_id", restaurantId!),
+          // Single-level embedded filters (invoices.status/location_id/
+          // invoice_date) run server-side, same pattern useFoodCostSummary
+          // already relies on; the deeper invoices.vendors.category filter
+          // is two levels down from invoice_lines and isn't a pattern
+          // proven elsewhere in this codebase, so it's checked client-side
+          // below instead of risking an unsupported filter path.
+          fetchAllRows((from, to) =>
+            supabase
+              .from("invoice_lines")
+              .select("ingredient_id, line_total_cents, invoices!inner(status, vendors(category))")
+              .not("ingredient_id", "is", null)
+              .eq("invoices.status", "approved")
+              .in("invoices.location_id", locationIds!)
+              .gte("invoices.invoice_date", fromIso)
+              .lte("invoices.invoice_date", toIso)
+              .range(from, to),
+          ),
+          supabase
+            .from("invoices")
+            .select("total_cents, vendors!inner(category)")
+            .in("location_id", locationIds!)
+            .eq("status", "approved")
+            .eq("vendors.category", "food_beverage")
+            .gte("invoice_date", fromIso)
+            .lte("invoice_date", toIso),
+        ]);
+      if (ingredientsRes.error) throw ingredientsRes.error;
+      if (totalInvoicesRes.error) throw totalInvoicesRes.error;
+
+      const qtyByItem = new Map<string, number>();
+      for (const row of salesData) {
+        qtyByItem.set(
+          row.menu_item_pos_id,
+          (qtyByItem.get(row.menu_item_pos_id) ?? 0) + Number(row.quantity_sold),
+        );
+      }
+
+      const theoreticalByIngredient = new Map<string, number>();
+      const itemsMissing = new Set<string>();
+      for (const [menuItemPosId, qty] of qtyByItem) {
+        const lines = recipeCostCtx.recipeLinesByMenuItem.get(menuItemPosId) ?? [];
+        if (lines.length === 0) {
+          itemsMissing.add(menuItemPosId);
+          continue;
+        }
+        const acc = new Map<string, number>();
+        const ok = accumulateMenuItemIngredientUsage(
+          lines,
+          recipeCostCtx.prepRecipeLinesByPrepId,
+          recipeCostCtx.prepRecipeYieldById,
+          recipeCostCtx.ingredientById,
+          qty,
+          acc,
+        );
+        if (!ok) {
+          itemsMissing.add(menuItemPosId);
+          continue;
+        }
+        for (const [ingredientId, cents] of acc) {
+          theoreticalByIngredient.set(
+            ingredientId,
+            (theoreticalByIngredient.get(ingredientId) ?? 0) + cents,
+          );
+        }
+      }
+
+      const actualByIngredient = new Map<string, number>();
+      let matchedActualCents = 0;
+      for (const row of invoiceLineRows as unknown as InvoiceLineActualRow[]) {
+        if (row.invoices?.vendors?.category !== "food_beverage") continue;
+        const cents = row.line_total_cents ?? 0;
+        actualByIngredient.set(
+          row.ingredient_id,
+          (actualByIngredient.get(row.ingredient_id) ?? 0) + cents,
+        );
+        matchedActualCents += cents;
+      }
+
+      const ingredientInfoById = new Map(
+        (ingredientsRes.data ?? []).map((i) => [i.id, { name: i.name, category: i.category }]),
+      );
+      const allIngredientIds = new Set([
+        ...theoreticalByIngredient.keys(),
+        ...actualByIngredient.keys(),
+      ]);
+      const rows: IngredientVarianceRow[] = Array.from(allIngredientIds)
+        .map((id) => {
+          const theoreticalCostCents = theoreticalByIngredient.get(id) ?? 0;
+          const actualSpendCents = actualByIngredient.get(id) ?? 0;
+          const info = ingredientInfoById.get(id);
+          return {
+            ingredientId: id,
+            ingredientName: info?.name ?? "Unknown ingredient",
+            category: info?.category ?? null,
+            theoreticalCostCents,
+            actualSpendCents,
+            varianceCents: actualSpendCents - theoreticalCostCents,
+          };
+        })
+        .sort((a, b) => Math.abs(b.varianceCents) - Math.abs(a.varianceCents));
+
+      const totalApprovedFoodBevCents = (totalInvoicesRes.data ?? []).reduce(
+        (sum, inv) => sum + (inv.total_cents ?? 0),
+        0,
+      );
+
+      return {
+        rows,
+        totalTheoreticalCents: rows.reduce((s, r) => s + r.theoreticalCostCents, 0),
+        totalActualCents: matchedActualCents,
+        unmatchedActualSpendCents: Math.max(0, totalApprovedFoodBevCents - matchedActualCents),
+        itemsMissingRecipeCount: itemsMissing.size,
+      };
+    },
+  });
+}
+
+// Reconciles the two most recent Inventory Counts against what should
+// have happened in between (purchases minus recipe-driven usage minus
+// logged waste) — the "unexplained" leftover is real shrinkage:
+// theft, breakage nobody logged, over-pouring, spoilage that missed
+// Waste Log. This is the physical-stock counterpart to Cost Variance
+// (which reconciles dollars against recipes) — this one reconciles
+// real units, so it doesn't need — and deliberately ignores — cost
+// data at all except for display; an ingredient with no price yet
+// still gets a full quantity reconciliation.
+//
+// Needs at least 2 saved counts to compute anything (a variance is
+// always "since the last count") — with 0 or 1, status is
+// "insufficient_counts" and rows is empty; the caller should show a
+// clear "save another count" prompt rather than an empty table that
+// looks like zero variance.
+export type IngredientVarianceDetail = {
+  ingredientId: string;
+  ingredientName: string;
+  category: string | null;
+  unit: string;
+  startQty: number;
+  purchasedQty: number;
+  usedQty: number;
+  wastedQty: number;
+  expectedEndQty: number;
+  actualEndQty: number;
+  varianceQty: number;
+  // Null when the ingredient has no cost set yet — the row still
+  // shows real quantity variance, just without a dollar translation.
+  varianceCostCents: number | null;
+};
+
+export type InventoryVariance = {
+  status: "ready" | "insufficient_counts";
+  countsAvailable: number;
+  previousCountedAt: string | null;
+  latestCountedAt: string | null;
+  rows: IngredientVarianceDetail[];
+  itemsMissingRecipeCount: number;
+  // Ingredients counted in both periods but excluded from `rows`
+  // because a purchase, waste, or count line for them used a unit
+  // that couldn't convert to the ingredient's own unit — better than
+  // silently treating an unconvertible amount as zero.
+  excludedIngredientCount: number;
+};
+
+type IngredientFullInfo = {
+  name: string;
+  category: string | null;
+  unit: string;
+  unitCostCents: number | null;
+  containerSizeMl: number | null;
+  containerSizeG: number | null;
+};
+
+// Sums a set of (ingredient_id, quantity, unit) lines into each
+// ingredient's own native unit. An ingredient with no info (deleted
+// since) or a line whose unit can't convert goes into `unreliable`
+// instead of silently contributing 0 or a wrong number.
+function sumQtyByIngredient(
+  lines: { ingredient_id: string; quantity: number; unit: string }[],
+  ingredientInfoById: Map<string, IngredientFullInfo>,
+): { qtyByIngredient: Map<string, number>; unreliable: Set<string> } {
+  const qtyByIngredient = new Map<string, number>();
+  const unreliable = new Set<string>();
+  for (const line of lines) {
+    const info = ingredientInfoById.get(line.ingredient_id);
+    if (!info) {
+      unreliable.add(line.ingredient_id);
+      continue;
+    }
+    const converted = convertQuantityToIngredientUnit(
+      Number(line.quantity),
+      line.unit,
+      info.unit,
+      info.containerSizeMl,
+      info.containerSizeG,
+    );
+    if (converted == null) {
+      unreliable.add(line.ingredient_id);
+      continue;
+    }
+    qtyByIngredient.set(
+      line.ingredient_id,
+      (qtyByIngredient.get(line.ingredient_id) ?? 0) + converted,
+    );
+  }
+  return { qtyByIngredient, unreliable };
+}
+
+export function useInventoryVariance() {
+  const { data: locationIds } = useLocationIds();
+  const restaurantId = useRestaurantIds()[0];
+
+  return useQuery({
+    queryKey: ["inventory-variance", locationIds, restaurantId],
+    enabled: !!locationIds && locationIds.length > 0 && !!restaurantId,
+    queryFn: async (): Promise<InventoryVariance> => {
+      const countsRes = await supabase
+        .from("inventory_counts")
+        .select("id, counted_at")
+        .in("location_id", locationIds!)
+        .order("counted_at", { ascending: false })
+        .order("created_at", { ascending: false })
+        .limit(2);
+      if (countsRes.error) throw countsRes.error;
+      const counts = countsRes.data ?? [];
+
+      if (counts.length < 2) {
+        return {
+          status: "insufficient_counts",
+          countsAvailable: counts.length,
+          previousCountedAt: null,
+          latestCountedAt: null,
+          rows: [],
+          itemsMissingRecipeCount: 0,
+          excludedIngredientCount: 0,
+        };
+      }
+
+      const [latestCount, previousCount] = counts;
+      const fromIso = previousCount.counted_at as string;
+      const toIso = latestCount.counted_at as string;
+
+      const [
+        latestLinesRes,
+        previousLinesRes,
+        ingredientsRes,
+        salesData,
+        recipeCostCtx,
+        invoiceLineRows,
+        wasteLogRes,
+      ] = await Promise.all([
+        supabase
+          .from("inventory_count_lines")
+          .select("ingredient_id, quantity, unit")
+          .eq("inventory_count_id", latestCount.id),
+        supabase
+          .from("inventory_count_lines")
+          .select("ingredient_id, quantity, unit")
+          .eq("inventory_count_id", previousCount.id),
+        supabase
+          .from("ingredients")
+          .select("id, name, category, unit, unit_cost_cents, container_size_ml, container_size_g")
+          .eq("restaurant_id", restaurantId!),
+        fetchAllRows((from, to) =>
+          supabase
+            .from("pmix_sales")
+            .select("menu_item_pos_id, quantity_sold")
+            .in("location_id", locationIds!)
+            .gt("business_date", fromIso)
+            .lte("business_date", toIso)
+            .order("business_date", { ascending: true })
+            .range(from, to),
+        ),
+        fetchRecipeCostContext(locationIds!),
+        fetchAllRows((from, to) =>
+          supabase
+            .from("invoice_lines")
+            .select("ingredient_id, quantity, unit, invoices!inner(status, vendors(category))")
+            .not("ingredient_id", "is", null)
+            .eq("invoices.status", "approved")
+            .in("invoices.location_id", locationIds!)
+            .gt("invoices.invoice_date", fromIso)
+            .lte("invoices.invoice_date", toIso)
+            .range(from, to),
+        ),
+        fetchAllRows((from, to) =>
+          supabase
+            .from("waste_log")
+            .select("ingredient_id, quantity, unit")
+            .in("location_id", locationIds!)
+            .gt("logged_at", fromIso)
+            .lte("logged_at", toIso)
+            .range(from, to),
+        ),
+      ]);
+      if (latestLinesRes.error) throw latestLinesRes.error;
+      if (previousLinesRes.error) throw previousLinesRes.error;
+      if (ingredientsRes.error) throw ingredientsRes.error;
+
+      const ingredientInfoById = new Map<string, IngredientFullInfo>(
+        (ingredientsRes.data ?? []).map((i) => [
+          i.id,
+          {
+            name: i.name,
+            category: i.category,
+            unit: i.unit,
+            unitCostCents: i.unit_cost_cents,
+            containerSizeMl: i.container_size_ml,
+            containerSizeG: i.container_size_g,
+          },
+        ]),
+      );
+
+      const { qtyByIngredient: latestQty, unreliable: latestUnreliable } = sumQtyByIngredient(
+        (latestLinesRes.data ?? []).map((r) => ({
+          ingredient_id: r.ingredient_id,
+          quantity: r.quantity,
+          unit: r.unit,
+        })),
+        ingredientInfoById,
+      );
+      const { qtyByIngredient: previousQty, unreliable: previousUnreliable } = sumQtyByIngredient(
+        (previousLinesRes.data ?? []).map((r) => ({
+          ingredient_id: r.ingredient_id,
+          quantity: r.quantity,
+          unit: r.unit,
+        })),
+        ingredientInfoById,
+      );
+
+      const matchedInvoiceLines = (
+        invoiceLineRows as unknown as {
+          ingredient_id: string;
+          quantity: number | null;
+          unit: string | null;
+          invoices: { status: string; vendors: { category: string } | null } | null;
+        }[]
+      ).filter(
+        (r) => r.invoices?.vendors?.category === "food_beverage" && r.quantity != null && r.unit,
+      );
+      const { qtyByIngredient: purchasedQty, unreliable: purchaseUnreliable } = sumQtyByIngredient(
+        matchedInvoiceLines.map((r) => ({
+          ingredient_id: r.ingredient_id,
+          quantity: r.quantity!,
+          unit: r.unit!,
+        })),
+        ingredientInfoById,
+      );
+
+      const { qtyByIngredient: wastedQty, unreliable: wasteUnreliable } = sumQtyByIngredient(
+        (wasteLogRes ?? []).map((r) => ({
+          ingredient_id: r.ingredient_id,
+          quantity: r.quantity,
+          unit: r.unit,
+        })),
+        ingredientInfoById,
+      );
+
+      // Theoretical usage — same recursive recipe walk Cost Variance
+      // uses, decomposed into real quantity instead of dollars, over
+      // whatever sold between the two counts.
+      const qtyByItem = new Map<string, number>();
+      for (const row of salesData) {
+        qtyByItem.set(
+          row.menu_item_pos_id,
+          (qtyByItem.get(row.menu_item_pos_id) ?? 0) + Number(row.quantity_sold),
+        );
+      }
+      const usedQty = new Map<string, number>();
+      const itemsMissing = new Set<string>();
+      for (const [menuItemPosId, qty] of qtyByItem) {
+        const lines = recipeCostCtx.recipeLinesByMenuItem.get(menuItemPosId) ?? [];
+        if (lines.length === 0) {
+          itemsMissing.add(menuItemPosId);
+          continue;
+        }
+        const acc = new Map<string, number>();
+        const ok = accumulateMenuItemIngredientQuantity(
+          lines,
+          recipeCostCtx.prepRecipeLinesByPrepId,
+          recipeCostCtx.prepRecipeYieldById,
+          recipeCostCtx.ingredientById,
+          qty,
+          acc,
+        );
+        if (!ok) {
+          itemsMissing.add(menuItemPosId);
+          continue;
+        }
+        for (const [ingredientId, q] of acc) {
+          usedQty.set(ingredientId, (usedQty.get(ingredientId) ?? 0) + q);
+        }
+      }
+
+      const unreliableIngredients = new Set([
+        ...latestUnreliable,
+        ...previousUnreliable,
+        ...purchaseUnreliable,
+        ...wasteUnreliable,
+      ]);
+
+      // Only ingredients counted in BOTH periods have a real start and
+      // end point — anything added or removed between counts can't be
+      // reconciled and is simply not shown, rather than guessed at.
+      let excludedIngredientCount = 0;
+      const rows: IngredientVarianceDetail[] = [];
+      for (const [ingredientId, startQty] of previousQty) {
+        const endQty = latestQty.get(ingredientId);
+        if (endQty == null) continue;
+        if (unreliableIngredients.has(ingredientId)) {
+          excludedIngredientCount++;
+          continue;
+        }
+        const info = ingredientInfoById.get(ingredientId);
+        if (!info) {
+          excludedIngredientCount++;
+          continue;
+        }
+        const purchased = purchasedQty.get(ingredientId) ?? 0;
+        const used = usedQty.get(ingredientId) ?? 0;
+        const wasted = wastedQty.get(ingredientId) ?? 0;
+        const expectedEndQty = startQty + purchased - used - wasted;
+        const varianceQty = endQty - expectedEndQty;
+        rows.push({
+          ingredientId,
+          ingredientName: info.name,
+          category: info.category,
+          unit: info.unit,
+          startQty,
+          purchasedQty: purchased,
+          usedQty: used,
+          wastedQty: wasted,
+          expectedEndQty,
+          actualEndQty: endQty,
+          varianceQty,
+          varianceCostCents: info.unitCostCents != null ? varianceQty * info.unitCostCents : null,
+        });
+      }
+      rows.sort((a, b) => {
+        const av =
+          a.varianceCostCents != null ? Math.abs(a.varianceCostCents) : Math.abs(a.varianceQty);
+        const bv =
+          b.varianceCostCents != null ? Math.abs(b.varianceCostCents) : Math.abs(b.varianceQty);
+        return bv - av;
+      });
+
+      return {
+        status: "ready",
+        countsAvailable: counts.length,
+        previousCountedAt: previousCount.counted_at as string,
+        latestCountedAt: latestCount.counted_at as string,
+        rows,
+        itemsMissingRecipeCount: itemsMissing.size,
+        excludedIngredientCount,
       };
     },
   });

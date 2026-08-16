@@ -2845,3 +2845,158 @@ export function useUpdateInvoiceLineIngredient() {
     },
   });
 }
+
+function pctChange(from: number, to: number): number | null {
+  if (from <= 0) return null;
+  return Math.round(((to - from) / from) * 1000) / 10;
+}
+
+type CostHistoryVendorRow = {
+  ingredient_id: string;
+  unit_cost_cents: number;
+  effective_date: string;
+  created_at: string;
+  invoice_lines: { invoices: { vendors: { name: string } | null } | null } | null;
+};
+
+function vendorLabelFromEntries(
+  entries: { invoice_lines: CostHistoryVendorRow["invoice_lines"] }[],
+) {
+  const vendors = new Set<string>();
+  for (const e of entries) {
+    const name = e.invoice_lines?.invoices?.vendors?.name;
+    if (name) vendors.add(name);
+  }
+  if (vendors.size === 0) return "—";
+  if (vendors.size === 1) return Array.from(vendors)[0];
+  return "Multiple vendors";
+}
+
+// Every ingredient with at least one recorded cost (see
+// useApproveInvoice — every approved invoice line writes a
+// ingredient_cost_history row), ranked by how much its price has
+// actually moved rather than by spend — the whole point is to surface
+// a big % jump on a low-spend item that useTopLineItems' top-8-by-spend
+// list would never show. changePct compares the very first recorded
+// cost to the current one (the full-history story); lastMovePct is
+// just the most recent step (what changed at the last invoice) — an
+// ingredient can have a flat changePct while still moving a lot
+// step-to-step, so both are shown rather than collapsing to one number.
+export type IngredientPriceMover = {
+  ingredientId: string;
+  name: string;
+  category: string | null;
+  unit: string;
+  currentCostCents: number;
+  firstCostCents: number;
+  firstDate: string;
+  latestDate: string;
+  changePct: number | null;
+  lastMoveCostCents: number | null;
+  lastMovePct: number | null;
+  vendorLabel: string;
+  pointCount: number;
+};
+
+export function useIngredientPriceMovers() {
+  const restaurantId = useCurrentRestaurantId();
+  return useQuery({
+    queryKey: ["ingredient-price-movers", restaurantId],
+    enabled: !!restaurantId,
+    queryFn: async (): Promise<IngredientPriceMover[]> => {
+      const [historyRes, ingredientsRes] = await Promise.all([
+        supabase
+          .from("ingredient_cost_history")
+          .select(
+            "ingredient_id, unit_cost_cents, effective_date, created_at, invoice_lines(invoices(vendors(name)))",
+          )
+          .eq("restaurant_id", restaurantId!)
+          .order("effective_date", { ascending: true })
+          .order("created_at", { ascending: true }),
+        supabase
+          .from("ingredients")
+          .select("id, name, category, unit")
+          .eq("restaurant_id", restaurantId!),
+      ]);
+      if (historyRes.error) throw historyRes.error;
+      if (ingredientsRes.error) throw ingredientsRes.error;
+
+      const byIngredient = new Map<string, CostHistoryVendorRow[]>();
+      for (const row of (historyRes.data ?? []) as unknown as CostHistoryVendorRow[]) {
+        const list = byIngredient.get(row.ingredient_id) ?? [];
+        list.push(row);
+        byIngredient.set(row.ingredient_id, list);
+      }
+
+      const ingredientInfoById = new Map(
+        (ingredientsRes.data ?? []).map((i) => [
+          i.id,
+          { name: i.name, category: i.category, unit: i.unit },
+        ]),
+      );
+
+      const rows: IngredientPriceMover[] = [];
+      for (const [ingredientId, entries] of byIngredient) {
+        const info = ingredientInfoById.get(ingredientId);
+        if (!info) continue;
+        const first = entries[0];
+        const latest = entries[entries.length - 1];
+        const previous = entries.length >= 2 ? entries[entries.length - 2] : null;
+        rows.push({
+          ingredientId,
+          name: info.name,
+          category: info.category,
+          unit: info.unit,
+          currentCostCents: latest.unit_cost_cents,
+          firstCostCents: first.unit_cost_cents,
+          firstDate: first.effective_date,
+          latestDate: latest.effective_date,
+          changePct: pctChange(first.unit_cost_cents, latest.unit_cost_cents),
+          lastMoveCostCents: previous?.unit_cost_cents ?? null,
+          lastMovePct: previous
+            ? pctChange(previous.unit_cost_cents, latest.unit_cost_cents)
+            : null,
+          vendorLabel: vendorLabelFromEntries(entries),
+          pointCount: entries.length,
+        });
+      }
+
+      return rows.sort((a, b) => Math.abs(b.changePct ?? 0) - Math.abs(a.changePct ?? 0));
+    },
+  });
+}
+
+export type IngredientPricePoint = {
+  effectiveDate: string;
+  unitCostCents: number;
+  vendorName: string | null;
+};
+
+// Full point-by-point history for one ingredient, for the trend chart
+// in the detail drawer — useIngredientPriceMovers only carries
+// first/latest/previous, not the whole series.
+export function useIngredientPriceHistory(ingredientId: string | undefined) {
+  return useQuery({
+    queryKey: ["ingredient-price-history", ingredientId],
+    enabled: !!ingredientId,
+    queryFn: async (): Promise<IngredientPricePoint[]> => {
+      const { data, error } = await supabase
+        .from("ingredient_cost_history")
+        .select("unit_cost_cents, effective_date, invoice_lines(invoices(vendors(name)))")
+        .eq("ingredient_id", ingredientId!)
+        .order("effective_date", { ascending: true })
+        .order("created_at", { ascending: true });
+      if (error) throw error;
+      type Row = {
+        unit_cost_cents: number;
+        effective_date: string;
+        invoice_lines: { invoices: { vendors: { name: string } | null } | null } | null;
+      };
+      return ((data ?? []) as unknown as Row[]).map((r) => ({
+        effectiveDate: r.effective_date,
+        unitCostCents: r.unit_cost_cents,
+        vendorName: r.invoice_lines?.invoices?.vendors?.name ?? null,
+      }));
+    },
+  });
+}

@@ -137,6 +137,207 @@ export function resolveMenuItemRecipeCostCents(
   return Math.round(totalCents);
 }
 
+// Same recursive walk resolveMenuItemRecipeCostCents/
+// resolvePrepRecipeCostPerYieldUnit already do (through prep recipes,
+// same unit conversion), but decomposes into each raw ingredient's own
+// dollar contribution instead of collapsing to one total — used by the
+// Food Cost Variance page to show which specific ingredients explain
+// the gap between theoretical and actual spend, not just one aggregate
+// number. Accumulates into `acc` (ingredientId -> cents), scaled by
+// `multiplier` (typically units sold, for a menu item's top-level
+// call). Returns false the moment any line can't be costed; the
+// caller must then discard whatever this call added to `acc` rather
+// than treat a partial sum as real — same "never silently wrong"
+// contract as the two functions above. Does not account for price
+// tiers (see menu_item_price_tiers) — always uses an item's base/
+// untiered recipe, same as resolveBaseCostCents in pos/queries.ts;
+// a tiered item's true blended cost can differ slightly from what
+// this decomposes.
+export function accumulateMenuItemIngredientUsage(
+  recipeLines: RecipeLineRow[],
+  prepRecipeLinesByPrepId: Map<string, PrepRecipeLineRow[]>,
+  prepRecipeYieldById: Map<string, number>,
+  ingredientById: Map<string, IngredientCostInfo | undefined>,
+  multiplier: number,
+  acc: Map<string, number>,
+): boolean {
+  for (const line of recipeLines) {
+    if (line.ingredient_id) {
+      const lineCost = resolveIngredientLineCostCents(
+        line.quantity,
+        line.unit,
+        ingredientById.get(line.ingredient_id),
+      );
+      if (lineCost == null) return false;
+      acc.set(line.ingredient_id, (acc.get(line.ingredient_id) ?? 0) + multiplier * lineCost);
+    } else {
+      if (!line.prep_recipe_id) return false;
+      const ok = accumulatePrepRecipeIngredientUsage(
+        line.prep_recipe_id,
+        prepRecipeLinesByPrepId,
+        prepRecipeYieldById,
+        ingredientById,
+        multiplier * Number(line.quantity),
+        acc,
+        new Set(),
+      );
+      if (!ok) return false;
+    }
+  }
+  return true;
+}
+
+function accumulatePrepRecipeIngredientUsage(
+  prepRecipeId: string,
+  prepRecipeLinesByPrepId: Map<string, PrepRecipeLineRow[]>,
+  prepRecipeYieldById: Map<string, number>,
+  ingredientById: Map<string, IngredientCostInfo | undefined>,
+  multiplier: number,
+  acc: Map<string, number>,
+  visited: Set<string>,
+): boolean {
+  // Cycle guard — wouldCreateCycle already rejects creating a cycle at
+  // write time, so this should be unreachable in practice, but an
+  // infinite recursion here would hang the whole page rather than just
+  // mis-costing one item, so it's worth the defensive check.
+  if (visited.has(prepRecipeId)) return false;
+  const ownLines = prepRecipeLinesByPrepId.get(prepRecipeId) ?? [];
+  if (ownLines.length === 0) return false;
+  const yieldQty = prepRecipeYieldById.get(prepRecipeId) ?? 1;
+  if (yieldQty <= 0) return false;
+  const nextVisited = new Set(visited);
+  nextVisited.add(prepRecipeId);
+  const perYieldMultiplier = multiplier / yieldQty;
+  for (const line of ownLines) {
+    if (line.ingredient_id) {
+      const lineCost = resolveIngredientLineCostCents(
+        line.quantity,
+        line.unit,
+        ingredientById.get(line.ingredient_id),
+      );
+      if (lineCost == null) return false;
+      acc.set(
+        line.ingredient_id,
+        (acc.get(line.ingredient_id) ?? 0) + perYieldMultiplier * lineCost,
+      );
+    } else {
+      if (!line.sub_prep_recipe_id) return false;
+      const ok = accumulatePrepRecipeIngredientUsage(
+        line.sub_prep_recipe_id,
+        prepRecipeLinesByPrepId,
+        prepRecipeYieldById,
+        ingredientById,
+        perYieldMultiplier * Number(line.quantity),
+        acc,
+        nextVisited,
+      );
+      if (!ok) return false;
+    }
+  }
+  return true;
+}
+
+// Same recursive walk as accumulateMenuItemIngredientUsage, but
+// accumulates each raw ingredient's own converted QUANTITY (in the
+// ingredient's own native unit) instead of dollar cost — and, unlike
+// every cost-resolving function above, never requires unitCostCents to
+// be set. Used by the Inventory Variance page, which reconciles
+// physical counts against purchases/usage/waste in real units; most
+// ingredients don't have a cost yet (confirmed live: 266 of 338), and
+// a quantity reconciliation has no reason to go blind on them just
+// because pricing hasn't caught up. Still returns false — meaning
+// "discard whatever this call added to `acc`" — when a line's unit
+// can't convert to the ingredient's own unit (no container-size
+// bridge), since that's a real "we don't know how much of this was
+// used" gap, not merely a costing gap.
+export function accumulateMenuItemIngredientQuantity(
+  recipeLines: RecipeLineRow[],
+  prepRecipeLinesByPrepId: Map<string, PrepRecipeLineRow[]>,
+  prepRecipeYieldById: Map<string, number>,
+  ingredientById: Map<string, IngredientCostInfo | undefined>,
+  multiplier: number,
+  acc: Map<string, number>,
+): boolean {
+  for (const line of recipeLines) {
+    if (line.ingredient_id) {
+      const info = ingredientById.get(line.ingredient_id);
+      if (!info) return false;
+      const converted = convertQuantityToIngredientUnit(
+        line.quantity,
+        line.unit,
+        info.unit,
+        info.containerSizeMl,
+        info.containerSizeG,
+      );
+      if (converted == null) return false;
+      acc.set(line.ingredient_id, (acc.get(line.ingredient_id) ?? 0) + multiplier * converted);
+    } else {
+      if (!line.prep_recipe_id) return false;
+      const ok = accumulatePrepRecipeIngredientQuantity(
+        line.prep_recipe_id,
+        prepRecipeLinesByPrepId,
+        prepRecipeYieldById,
+        ingredientById,
+        multiplier * Number(line.quantity),
+        acc,
+        new Set(),
+      );
+      if (!ok) return false;
+    }
+  }
+  return true;
+}
+
+function accumulatePrepRecipeIngredientQuantity(
+  prepRecipeId: string,
+  prepRecipeLinesByPrepId: Map<string, PrepRecipeLineRow[]>,
+  prepRecipeYieldById: Map<string, number>,
+  ingredientById: Map<string, IngredientCostInfo | undefined>,
+  multiplier: number,
+  acc: Map<string, number>,
+  visited: Set<string>,
+): boolean {
+  if (visited.has(prepRecipeId)) return false;
+  const ownLines = prepRecipeLinesByPrepId.get(prepRecipeId) ?? [];
+  if (ownLines.length === 0) return false;
+  const yieldQty = prepRecipeYieldById.get(prepRecipeId) ?? 1;
+  if (yieldQty <= 0) return false;
+  const nextVisited = new Set(visited);
+  nextVisited.add(prepRecipeId);
+  const perYieldMultiplier = multiplier / yieldQty;
+  for (const line of ownLines) {
+    if (line.ingredient_id) {
+      const info = ingredientById.get(line.ingredient_id);
+      if (!info) return false;
+      const converted = convertQuantityToIngredientUnit(
+        line.quantity,
+        line.unit,
+        info.unit,
+        info.containerSizeMl,
+        info.containerSizeG,
+      );
+      if (converted == null) return false;
+      acc.set(
+        line.ingredient_id,
+        (acc.get(line.ingredient_id) ?? 0) + perYieldMultiplier * converted,
+      );
+    } else {
+      if (!line.sub_prep_recipe_id) return false;
+      const ok = accumulatePrepRecipeIngredientQuantity(
+        line.sub_prep_recipe_id,
+        prepRecipeLinesByPrepId,
+        prepRecipeYieldById,
+        ingredientById,
+        perYieldMultiplier * Number(line.quantity),
+        acc,
+        nextVisited,
+      );
+      if (!ok) return false;
+    }
+  }
+  return true;
+}
+
 // Walks a prep recipe's own dependency graph and reports every prep
 // recipe id reachable from it (itself included) — used to reject a
 // cycle *before* writing a new prep_recipe_lines row: if the recipe

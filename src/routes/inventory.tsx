@@ -107,7 +107,7 @@ import { CATEGORIES as SHARED_CATEGORIES } from "@/lib/boh/ingredient-categories
 export const Route = createFileRoute("/inventory")({
   head: () => ({
     meta: [
-      { title: "Inventory & Ordering · Thrasher's Pub" },
+      { title: "Ordering · Thrasher's Pub" },
       {
         name: "description",
         content:
@@ -665,7 +665,7 @@ function InventoryPage() {
 
   return (
     <div className="min-h-screen bg-cream">
-      <Topbar eyebrow="Stock & purchasing" title="Inventory & Ordering" />
+      <Topbar eyebrow="Stock & purchasing" title="Ordering" />
 
       <main className="px-8 py-8 max-w-[1500px] mx-auto space-y-8">
         {/* Header */}
@@ -674,7 +674,7 @@ function InventoryPage() {
             <p className="text-xs uppercase tracking-[0.18em] text-terracotta font-semibold">
               Stock & purchasing
             </p>
-            <h1 className="font-serif text-4xl text-ink mt-2">Inventory & Ordering</h1>
+            <h1 className="font-serif text-4xl text-ink mt-2">Ordering</h1>
             <p className="text-sm text-stone-600 mt-2 max-w-xl">
               Live counts across beverages, alcohol, food and dry goods. Update par levels, build a
               cart from AI suggestions, and dispatch POs to vendors automatically.
@@ -790,7 +790,7 @@ function InventoryPage() {
 
         {/* Vendors and Purchase Orders both moved to their own pages
             (/vendors, /purchase-orders), listed as siblings under
-            Inventory & Ordering in the sidebar rather than buried in a
+            Stock & Purchasing in the sidebar rather than buried in a
             tab here. */}
         <div className="space-y-5">
           {/* Filters */}
@@ -1272,7 +1272,7 @@ function InventoryPage() {
             </DialogTitle>
             <DialogDescription>
               {itemEditingId
-                ? "Changes apply immediately across Inventory & Ordering."
+                ? "Changes apply immediately across Stock & Purchasing."
                 : "The Ordering agent will start tracking par levels and usage as soon as you save."}
             </DialogDescription>
           </DialogHeader>

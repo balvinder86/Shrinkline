@@ -26,7 +26,9 @@ export type TranslationDict = {
     vendors: string;
     purchaseOrders: string;
     wasteLog: string;
+    inventoryVariance: string;
     invoices: string;
+    performance: string;
     reviews: string;
     seo: string;
     marketing: string;
@@ -34,6 +36,8 @@ export type TranslationDict = {
     scheduling: string;
     laborCost: string;
     pnl: string;
+    variance: string;
+    ingredientPriceTrends: string;
     admin: string;
     settings: string;
   };
@@ -61,13 +65,15 @@ export const translations: Record<Language, TranslationDict> = {
       home: "Home",
       productMix: "Product Mix",
       recipes: "Recipes",
-      inventory: "Inventory & Ordering",
-      inventoryItems: "Items",
+      inventory: "Stock & Purchasing",
+      inventoryItems: "Ordering",
       inventoryCount: "Count Inventory",
       vendors: "Vendors",
       purchaseOrders: "Purchase Orders",
       wasteLog: "Waste Log",
+      inventoryVariance: "Inventory Variance",
       invoices: "Invoices",
+      performance: "Performance",
       reviews: "Reviews",
       seo: "SEO",
       marketing: "Marketing",
@@ -75,6 +81,8 @@ export const translations: Record<Language, TranslationDict> = {
       scheduling: "Scheduling",
       laborCost: "Labor Cost",
       pnl: "P&L",
+      variance: "Cost Variance",
+      ingredientPriceTrends: "Ingredient Price Trends",
       admin: "Admin",
       settings: "Settings",
     },
@@ -109,13 +117,15 @@ export const translations: Record<Language, TranslationDict> = {
       home: "Inicio",
       productMix: "Mezcla de productos",
       recipes: "Recetas",
-      inventory: "Inventario y pedidos",
-      inventoryItems: "Artículos",
+      inventory: "Stock y compras",
+      inventoryItems: "Pedidos",
       inventoryCount: "Contar inventario",
       vendors: "Proveedores",
       purchaseOrders: "Órdenes de compra",
       wasteLog: "Registro de desperdicio",
+      inventoryVariance: "Variación de inventario",
       invoices: "Facturas",
+      performance: "Rendimiento",
       reviews: "Reseñas",
       seo: "SEO",
       marketing: "Marketing",
@@ -123,6 +133,8 @@ export const translations: Record<Language, TranslationDict> = {
       scheduling: "Horarios",
       laborCost: "Costo laboral",
       pnl: "Pérdidas y ganancias",
+      variance: "Variación de costos",
+      ingredientPriceTrends: "Tendencias de precios",
       admin: "Administración",
       settings: "Configuración",
     },
