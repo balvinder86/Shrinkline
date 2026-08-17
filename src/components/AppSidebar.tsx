@@ -1,5 +1,5 @@
 import { Link, useRouterState } from "@tanstack/react-router";
-import { ChevronRight, LogOut, UtensilsCrossed } from "lucide-react";
+import { ChevronRight, LogOut } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -37,9 +37,9 @@ import {
 } from "@/lib/nav-items";
 import { useAuth } from "@/lib/supabase/auth-context";
 import { useCurrentRestaurant } from "@/lib/restaurant-context";
-import { useCurrentLocation } from "@/lib/location-context";
 import { useLanguage } from "@/lib/i18n/language-context";
 import { LANGUAGES, type Language } from "@/lib/i18n/translations";
+import { BrandLocationSwitcher } from "@/components/BrandLocationSwitcher";
 
 function visibleFor<T extends { permission: PermissionKey }>(
   items: T[],
@@ -55,9 +55,7 @@ export function AppSidebar() {
   const { setOpenMobile } = useSidebar();
   const { signOut } = useAuth();
   const { language, setLanguage, t } = useLanguage();
-  const { restaurants, currentRestaurantId, currentRestaurant, setCurrentRestaurantId } =
-    useCurrentRestaurant();
-  const { locations, currentLocationId, setCurrentLocationId } = useCurrentLocation();
+  const { currentRestaurant } = useCurrentRestaurant();
 
   const visibleOverview = visibleFor(NAV_OVERVIEW, membership);
   const visibleGrowth = visibleFor(NAV_GROWTH, membership);
@@ -133,19 +131,7 @@ export function AppSidebar() {
   return (
     <Sidebar collapsible="icon" className="border-r border-sidebar-border">
       <SidebarHeader className="border-b border-sidebar-border px-4 py-5">
-        <Link to="/" onClick={() => setOpenMobile(false)} className="flex items-center gap-3">
-          <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-primary text-primary-foreground shadow-soft">
-            <UtensilsCrossed className="h-5 w-5" />
-          </div>
-          <div className="min-w-0">
-            <div className="truncate font-display text-base leading-tight">
-              {currentRestaurant?.name ?? "Thrasher's Pub"}
-            </div>
-            <div className="truncate text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
-              {t.sidebar.tagline}
-            </div>
-          </div>
-        </Link>
+        <BrandLocationSwitcher />
       </SidebarHeader>
       <SidebarContent className="px-2 py-3">
         {renderGroup(t.navSection.overview, visibleOverview)}
@@ -171,42 +157,6 @@ export function AppSidebar() {
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" side="top" className="w-56">
-            {restaurants.length > 1 && (
-              <>
-                <DropdownMenuLabel className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
-                  {t.profile.restaurant}
-                </DropdownMenuLabel>
-                <DropdownMenuRadioGroup
-                  value={currentRestaurantId ?? ""}
-                  onValueChange={(v) => setCurrentRestaurantId(v)}
-                >
-                  {restaurants.map((r) => (
-                    <DropdownMenuRadioItem key={r.id} value={r.id}>
-                      {r.name}
-                    </DropdownMenuRadioItem>
-                  ))}
-                </DropdownMenuRadioGroup>
-                <DropdownMenuSeparator />
-              </>
-            )}
-            {locations.length > 1 && (
-              <>
-                <DropdownMenuLabel className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
-                  {t.profile.location}
-                </DropdownMenuLabel>
-                <DropdownMenuRadioGroup
-                  value={currentLocationId ?? ""}
-                  onValueChange={(v) => setCurrentLocationId(v)}
-                >
-                  {locations.map((l) => (
-                    <DropdownMenuRadioItem key={l.id} value={l.id}>
-                      {l.name}
-                    </DropdownMenuRadioItem>
-                  ))}
-                </DropdownMenuRadioGroup>
-                <DropdownMenuSeparator />
-              </>
-            )}
             <DropdownMenuLabel className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
               {t.profile.language}
             </DropdownMenuLabel>

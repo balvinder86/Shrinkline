@@ -243,6 +243,11 @@ export function useCreateLocation() {
       // — invalidating it is what makes the new location show up in the
       // sidebar switcher immediately instead of only after a refresh.
       queryClient.invalidateQueries({ queryKey: ["locations-for-switcher"] });
+      // Brands overview page's query (src/lib/restaurants/queries.ts) —
+      // same reasoning, otherwise a location added from there (or from
+      // the header switcher's Add Location dialog) leaves its card
+      // showing a stale location list until a manual reload.
+      queryClient.invalidateQueries({ queryKey: ["brands-overview"] });
     },
   });
 }

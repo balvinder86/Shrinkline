@@ -20,6 +20,11 @@ type AuthState = {
   // array and wrongly conclude "no access" for a beat. Route guards
   // need this to tell "still loading" apart from "genuinely none."
   membershipsLoading: boolean;
+  // Memberships only ever refetched automatically on session change —
+  // creating a brand-new restaurant (useCreateRestaurant) adds a
+  // membership row without a new session, so callers that do that need
+  // a way to pull it in immediately rather than waiting for a reload.
+  refetchMemberships: () => Promise<void>;
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
 };
@@ -45,12 +50,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => listener.subscription.unsubscribe();
   }, []);
 
-  useEffect(() => {
-    if (!session) {
-      setMemberships([]);
-      setMembershipsLoading(false);
-      return;
-    }
+  const loadMemberships = async (userId: string) => {
     setMembershipsLoading(true);
     // tenant_read's RLS policy scopes this to restaurants the caller
     // belongs to, not to the caller's own row — deliberately, since
@@ -60,20 +60,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // explicitly — without this, whichever row happened to load first
     // for a shared restaurant_id (e.g. the owner's) would silently
     // stand in for this user's real role and permissions.
-    supabase
+    const { data, error } = await supabase
       .from("memberships")
       .select("restaurant_id, role, permissions")
-      .eq("user_id", session.user.id)
-      .then(({ data, error }) => {
-        if (error) {
-          console.error("failed to load memberships", error);
-          setMembershipsLoading(false);
-          return;
-        }
-        setMemberships(data ?? []);
-        setMembershipsLoading(false);
-      });
+      .eq("user_id", userId);
+    if (error) {
+      console.error("failed to load memberships", error);
+      setMembershipsLoading(false);
+      return;
+    }
+    setMemberships(data ?? []);
+    setMembershipsLoading(false);
+  };
+
+  useEffect(() => {
+    if (!session) {
+      setMemberships([]);
+      setMembershipsLoading(false);
+      return;
+    }
+    void loadMemberships(session.user.id);
   }, [session]);
+
+  const refetchMemberships = async () => {
+    if (!session) return;
+    await loadMemberships(session.user.id);
+  };
 
   const signIn = async (email: string, password: string) => {
     const { error } = await supabase.auth.signInWithPassword({ email, password });
@@ -92,6 +104,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         memberships,
         loading,
         membershipsLoading,
+        refetchMemberships,
         signIn,
         signOut,
       }}

@@ -65,6 +65,7 @@ import {
 import { useAuth } from "@/lib/supabase/auth-context";
 import { useCurrentRestaurant } from "@/lib/restaurant-context";
 import { supabase } from "@/lib/supabase/client";
+import { TIMEZONES } from "@/lib/timezones";
 import {
   useUpdateRestaurantName,
   useLocationsForSettings,
@@ -554,16 +555,6 @@ function ProfileSection() {
 }
 
 /* ---------- Locations ---------- */
-
-const TIMEZONES = [
-  "America/New_York",
-  "America/Chicago",
-  "America/Denver",
-  "America/Phoenix",
-  "America/Los_Angeles",
-  "America/Anchorage",
-  "Pacific/Honolulu",
-];
 
 function LocationEditor({
   location,

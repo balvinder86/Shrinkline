@@ -21,6 +21,7 @@ import {
   Scale,
   PackageSearch,
   LineChart,
+  Store,
   type LucideIcon,
 } from "lucide-react";
 
@@ -134,6 +135,7 @@ export const NAV_UNGATED: {
   url: string;
   icon: LucideIcon;
 }[] = [
+  { titleKey: "brands", url: "/brands", icon: Store },
   { titleKey: "admin", url: "/admin", icon: Shield },
   { titleKey: "settings", url: "/settings", icon: Settings },
 ];
