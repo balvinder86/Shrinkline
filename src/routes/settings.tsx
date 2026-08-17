@@ -23,6 +23,7 @@ import {
   Smartphone,
   Upload,
   ExternalLink,
+  AlertTriangle,
 } from "lucide-react";
 import { Topbar } from "@/components/dashboard/Topbar";
 import { Card } from "@/components/ui/card";
@@ -62,6 +63,14 @@ import {
   useGmailConnection,
   useConnectGmail,
 } from "@/lib/integrations/queries";
+import { useAuth } from "@/lib/supabase/auth-context";
+import { useCurrentRestaurant } from "@/lib/restaurant-context";
+import { supabase } from "@/lib/supabase/client";
+import {
+  useUpdateRestaurantName,
+  useLocationsForSettings,
+  useUpdateLocation,
+} from "@/lib/settings/queries";
 
 export const Route = createFileRoute("/settings")({
   head: () => ({ meta: [{ title: "Settings · Thrasher's Pub" }] }),
@@ -228,11 +237,24 @@ function Row({
     <div className="flex items-start justify-between gap-6 py-4">
       <div className="min-w-0">
         <div className="text-sm font-medium">{title}</div>
-        {description && (
-          <div className="mt-0.5 text-xs text-muted-foreground">{description}</div>
-        )}
+        {description && <div className="mt-0.5 text-xs text-muted-foreground">{description}</div>}
       </div>
       <div className="shrink-0">{children}</div>
+    </div>
+  );
+}
+
+// Every section below that has no real backend gets one of these —
+// loud enough that it can't be mistaken for a real save, honest about
+// exactly what's fake so a later pass knows precisely what to build
+// rather than re-auditing the whole page again.
+function PlaceholderBanner({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-sm text-amber-900">
+      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+      <div>
+        <span className="font-medium">Not built yet.</span> {children}
+      </div>
     </div>
   );
 }
@@ -240,23 +262,71 @@ function Row({
 /* ---------- Profile ---------- */
 
 function ProfileSection() {
+  const { currentRestaurant } = useCurrentRestaurant();
+  const updateName = useUpdateRestaurantName();
+  const [name, setName] = useState(currentRestaurant?.name ?? "");
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    setName(currentRestaurant?.name ?? "");
+  }, [currentRestaurant?.name]);
+
+  const dirty =
+    currentRestaurant != null && name.trim() !== currentRestaurant.name && name.trim() !== "";
+
   return (
     <div className="space-y-6">
       <SectionHeader
         eyebrow="Business"
         title="Restaurant profile"
-        description="Public-facing details used across your website, receipts, marketing, and listings."
-        action={
-          <Button size="sm" className="rounded-full">
-            Save changes
-          </Button>
-        }
+        description="Only the restaurant name is real right now — everything else on this page is a placeholder for what a full profile would eventually cover."
       />
 
       <Card className="p-6">
-        <div className="flex items-start gap-5">
+        <div className="max-w-md">
+          <Field
+            label="Restaurant name"
+            hint="Shown across the dashboard, including the restaurant switcher."
+          >
+            <div className="flex gap-2">
+              <Input
+                value={name}
+                onChange={(e) => {
+                  setName(e.target.value);
+                  setSaved(false);
+                }}
+                disabled={!currentRestaurant}
+              />
+              <Button
+                size="sm"
+                disabled={!dirty || updateName.isPending}
+                onClick={() => {
+                  if (!currentRestaurant) return;
+                  updateName.mutate(
+                    { id: currentRestaurant.id, name: name.trim() },
+                    { onSuccess: () => setSaved(true) },
+                  );
+                }}
+              >
+                {updateName.isPending ? "Saving…" : "Save"}
+              </Button>
+            </div>
+          </Field>
+          {updateName.isError && (
+            <p className="mt-2 text-xs text-destructive">{(updateName.error as Error).message}</p>
+          )}
+          {saved && !updateName.isError && <p className="mt-2 text-xs text-emerald-700">Saved.</p>}
+        </div>
+      </Card>
+
+      <Card className="p-6 space-y-4">
+        <PlaceholderBanner>
+          Logo, legal business name, cuisine/category, price tier, public contact info, and
+          description have no database columns yet — nothing below is saved.
+        </PlaceholderBanner>
+        <div className="flex items-start gap-5 opacity-60">
           <div className="grid h-20 w-20 place-items-center rounded-2xl bg-primary/10 font-display text-2xl text-primary">
-            TP
+            {(currentRestaurant?.name ?? "?").slice(0, 2).toUpperCase()}
           </div>
           <div className="flex-1 space-y-1">
             <div className="text-sm font-medium">Logo & brand mark</div>
@@ -264,62 +334,54 @@ function ProfileSection() {
               Square PNG or SVG, transparent background. Used on receipts, email, and social.
             </p>
             <div className="mt-3 flex gap-2">
-              <Button size="sm" variant="outline" className="gap-2">
+              <Button size="sm" variant="outline" className="gap-2" disabled>
                 <Upload className="h-3.5 w-3.5" /> Upload
               </Button>
-              <Button size="sm" variant="ghost">Remove</Button>
+              <Button size="sm" variant="ghost" disabled>
+                Remove
+              </Button>
             </div>
           </div>
         </div>
-      </Card>
-
-      <Card className="p-6">
-        <div className="grid gap-5 md:grid-cols-2">
+        <div className="grid gap-5 opacity-60 md:grid-cols-2">
           <Field label="Legal business name">
-            <Input defaultValue="Thrasher's Pub LLC" />
-          </Field>
-          <Field label="Display name" hint="Shown to guests on receipts, email, and listings.">
-            <Input defaultValue="Thrasher's Pub" />
+            <Input defaultValue="Thrasher's Pub LLC" disabled />
           </Field>
           <Field label="Cuisine / category">
-            <Select defaultValue="pub">
-              <SelectTrigger><SelectValue /></SelectTrigger>
+            <Select defaultValue="pub" disabled>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
               <SelectContent>
                 <SelectItem value="pub">Gastropub</SelectItem>
-                <SelectItem value="american">American</SelectItem>
-                <SelectItem value="italian">Italian</SelectItem>
-                <SelectItem value="bar">Bar & lounge</SelectItem>
               </SelectContent>
             </Select>
           </Field>
           <Field label="Price tier">
-            <Select defaultValue="$$">
-              <SelectTrigger><SelectValue /></SelectTrigger>
+            <Select defaultValue="$$" disabled>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
               <SelectContent>
-                <SelectItem value="$">$ – Budget</SelectItem>
                 <SelectItem value="$$">$$ – Casual</SelectItem>
-                <SelectItem value="$$$">$$$ – Upscale</SelectItem>
-                <SelectItem value="$$$$">$$$$ – Fine dining</SelectItem>
               </SelectContent>
             </Select>
           </Field>
           <Field label="Public email">
-            <Input defaultValue="hello@thrasherspub.com" />
+            <Input defaultValue="hello@thrasherspub.com" disabled />
           </Field>
           <Field label="Reservations phone">
-            <Input defaultValue="(202) 555-0144" />
+            <Input defaultValue="(202) 555-0144" disabled />
           </Field>
           <Field label="Website">
-            <Input defaultValue="https://thrasherspub.com" />
-          </Field>
-          <Field label="Founded">
-            <Input defaultValue="2018" />
+            <Input defaultValue="https://thrasherspub.com" disabled />
           </Field>
           <div className="md:col-span-2">
-            <Field label="Short description" hint="Up to 280 characters. Used for SEO meta and Google Business.">
+            <Field label="Short description">
               <Textarea
                 rows={3}
-                defaultValue="Neighborhood gastropub with seasonal small plates, wood-fired classics, and a 40+ craft beer lineup. Open late, all welcome."
+                defaultValue="Neighborhood gastropub with seasonal small plates, wood-fired classics, and a 40+ craft beer lineup."
+                disabled
               />
             </Field>
           </div>
@@ -349,11 +411,15 @@ function HoursSection() {
       <SectionHeader
         eyebrow="Business"
         title="Hours of operation"
-        description="Syncs to Google Business, your website, and reservation widgets."
-        action={<Button size="sm" className="rounded-full">Publish hours</Button>}
+        description="No hours table exists yet — this whole section is a working mockup of what it'd look like, not a real editor."
       />
 
-      <Card className="p-6">
+      <PlaceholderBanner>
+        Nothing here is saved. Building this for real would need a new table plus deciding whether
+        hours live per-location or per-restaurant.
+      </PlaceholderBanner>
+
+      <Card className="p-6 opacity-60">
         <div className="space-y-1">
           {DAYS.map((day, i) => (
             <div
@@ -368,6 +434,7 @@ function HoursSection() {
                   <Input
                     type="time"
                     value={hours[i].open}
+                    disabled
                     onChange={(e) =>
                       setHours((h) =>
                         h.map((d, idx) => (idx === i ? { ...d, open: e.target.value } : d)),
@@ -379,6 +446,7 @@ function HoursSection() {
                   <Input
                     type="time"
                     value={hours[i].close}
+                    disabled
                     onChange={(e) =>
                       setHours((h) =>
                         h.map((d, idx) => (idx === i ? { ...d, close: e.target.value } : d)),
@@ -392,6 +460,7 @@ function HoursSection() {
                 <span className="text-xs text-muted-foreground">Closed</span>
                 <Switch
                   checked={hours[i].closed}
+                  disabled
                   onCheckedChange={(v) =>
                     setHours((h) => h.map((d, idx) => (idx === i ? { ...d, closed: v } : d)))
                   }
@@ -402,12 +471,12 @@ function HoursSection() {
         </div>
       </Card>
 
-      <Card className="p-6">
+      <Card className="p-6 opacity-60">
         <SectionHeader
           title="Special hours & holidays"
           description="Override regular hours for holidays, private events, or unexpected closures."
           action={
-            <Button size="sm" variant="outline" className="gap-2">
+            <Button size="sm" variant="outline" className="gap-2" disabled>
               <Plus className="h-3.5 w-3.5" /> Add date
             </Button>
           }
@@ -416,7 +485,6 @@ function HoursSection() {
           {[
             { date: "Jul 4, 2026", label: "Independence Day", note: "Closing at 6:00 PM" },
             { date: "Nov 26, 2026", label: "Thanksgiving", note: "Closed all day" },
-            { date: "Dec 25, 2026", label: "Christmas Day", note: "Closed all day" },
           ].map((h) => (
             <div
               key={h.date}
@@ -429,8 +497,12 @@ function HoursSection() {
                 </div>
               </div>
               <div className="flex gap-1">
-                <Button size="icon" variant="ghost" className="h-8 w-8"><Pencil className="h-3.5 w-3.5" /></Button>
-                <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive"><Trash2 className="h-3.5 w-3.5" /></Button>
+                <Button size="icon" variant="ghost" className="h-8 w-8" disabled>
+                  <Pencil className="h-3.5 w-3.5" />
+                </Button>
+                <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive" disabled>
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
               </div>
             </div>
           ))}
@@ -442,47 +514,125 @@ function HoursSection() {
 
 /* ---------- Locations ---------- */
 
+const TIMEZONES = [
+  "America/New_York",
+  "America/Chicago",
+  "America/Denver",
+  "America/Phoenix",
+  "America/Los_Angeles",
+  "America/Anchorage",
+  "Pacific/Honolulu",
+];
+
+function LocationEditor({
+  location,
+}: {
+  location: { id: string; name: string; timezone: string };
+}) {
+  const updateLocation = useUpdateLocation();
+  const [name, setName] = useState(location.name);
+  const [timezone, setTimezone] = useState(location.timezone);
+  const [saved, setSaved] = useState(false);
+  const dirty = name.trim() !== location.name || timezone !== location.timezone;
+
+  return (
+    <Card className="p-5">
+      <div className="flex items-start justify-between gap-3">
+        <div className="grid h-10 w-10 place-items-center rounded-lg bg-primary/10 text-primary">
+          <MapPin className="h-4 w-4" />
+        </div>
+      </div>
+      <div className="mt-4 space-y-3">
+        <Field label="Name">
+          <Input
+            value={name}
+            onChange={(e) => {
+              setName(e.target.value);
+              setSaved(false);
+            }}
+          />
+        </Field>
+        <Field label="Timezone">
+          <Select
+            value={timezone}
+            onValueChange={(v) => {
+              setTimezone(v);
+              setSaved(false);
+            }}
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {TIMEZONES.map((tz) => (
+                <SelectItem key={tz} value={tz}>
+                  {tz}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
+      </div>
+      <p className="mt-3 text-xs text-muted-foreground">
+        Address and seating capacity aren't tracked yet.
+      </p>
+      <Separator className="my-4" />
+      <div className="flex items-center gap-2">
+        <Button
+          size="sm"
+          disabled={!dirty || !name.trim() || updateLocation.isPending}
+          onClick={() =>
+            updateLocation.mutate(
+              { id: location.id, name: name.trim(), timezone },
+              { onSuccess: () => setSaved(true) },
+            )
+          }
+        >
+          {updateLocation.isPending ? "Saving…" : "Save"}
+        </Button>
+        {saved && !updateLocation.isPending && (
+          <span className="text-xs text-emerald-700">Saved.</span>
+        )}
+        {updateLocation.isError && (
+          <span className="text-xs text-destructive">
+            {(updateLocation.error as Error).message}
+          </span>
+        )}
+      </div>
+    </Card>
+  );
+}
+
 function LocationsSection() {
-  const locations = [
-    { name: "Thrasher's Pub – H Street", addr: "1218 H St NE, Washington, DC 20002", primary: true, seats: 96 },
-    { name: "Thrasher's Pub – Navy Yard", addr: "300 Tingey St SE, Washington, DC 20003", primary: false, seats: 124 },
-  ];
+  const { data: locations = [], isLoading } = useLocationsForSettings();
   return (
     <div className="space-y-6">
       <SectionHeader
         eyebrow="Business"
         title="Locations"
-        description="Manage multiple venues. Each location has its own hours, menu, and tax settings."
+        description="Real locations, editable name and timezone. Adding a new location isn't built here — locations are provisioned during Toast setup."
         action={
-          <Button size="sm" className="gap-2 rounded-full">
+          <Button
+            size="sm"
+            className="gap-2 rounded-full"
+            disabled
+            title="Not built yet — add locations via Toast setup"
+          >
             <Plus className="h-3.5 w-3.5" /> Add location
           </Button>
         }
       />
-      <div className="grid gap-4 md:grid-cols-2">
-        {locations.map((l) => (
-          <Card key={l.name} className="p-5">
-            <div className="flex items-start justify-between gap-3">
-              <div className="grid h-10 w-10 place-items-center rounded-lg bg-primary/10 text-primary">
-                <MapPin className="h-4 w-4" />
-              </div>
-              {l.primary && <Badge variant="secondary">Primary</Badge>}
-            </div>
-            <div className="mt-4 font-medium">{l.name}</div>
-            <p className="mt-1 text-xs text-muted-foreground">{l.addr}</p>
-            <div className="mt-4 flex items-center gap-4 text-xs text-muted-foreground">
-              <span>{l.seats} seats</span>
-              <span>·</span>
-              <span>Open today</span>
-            </div>
-            <Separator className="my-4" />
-            <div className="flex gap-2">
-              <Button size="sm" variant="outline" className="flex-1">Edit</Button>
-              <Button size="sm" variant="ghost">View</Button>
-            </div>
-          </Card>
-        ))}
-      </div>
+      {isLoading ? (
+        <p className="text-sm text-muted-foreground">Loading…</p>
+      ) : locations.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No locations found for this restaurant.</p>
+      ) : (
+        <div className="grid gap-4 md:grid-cols-2">
+          {locations.map((l) => (
+            <LocationEditor key={l.id} location={l} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -498,59 +648,65 @@ function BrandingSection() {
         title="Branding"
         description="Colors and typography applied to receipts, email, marketing campaigns, and your storefront."
       />
-      <Card className="p-6">
+      <PlaceholderBanner>
+        No branding table exists — nothing on this page persists. This is a mockup of what a real
+        branding editor could look like.
+      </PlaceholderBanner>
+      <Card className="p-6 opacity-60">
         <div className="text-sm font-medium">Brand palette</div>
         <div className="mt-3 flex flex-wrap gap-3">
           {palette.map((c) => (
-            <div key={c} className="flex items-center gap-2 rounded-lg border border-border/60 bg-card/60 p-2 pr-3">
+            <div
+              key={c}
+              className="flex items-center gap-2 rounded-lg border border-border/60 bg-card/60 p-2 pr-3"
+            >
               <div className="h-9 w-9 rounded-md border border-border" style={{ background: c }} />
               <div className="text-xs">
                 <div className="font-medium">{c}</div>
-                <button className="text-muted-foreground hover:text-foreground">Replace</button>
+                <span className="text-muted-foreground">Replace</span>
               </div>
             </div>
           ))}
-          <button className="flex h-[52px] items-center gap-2 rounded-lg border border-dashed border-border/80 px-3 text-xs text-muted-foreground hover:bg-accent">
+          <div className="flex h-[52px] items-center gap-2 rounded-lg border border-dashed border-border/80 px-3 text-xs text-muted-foreground">
             <Plus className="h-3.5 w-3.5" /> Add color
-          </button>
+          </div>
         </div>
       </Card>
 
-      <Card className="p-6">
+      <Card className="p-6 opacity-60">
         <div className="grid gap-5 md:grid-cols-2">
           <Field label="Display typeface">
-            <Select defaultValue="fraunces">
-              <SelectTrigger><SelectValue /></SelectTrigger>
+            <Select defaultValue="fraunces" disabled>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
               <SelectContent>
                 <SelectItem value="fraunces">Fraunces</SelectItem>
-                <SelectItem value="playfair">Playfair Display</SelectItem>
-                <SelectItem value="dm-serif">DM Serif Display</SelectItem>
               </SelectContent>
             </Select>
           </Field>
           <Field label="Body typeface">
-            <Select defaultValue="inter">
-              <SelectTrigger><SelectValue /></SelectTrigger>
+            <Select defaultValue="inter" disabled>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
               <SelectContent>
                 <SelectItem value="inter">Inter</SelectItem>
-                <SelectItem value="manrope">Manrope</SelectItem>
-                <SelectItem value="dm-sans">DM Sans</SelectItem>
               </SelectContent>
             </Select>
           </Field>
           <Field label="Voice & tone">
-            <Select defaultValue="warm">
-              <SelectTrigger><SelectValue /></SelectTrigger>
+            <Select defaultValue="warm" disabled>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
               <SelectContent>
                 <SelectItem value="warm">Warm & welcoming</SelectItem>
-                <SelectItem value="playful">Playful</SelectItem>
-                <SelectItem value="refined">Refined</SelectItem>
-                <SelectItem value="bold">Bold</SelectItem>
               </SelectContent>
             </Select>
           </Field>
           <Field label="Tagline">
-            <Input defaultValue="Neighborhood food. Honest drinks." />
+            <Input defaultValue="Neighborhood food. Honest drinks." disabled />
           </Field>
         </div>
       </Card>
@@ -593,12 +749,22 @@ function NotificationsSection() {
         title="Notifications"
         description="Choose how and when each event reaches your team."
       />
-      <Card className="p-6">
+      <PlaceholderBanner>
+        No notification-preferences table exists — every toggle below is illustrative only, nothing
+        is sent or saved based on these.
+      </PlaceholderBanner>
+      <Card className="p-6 opacity-60">
         <div className="grid grid-cols-[1fr_auto_auto_auto] items-center gap-4 pb-2 text-[11px] uppercase tracking-[0.2em] text-muted-foreground">
           <div>Event</div>
-          <div className="flex items-center gap-1"><Mail className="h-3 w-3" /> Email</div>
-          <div className="flex items-center gap-1"><Smartphone className="h-3 w-3" /> Push</div>
-          <div className="flex items-center gap-1"><Phone className="h-3 w-3" /> SMS</div>
+          <div className="flex items-center gap-1">
+            <Mail className="h-3 w-3" /> Email
+          </div>
+          <div className="flex items-center gap-1">
+            <Smartphone className="h-3 w-3" /> Push
+          </div>
+          <div className="flex items-center gap-1">
+            <Phone className="h-3 w-3" /> SMS
+          </div>
         </div>
         {groups.map((g) => (
           <div key={g.title} className="mt-4 first:mt-0">
@@ -607,14 +773,17 @@ function NotificationsSection() {
             </div>
             <div className="divide-y divide-border/60 rounded-lg border border-border/60">
               {g.items.map((it) => (
-                <div key={it.t} className="grid grid-cols-[1fr_auto_auto_auto] items-center gap-4 px-4 py-3">
+                <div
+                  key={it.t}
+                  className="grid grid-cols-[1fr_auto_auto_auto] items-center gap-4 px-4 py-3"
+                >
                   <div>
                     <div className="text-sm font-medium">{it.t}</div>
                     <div className="text-xs text-muted-foreground">{it.d}</div>
                   </div>
-                  <Switch defaultChecked />
-                  <Switch defaultChecked />
-                  <Switch />
+                  <Switch defaultChecked disabled />
+                  <Switch defaultChecked disabled />
+                  <Switch disabled />
                 </div>
               ))}
             </div>
@@ -622,15 +791,15 @@ function NotificationsSection() {
         ))}
       </Card>
 
-      <Card className="p-6">
+      <Card className="p-6 opacity-60">
         <SectionHeader
           title="Quiet hours"
           description="No push or SMS notifications during this window unless marked urgent."
         />
         <div className="mt-4 flex items-center gap-3">
-          <Input type="time" defaultValue="23:00" className="h-9 w-32" />
+          <Input type="time" defaultValue="23:00" className="h-9 w-32" disabled />
           <span className="text-sm text-muted-foreground">to</span>
-          <Input type="time" defaultValue="07:00" className="h-9 w-32" />
+          <Input type="time" defaultValue="07:00" className="h-9 w-32" disabled />
         </div>
       </Card>
     </div>
@@ -642,7 +811,7 @@ function NotificationsSection() {
 type AppRow = {
   name: string;
   cat: string;
-  status: "Connected" | "Available" | "Action needed";
+  status: "Connected" | "Available" | "Action needed" | "Not built";
   desc: string;
   meta?: string;
   channel?: "EDI" | "API" | "Email PO" | "Portal" | "CSV";
@@ -686,6 +855,9 @@ function IntegrationsSection() {
     ? `Reads vendor invoice emails, sends purchase orders. Connected as ${gmailConnection.connectedEmail}.`
     : "Reads vendor invoice emails, sends purchase orders.";
 
+  // Everything past Toast/Gmail below is "Not built" — no real
+  // credential, no real sync — kept in the list only as a roadmap of
+  // what could eventually be connected, not as a claim it already is.
   const platform: AppRow[] = [
     {
       name: "Toast POS",
@@ -701,31 +873,128 @@ function IntegrationsSection() {
       desc: gmailDesc,
       onClick: () => connectGmail.mutate(),
     },
-    { name: "Square", cat: "Payments", status: "Connected", desc: "Card processing & online ordering." },
-    { name: "QuickBooks Online", cat: "Accounting", status: "Connected", desc: "Pushes invoices, sales, payroll exports." },
-    { name: "Mailchimp", cat: "Email", status: "Connected", desc: "Sync segments and send campaigns." },
-    { name: "Twilio", cat: "SMS", status: "Connected", desc: "Outbound SMS campaigns & alerts." },
-    { name: "7shifts", cat: "Scheduling", status: "Available", desc: "Import shifts and labor data." },
-    { name: "Resy", cat: "Reservations", status: "Available", desc: "Sync reservation activity." },
-    { name: "Google Business", cat: "Listings", status: "Connected", desc: "Hours, menu, reviews." },
-    { name: "Yelp", cat: "Reviews", status: "Connected", desc: "Pull reviews into the inbox." },
-    { name: "Slack", cat: "Notifications", status: "Available", desc: "Route alerts to channels." },
-    { name: "Stripe", cat: "Payments", status: "Available", desc: "Gift cards & online sales." },
+    {
+      name: "Square",
+      cat: "Payments",
+      status: "Not built",
+      desc: "Card processing & online ordering.",
+    },
+    {
+      name: "QuickBooks Online",
+      cat: "Accounting",
+      status: "Not built",
+      desc: "Pushes invoices, sales, payroll exports.",
+    },
+    {
+      name: "Mailchimp",
+      cat: "Email",
+      status: "Not built",
+      desc: "Sync segments and send campaigns.",
+    },
+    { name: "Twilio", cat: "SMS", status: "Not built", desc: "Outbound SMS campaigns & alerts." },
+    {
+      name: "7shifts",
+      cat: "Scheduling",
+      status: "Not built",
+      desc: "Import shifts and labor data.",
+    },
+    { name: "Resy", cat: "Reservations", status: "Not built", desc: "Sync reservation activity." },
+    {
+      name: "Google Business",
+      cat: "Listings",
+      status: "Not built",
+      desc: "Hours, menu, reviews.",
+    },
+    { name: "Yelp", cat: "Reviews", status: "Not built", desc: "Pull reviews into the inbox." },
+    { name: "Slack", cat: "Notifications", status: "Not built", desc: "Route alerts to channels." },
+    { name: "Stripe", cat: "Payments", status: "Not built", desc: "Gift cards & online sales." },
   ];
 
   const vendors: AppRow[] = [
-    { name: "Sysco", cat: "Broadline foodservice", status: "Connected", desc: "Live catalog, pricing, EDI 850/810.", channel: "EDI", meta: "Acct #44-218 · orders by 4pm" },
-    { name: "US Foods", cat: "Broadline foodservice", status: "Connected", desc: "MOXē API for catalog, orders, invoices.", channel: "API", meta: "Acct #US-90412 · 24h lead" },
-    { name: "Southern Glazer's", cat: "Wine & spirits", status: "Connected", desc: "eXchange portal sync + invoice PDFs.", channel: "Portal", meta: "Lic. #LBD-7781 · Mon/Thu delivery" },
-    { name: "Columbia Distributing", cat: "Beer & beverage", status: "Connected", desc: "Auto-send POs by email with PDF attachment.", channel: "Email PO", meta: "rep.bali@columbiadist.com" },
-    { name: "Restaurant Depot", cat: "Cash & carry", status: "Action needed", desc: "Cart export via Instacart Business — reconnect.", channel: "Portal", meta: "Token expired 2 days ago" },
-    { name: "Performance Food Group", cat: "Broadline foodservice", status: "Available", desc: "PFG Customer API for catalog & invoices.", channel: "API" },
-    { name: "Reinhart (RDC)", cat: "Broadline foodservice", status: "Available", desc: "EDI 850/855/810 over SFTP.", channel: "EDI" },
-    { name: "Breakthru Beverage", cat: "Wine & spirits", status: "Available", desc: "Portal scrape + email confirmations.", channel: "Portal" },
-    { name: "RNDC", cat: "Wine & spirits", status: "Available", desc: "eRNDC catalog + email PO fallback.", channel: "Email PO" },
-    { name: "Local Produce Co-op", cat: "Produce", status: "Connected", desc: "CSV order sheet emailed nightly.", channel: "CSV", meta: "orders@localcoop.com" },
-    { name: "Bimbo Bakeries", cat: "Bakery", status: "Available", desc: "Standing order via email.", channel: "Email PO" },
-    { name: "Edward Don & Co.", cat: "Smallwares", status: "Available", desc: "B2B portal for non-food supplies.", channel: "Portal" },
+    {
+      name: "Sysco",
+      cat: "Broadline foodservice",
+      status: "Not built",
+      desc: "Live catalog, pricing, EDI 850/810.",
+      channel: "EDI",
+    },
+    {
+      name: "US Foods",
+      cat: "Broadline foodservice",
+      status: "Not built",
+      desc: "MOXē API for catalog, orders, invoices.",
+      channel: "API",
+    },
+    {
+      name: "Southern Glazer's",
+      cat: "Wine & spirits",
+      status: "Not built",
+      desc: "eXchange portal sync + invoice PDFs.",
+      channel: "Portal",
+    },
+    {
+      name: "Columbia Distributing",
+      cat: "Beer & beverage",
+      status: "Not built",
+      desc: "Auto-send POs by email with PDF attachment.",
+      channel: "Email PO",
+    },
+    {
+      name: "Restaurant Depot",
+      cat: "Cash & carry",
+      status: "Not built",
+      desc: "Cart export via Instacart Business.",
+      channel: "Portal",
+    },
+    {
+      name: "Performance Food Group",
+      cat: "Broadline foodservice",
+      status: "Not built",
+      desc: "PFG Customer API for catalog & invoices.",
+      channel: "API",
+    },
+    {
+      name: "Reinhart (RDC)",
+      cat: "Broadline foodservice",
+      status: "Not built",
+      desc: "EDI 850/855/810 over SFTP.",
+      channel: "EDI",
+    },
+    {
+      name: "Breakthru Beverage",
+      cat: "Wine & spirits",
+      status: "Not built",
+      desc: "Portal scrape + email confirmations.",
+      channel: "Portal",
+    },
+    {
+      name: "RNDC",
+      cat: "Wine & spirits",
+      status: "Not built",
+      desc: "eRNDC catalog + email PO fallback.",
+      channel: "Email PO",
+    },
+    {
+      name: "Local Produce Co-op",
+      cat: "Produce",
+      status: "Not built",
+      desc: "CSV order sheet emailed nightly.",
+      channel: "CSV",
+    },
+    {
+      name: "Bimbo Bakeries",
+      cat: "Bakery",
+      status: "Not built",
+      desc: "Standing order via email.",
+      channel: "Email PO",
+    },
+    {
+      name: "Edward Don & Co.",
+      cat: "Smallwares",
+      status: "Not built",
+      desc: "B2B portal for non-food supplies.",
+      channel: "Portal",
+    },
   ];
 
   return (
@@ -755,6 +1024,11 @@ function IntegrationsSection() {
         </div>
       )}
 
+      <PlaceholderBanner>
+        Toast POS and Gmail are the only real, live integrations. Everything else below is shown as
+        a roadmap of what could be connected later — none of it is wired up.
+      </PlaceholderBanner>
+
       <IntegrationGroup
         title="Platform & operations"
         subtitle="POS, payments, accounting, marketing, and listings."
@@ -766,7 +1040,13 @@ function IntegrationsSection() {
         subtitle="How the Ordering agent reaches each supplier — EDI, API, portal, or email PO. Powers auto-send from the Inventory cart and invoice ingestion."
         apps={vendors}
         action={
-          <Button size="sm" variant="outline" className="gap-2 rounded-full">
+          <Button
+            size="sm"
+            variant="outline"
+            className="gap-2 rounded-full"
+            disabled
+            title="Not built yet"
+          >
             <Plus className="h-3.5 w-3.5" /> Add vendor integration
           </Button>
         }
@@ -819,9 +1099,9 @@ function ToastConnectSheet({
             <Plug className="h-5 w-5" /> Connect Toast POS
           </SheetTitle>
           <SheetDescription>
-            Generate a Client ID and Client Secret in Toast's admin portal (Toast Web →
-            Integrations → API Access — no partner approval needed for your own restaurant),
-            then paste them here.
+            Generate a Client ID and Client Secret in Toast's admin portal (Toast Web → Integrations
+            → API Access — no partner approval needed for your own restaurant), then paste them
+            here.
           </SheetDescription>
         </SheetHeader>
 
@@ -898,7 +1178,7 @@ function IntegrationGroup({
       </div>
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {apps.map((a) => (
-          <Card key={a.name} className="p-4">
+          <Card key={a.name} className={cn("p-4", a.status === "Not built" && "opacity-70")}>
             <div className="flex items-start justify-between gap-3">
               <div className="grid h-10 w-10 place-items-center rounded-lg bg-muted text-foreground/70">
                 <Globe className="h-4 w-4" />
@@ -908,6 +1188,7 @@ function IntegrationGroup({
                 className={cn(
                   a.status === "Connected" && "bg-primary/10 text-primary hover:bg-primary/10",
                   a.status === "Action needed" && "border-destructive/40 text-destructive",
+                  a.status === "Not built" && "border-muted-foreground/30 text-muted-foreground",
                 )}
               >
                 {a.status === "Connected" && <Check className="mr-1 h-3 w-3" />}
@@ -922,7 +1203,9 @@ function IntegrationGroup({
                 </span>
               )}
             </div>
-            <div className="text-[11px] uppercase tracking-wider text-muted-foreground">{a.cat}</div>
+            <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
+              {a.cat}
+            </div>
             <p className="mt-2 text-xs text-muted-foreground">{a.desc}</p>
             {a.meta && <p className="mt-1 text-[11px] text-muted-foreground/80">{a.meta}</p>}
             <Separator className="my-3" />
@@ -932,12 +1215,15 @@ function IntegrationGroup({
               className="w-full"
               onClick={a.onClick}
               disabled={!a.onClick}
+              title={!a.onClick ? "Not built yet" : undefined}
             >
               {a.status === "Connected"
                 ? "Manage"
                 : a.status === "Action needed"
                   ? "Reconnect"
-                  : "Connect"}
+                  : a.status === "Not built"
+                    ? "Not built yet"
+                    : "Connect"}
             </Button>
           </Card>
         ))}
@@ -950,12 +1236,19 @@ function IntegrationGroup({
 
 function ApiSection() {
   const keys = [
-    { name: "Production", key: "tp_live_••••••••••••rA9k", created: "Mar 14, 2026", lastUsed: "2 min ago" },
-    { name: "Staging", key: "tp_test_••••••••••••8xQp", created: "Feb 02, 2026", lastUsed: "1 day ago" },
+    {
+      name: "Production",
+      key: "tp_live_••••••••••••rA9k",
+      created: "Mar 14, 2026",
+      lastUsed: "2 min ago",
+    },
   ];
   const hooks = [
-    { url: "https://hooks.thrasherspub.com/orders", events: "order.created, order.refunded", status: "Active" },
-    { url: "https://ops.zapier.com/hooks/abc123", events: "review.new", status: "Active" },
+    {
+      url: "https://hooks.thrasherspub.com/orders",
+      events: "order.created, order.refunded",
+      status: "Active",
+    },
   ];
   return (
     <div className="space-y-6">
@@ -963,13 +1256,12 @@ function ApiSection() {
         eyebrow="Workspace"
         title="API & webhooks"
         description="Programmatic access for developers and partners."
-        action={
-          <Button size="sm" className="gap-2 rounded-full">
-            <Plus className="h-3.5 w-3.5" /> New API key
-          </Button>
-        }
       />
-      <Card className="p-6">
+      <PlaceholderBanner>
+        This app has no public API today — there's nowhere for a real key to authenticate against.
+        The table below is illustrative only.
+      </PlaceholderBanner>
+      <Card className="p-6 opacity-60">
         <div className="text-sm font-medium">API keys</div>
         <Table className="mt-3">
           <TableHeader>
@@ -990,8 +1282,17 @@ function ApiSection() {
                 <TableCell className="text-muted-foreground">{k.lastUsed}</TableCell>
                 <TableCell>
                   <div className="flex justify-end gap-1">
-                    <Button size="icon" variant="ghost" className="h-8 w-8"><Copy className="h-3.5 w-3.5" /></Button>
-                    <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive"><Trash2 className="h-3.5 w-3.5" /></Button>
+                    <Button size="icon" variant="ghost" className="h-8 w-8" disabled>
+                      <Copy className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-8 w-8 text-destructive"
+                      disabled
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
                   </div>
                 </TableCell>
               </TableRow>
@@ -1000,10 +1301,10 @@ function ApiSection() {
         </Table>
       </Card>
 
-      <Card className="p-6">
+      <Card className="p-6 opacity-60">
         <div className="flex items-center justify-between">
           <div className="text-sm font-medium">Webhooks</div>
-          <Button size="sm" variant="outline" className="gap-2">
+          <Button size="sm" variant="outline" className="gap-2" disabled>
             <Plus className="h-3.5 w-3.5" /> Add endpoint
           </Button>
         </div>
@@ -1018,11 +1319,18 @@ function ApiSection() {
                 <div className="mt-0.5 text-xs text-muted-foreground">{h.events}</div>
               </div>
               <div className="flex items-center gap-2">
-                <Badge variant="secondary" className="bg-primary/10 text-primary hover:bg-primary/10">
+                <Badge
+                  variant="secondary"
+                  className="bg-primary/10 text-primary hover:bg-primary/10"
+                >
                   {h.status}
                 </Badge>
-                <Button size="icon" variant="ghost" className="h-8 w-8"><Pencil className="h-3.5 w-3.5" /></Button>
-                <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive"><Trash2 className="h-3.5 w-3.5" /></Button>
+                <Button size="icon" variant="ghost" className="h-8 w-8" disabled>
+                  <Pencil className="h-3.5 w-3.5" />
+                </Button>
+                <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive" disabled>
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
               </div>
             </div>
           ))}
@@ -1035,11 +1343,7 @@ function ApiSection() {
 /* ---------- Billing ---------- */
 
 function BillingSection() {
-  const invoices = [
-    { id: "INV-2026-0006", date: "Jun 01, 2026", amt: "$249.00", status: "Paid" },
-    { id: "INV-2026-0005", date: "May 01, 2026", amt: "$249.00", status: "Paid" },
-    { id: "INV-2026-0004", date: "Apr 01, 2026", amt: "$249.00", status: "Paid" },
-  ];
+  const invoices = [{ id: "INV-2026-0006", date: "Jun 01, 2026", amt: "$249.00", status: "Paid" }];
   return (
     <div className="space-y-6">
       <SectionHeader
@@ -1047,22 +1351,34 @@ function BillingSection() {
         title="Billing & plan"
         description="Manage subscription, payment method, and invoices."
       />
-      <Card className="overflow-hidden">
+      <PlaceholderBanner>
+        No Stripe subscription is wired up — the restaurants table has a stripe_customer_id column
+        but nothing populates or reads it yet. Everything below is a mockup.
+      </PlaceholderBanner>
+      <Card className="overflow-hidden opacity-60">
         <div className="bg-gradient-to-br from-primary/15 via-card to-card p-6">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
-              <div className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground">Current plan</div>
+              <div className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground">
+                Current plan
+              </div>
               <div className="mt-1 flex items-center gap-2">
                 <h3 className="font-display text-2xl">Hospitality Pro</h3>
-                <Badge variant="secondary" className="bg-primary/15 text-primary">Active</Badge>
+                <Badge variant="secondary" className="bg-primary/15 text-primary">
+                  Example
+                </Badge>
               </div>
               <p className="mt-1 text-sm text-muted-foreground">
                 $249/month · billed monthly · renews Jul 01, 2026
               </p>
             </div>
             <div className="flex gap-2">
-              <Button size="sm" variant="outline">Change plan</Button>
-              <Button size="sm" variant="ghost">Cancel</Button>
+              <Button size="sm" variant="outline" disabled>
+                Change plan
+              </Button>
+              <Button size="sm" variant="ghost" disabled>
+                Cancel
+              </Button>
             </div>
           </div>
           <Separator className="my-5" />
@@ -1074,20 +1390,24 @@ function BillingSection() {
         </div>
       </Card>
 
-      <Card className="p-6">
+      <Card className="p-6 opacity-60">
         <div className="flex items-center justify-between">
           <div>
             <div className="text-sm font-medium">Payment method</div>
-            <div className="mt-1 text-xs text-muted-foreground">Visa ending in 4242 · expires 09/27</div>
+            <div className="mt-1 text-xs text-muted-foreground">
+              Visa ending in 4242 · expires 09/27
+            </div>
           </div>
-          <Button size="sm" variant="outline">Update</Button>
+          <Button size="sm" variant="outline" disabled>
+            Update
+          </Button>
         </div>
       </Card>
 
-      <Card className="p-6">
+      <Card className="p-6 opacity-60">
         <div className="flex items-center justify-between">
           <div className="text-sm font-medium">Invoices</div>
-          <Button size="sm" variant="ghost" className="gap-2">
+          <Button size="sm" variant="ghost" className="gap-2" disabled>
             <Download className="h-3.5 w-3.5" /> Export all
           </Button>
         </div>
@@ -1108,12 +1428,15 @@ function BillingSection() {
                 <TableCell className="text-muted-foreground">{iv.date}</TableCell>
                 <TableCell>{iv.amt}</TableCell>
                 <TableCell>
-                  <Badge variant="secondary" className="bg-primary/10 text-primary hover:bg-primary/10">
+                  <Badge
+                    variant="secondary"
+                    className="bg-primary/10 text-primary hover:bg-primary/10"
+                  >
                     {iv.status}
                   </Badge>
                 </TableCell>
                 <TableCell className="text-right">
-                  <Button size="sm" variant="ghost" className="gap-1">
+                  <Button size="sm" variant="ghost" className="gap-1" disabled>
                     <Download className="h-3.5 w-3.5" /> PDF
                   </Button>
                 </TableCell>
@@ -1153,66 +1476,73 @@ function TaxSection() {
         title="Tax & compliance"
         description="Sales tax rates, registration IDs, and 1099/W-9 records used across invoicing."
       />
-      <Card className="p-6">
+      <PlaceholderBanner>
+        No tax-settings table or document storage exists yet — nothing below is saved.
+      </PlaceholderBanner>
+      <Card className="p-6 opacity-60">
         <div className="grid gap-5 md:grid-cols-2">
           <Field label="Federal EIN">
-            <Input defaultValue="83-1248901" />
+            <Input defaultValue="83-1248901" disabled />
           </Field>
           <Field label="State sales tax ID">
-            <Input defaultValue="DC-2018-4421" />
+            <Input defaultValue="DC-2018-4421" disabled />
           </Field>
           <Field label="Default sales tax rate">
-            <Input defaultValue="10.00%" />
+            <Input defaultValue="10.00%" disabled />
           </Field>
           <Field label="Liquor tax rate">
-            <Input defaultValue="10.25%" />
+            <Input defaultValue="10.25%" disabled />
           </Field>
           <Field label="Tax inclusive pricing">
-            <Select defaultValue="exclusive">
-              <SelectTrigger><SelectValue /></SelectTrigger>
+            <Select defaultValue="exclusive" disabled>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
               <SelectContent>
                 <SelectItem value="exclusive">Tax added at checkout</SelectItem>
-                <SelectItem value="inclusive">Tax included in menu price</SelectItem>
               </SelectContent>
             </Select>
           </Field>
           <Field label="Fiscal year start">
-            <Select defaultValue="jan">
-              <SelectTrigger><SelectValue /></SelectTrigger>
+            <Select defaultValue="jan" disabled>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
               <SelectContent>
                 <SelectItem value="jan">January</SelectItem>
-                <SelectItem value="jul">July</SelectItem>
-                <SelectItem value="oct">October</SelectItem>
               </SelectContent>
             </Select>
           </Field>
         </div>
       </Card>
 
-      <Card className="p-6">
+      <Card className="p-6 opacity-60">
         <SectionHeader
           title="Documents"
           description="Stored W-9s, resale certificates, and health permits."
           action={
-            <Button size="sm" variant="outline" className="gap-2">
+            <Button size="sm" variant="outline" className="gap-2" disabled>
               <Upload className="h-3.5 w-3.5" /> Upload
             </Button>
           }
         />
         <div className="mt-4 space-y-2">
-          {[
-            { name: "W-9 — Thrasher's Pub LLC.pdf", date: "Jan 12, 2026" },
-            { name: "DC Resale Certificate 2026.pdf", date: "Jan 15, 2026" },
-            { name: "Health Permit — H Street.pdf", date: "Mar 02, 2026" },
-          ].map((d) => (
-            <div key={d.name} className="flex items-center justify-between rounded-lg border border-border/60 bg-card/50 px-4 py-3">
+          {[{ name: "W-9 — example.pdf", date: "Jan 12, 2026" }].map((d) => (
+            <div
+              key={d.name}
+              className="flex items-center justify-between rounded-lg border border-border/60 bg-card/50 px-4 py-3"
+            >
               <div>
                 <div className="text-sm font-medium">{d.name}</div>
                 <div className="text-xs text-muted-foreground">Uploaded {d.date}</div>
               </div>
               <div className="flex gap-1">
-                <Button size="icon" variant="ghost" className="h-8 w-8"><Download className="h-3.5 w-3.5" /></Button>
-                <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive"><Trash2 className="h-3.5 w-3.5" /></Button>
+                <Button size="icon" variant="ghost" className="h-8 w-8" disabled>
+                  <Download className="h-3.5 w-3.5" />
+                </Button>
+                <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive" disabled>
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
               </div>
             </div>
           ))}
@@ -1224,37 +1554,116 @@ function TaxSection() {
 
 /* ---------- Security ---------- */
 
+function ChangePasswordCard() {
+  const [newPassword, setNewPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
+
+  const mismatch = confirm.length > 0 && newPassword !== confirm;
+  const tooShort = newPassword.length > 0 && newPassword.length < 6;
+  const canSubmit = newPassword.length >= 6 && newPassword === confirm && !pending;
+
+  async function handleSubmit() {
+    if (!canSubmit) return;
+    setPending(true);
+    setError(null);
+    setSuccess(false);
+    const { error: updateError } = await supabase.auth.updateUser({ password: newPassword });
+    setPending(false);
+    if (updateError) {
+      setError(updateError.message);
+      return;
+    }
+    setSuccess(true);
+    setNewPassword("");
+    setConfirm("");
+  }
+
+  return (
+    <Row title="Password" description="Set a new password for this account.">
+      <div className="w-64 space-y-2">
+        <Input
+          type="password"
+          placeholder="New password"
+          value={newPassword}
+          onChange={(e) => {
+            setNewPassword(e.target.value);
+            setSuccess(false);
+          }}
+          autoComplete="new-password"
+        />
+        <Input
+          type="password"
+          placeholder="Confirm new password"
+          value={confirm}
+          onChange={(e) => {
+            setConfirm(e.target.value);
+            setSuccess(false);
+          }}
+          autoComplete="new-password"
+        />
+        {tooShort && <p className="text-xs text-destructive">At least 6 characters.</p>}
+        {mismatch && <p className="text-xs text-destructive">Passwords don't match.</p>}
+        {error && <p className="text-xs text-destructive">{error}</p>}
+        {success && <p className="text-xs text-emerald-700">Password updated.</p>}
+        <Button size="sm" disabled={!canSubmit} onClick={handleSubmit}>
+          {pending ? "Saving…" : "Change password"}
+        </Button>
+      </div>
+    </Row>
+  );
+}
+
 function SecuritySection() {
-  const sessions = [
-    { device: "MacBook Pro · Safari", loc: "Washington, DC", last: "Active now", current: true },
-    { device: "iPhone 15 · Lovable app", loc: "Washington, DC", last: "1 hour ago", current: false },
-    { device: "Windows · Chrome", loc: "Arlington, VA", last: "Yesterday", current: false },
-  ];
+  const { user } = useAuth();
+  const [signOutPending, setSignOutPending] = useState(false);
+  const [signOutError, setSignOutError] = useState<string | null>(null);
+
+  async function handleSignOutAll() {
+    setSignOutPending(true);
+    setSignOutError(null);
+    const { error } = await supabase.auth.signOut({ scope: "global" });
+    if (error) {
+      setSignOutError(error.message);
+      setSignOutPending(false);
+    }
+    // On success the app's own onAuthStateChange listener (auth-context.tsx)
+    // picks up the cleared session and the root route guard redirects
+    // to /login — no manual navigation needed here.
+  }
+
   return (
     <div className="space-y-6">
       <SectionHeader
         eyebrow="Account"
         title="Security"
-        description="Protect your account and review who has access."
+        description={user?.email ? `Signed in as ${user.email}.` : undefined}
       />
       <Card className="divide-y divide-border/60 p-6 py-0">
-        <Row title="Two-factor authentication" description="Require a 6-digit code from an authenticator app at sign-in.">
-          <Switch defaultChecked />
+        <Row
+          title="Two-factor authentication"
+          description="Not built yet — requires a real TOTP enrollment flow."
+        >
+          <Switch disabled />
         </Row>
-        <Row title="Single sign-on (SSO)" description="SAML / OIDC for your organization. Available on Hospitality Pro+.">
-          <Button size="sm" variant="outline">Configure</Button>
+        <Row
+          title="Single sign-on (SSO)"
+          description="Not built yet — SAML / OIDC needs real IdP configuration."
+        >
+          <Button size="sm" variant="outline" disabled>
+            Configure
+          </Button>
         </Row>
-        <Row title="Password" description="Last changed 42 days ago.">
-          <Button size="sm" variant="outline">Change</Button>
-        </Row>
-        <Row title="Session timeout" description="Automatically sign out after inactivity.">
-          <Select defaultValue="60">
-            <SelectTrigger className="w-32"><SelectValue /></SelectTrigger>
+        <ChangePasswordCard />
+        <Row title="Session timeout" description="Not built yet — nothing currently enforces this.">
+          <Select defaultValue="60" disabled>
+            <SelectTrigger className="w-32">
+              <SelectValue />
+            </SelectTrigger>
             <SelectContent>
-              <SelectItem value="15">15 minutes</SelectItem>
               <SelectItem value="60">1 hour</SelectItem>
-              <SelectItem value="480">8 hours</SelectItem>
-              <SelectItem value="0">Never</SelectItem>
             </SelectContent>
           </Select>
         </Row>
@@ -1262,25 +1671,27 @@ function SecuritySection() {
 
       <Card className="p-6">
         <div className="flex items-center justify-between">
-          <div className="text-sm font-medium">Active sessions</div>
-          <Button size="sm" variant="ghost" className="text-destructive">Sign out all</Button>
+          <div>
+            <div className="text-sm font-medium">Sign out everywhere</div>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Ends this account's session on every device, including this one.
+            </p>
+          </div>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="text-destructive"
+            disabled={signOutPending}
+            onClick={handleSignOutAll}
+          >
+            {signOutPending ? "Signing out…" : "Sign out all"}
+          </Button>
         </div>
-        <div className="mt-3 space-y-2">
-          {sessions.map((s) => (
-            <div key={s.device} className="flex items-center justify-between rounded-lg border border-border/60 bg-card/50 px-4 py-3">
-              <div>
-                <div className="flex items-center gap-2 text-sm font-medium">
-                  {s.device}
-                  {s.current && (
-                    <Badge variant="secondary" className="bg-primary/10 text-primary hover:bg-primary/10">This device</Badge>
-                  )}
-                </div>
-                <div className="text-xs text-muted-foreground">{s.loc} · {s.last}</div>
-              </div>
-              {!s.current && <Button size="sm" variant="ghost">Revoke</Button>}
-            </div>
-          ))}
-        </div>
+        {signOutError && <p className="mt-2 text-xs text-destructive">{signOutError}</p>}
+        <p className="mt-3 text-xs text-muted-foreground">
+          A real per-device session list isn't built — Supabase doesn't expose that to the client
+          SDK without an admin API.
+        </p>
       </Card>
 
       <Card className="border-destructive/30 p-6">
@@ -1288,14 +1699,18 @@ function SecuritySection() {
           <div>
             <div className="text-sm font-medium text-destructive">Danger zone</div>
             <p className="mt-1 text-xs text-muted-foreground">
-              Export all data or permanently delete this workspace. This cannot be undone.
+              Not built yet. Deleting a workspace means cascading through every table in a
+              multi-tenant schema — real, deliberate design work before this should ever be enabled,
+              not a quick add.
             </p>
           </div>
           <div className="flex gap-2">
-            <Button size="sm" variant="outline" className="gap-2">
+            <Button size="sm" variant="outline" className="gap-2" disabled>
               <ExternalLink className="h-3.5 w-3.5" /> Export data
             </Button>
-            <Button size="sm" variant="destructive">Delete workspace</Button>
+            <Button size="sm" variant="destructive" disabled>
+              Delete workspace
+            </Button>
           </div>
         </div>
       </Card>
