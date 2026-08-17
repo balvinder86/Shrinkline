@@ -1007,6 +1007,21 @@ const TOOLS: Record<string, [(input: any, ctx: Ctx) => Promise<unknown>, string]
   get_ai_recommendations: [toolGetAiRecommendations, "pnl"],
 };
 
+// Friendly labels for the "Checking X…" status the client shows while
+// a tool call is in flight (streaming has no visible text at that
+// point otherwise — tool_use turns are silent from the model itself).
+const TOOL_LABELS: Record<string, string> = {
+  get_pnl_summary: "your P&L",
+  get_food_cost_variance: "cost variance",
+  get_inventory_variance: "inventory variance",
+  get_vendor_spend: "vendor spend",
+  get_ingredient_price_trends: "price trends",
+  get_labor_cost_summary: "labor cost",
+  search_ingredient: "ingredient data",
+  get_top_menu_items: "your top sellers",
+  get_ai_recommendations: "recommendations",
+};
+
 const TOOL_DEFINITIONS = [
   {
     name: "get_pnl_summary",
@@ -1142,7 +1157,8 @@ Rules:
 - If the user doesn't specify a date range, the tool defaults to the last 30 days — say that plainly in your answer (e.g. "over the last 30 days").
 - If a tool result includes a data-completeness caveat (itemsMissingRecipeCount, excludedIngredientCount, an "insufficient_counts" status, etc.), mention it rather than presenting the number as the complete picture.
 - If a tool result has error: "not_permitted", tell the user plainly they don't have access to that data and suggest asking an owner/manager to grant it — don't try another tool to work around it.
-- Keep answers short and conversational — a couple of sentences or a short "-" bullet list. No headers, no tables, no heavy markdown.
+- Keep answers short and conversational — a couple of sentences or a short "-" bullet list. No headers, no tables. Plain sentences only — no **bold**, no other markdown emphasis. The one exception is page links, exactly as described below.
+- Never narrate what you're about to do ("Let me check that", "I'll pull that up", "One moment") — go straight to calling tools silently and speak once, when you actually have the real answer. Your response streams to the user live, so a "let me look" preamble just reads as filler, not helpfulness.
 - You can only answer questions about this restaurant's own operational data. You cannot take actions (log waste, change prices, edit recipes, etc.) — if asked to DO something rather than answer a question, say so.
 - All dollar amounts in tool results are in cents — always convert to dollars in your answer.
 - When the user asks for suggestions, recommendations, or "what should I do", call get_ai_recommendations FIRST and lead your answer with those (they're the restaurant's real curated flags, generated nightly) — then, if a tool result you already pulled clearly shows something worth acting on (a big variance, a price spike, a shrinkage number), add 1-2 short, concrete, specific-to-this-data suggestions of your own. Never invent generic restaurant advice unconnected to a real number you just pulled.
@@ -1167,6 +1183,64 @@ AVAILABLE PAGES:
 - /marketing — Marketing: campaigns across email/SMS/social/loyalty/ads
 - /loyalty — Loyalty: program tiers, rewards, referrals
 - /scheduling — Scheduling: staff scheduling`;
+
+// ------------------------------------------------------------------
+// SSE — a minimal server-sent-events line parser, used to read
+// Anthropic's own streaming response. Each event is "event: <type>"
+// (optional, defaults to "message") + one or more "data: <json>"
+// lines, terminated by a blank line.
+// ------------------------------------------------------------------
+
+async function* iterateSSE(
+  body: ReadableStream<Uint8Array>,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+): AsyncGenerator<{ event: string; data: any }> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let sepIndex: number;
+      while ((sepIndex = buffer.indexOf("\n\n")) !== -1) {
+        const rawEvent = buffer.slice(0, sepIndex);
+        buffer = buffer.slice(sepIndex + 2);
+        let eventType = "message";
+        const dataLines: string[] = [];
+        for (const line of rawEvent.split("\n")) {
+          if (line.startsWith("event:")) eventType = line.slice(6).trim();
+          else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
+        }
+        if (dataLines.length === 0) continue;
+        try {
+          yield { event: eventType, data: JSON.parse(dataLines.join("\n")) };
+        } catch {
+          // malformed chunk — skip rather than crash the whole stream
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+// A single accumulating content block reconstructed from stream
+// deltas — shape matches what the non-streaming API would have
+// returned in body.content, so it can be pushed straight back into
+// anthropicMessages exactly like the old non-streaming loop did.
+type StreamBlock = {
+  type: string;
+  text?: string;
+  id?: string;
+  name?: string;
+  input?: unknown;
+  thinking?: string;
+  signature?: string;
+  data?: string;
+  _partialJson?: string;
+};
 
 // ------------------------------------------------------------------
 // Handler
@@ -1248,100 +1322,175 @@ Deno.serve(async (req) => {
       content: m.content,
     }));
 
-    let finalText: string | null = null;
-    for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
-      const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "x-api-key": ANTHROPIC_API_KEY,
-          "anthropic-version": "2023-06-01",
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: "claude-opus-5",
-          max_tokens: 8192,
-          thinking: { type: "adaptive" },
-          system: SYSTEM_PROMPT,
-          tools: TOOL_DEFINITIONS,
-          messages: anthropicMessages,
-        }),
-      });
-      if (!anthropicRes.ok) {
-        const errBody = await anthropicRes.text().catch(() => "");
-        return json(
-          { ok: false, error: `Claude API error ${anthropicRes.status}: ${errBody}` },
-          502,
-        );
-      }
-      const body = await anthropicRes.json();
-      const content: {
-        type: string;
-        text?: string;
-        id?: string;
-        name?: string;
-        input?: unknown;
-      }[] = body.content ?? [];
-
-      if (body.stop_reason !== "tool_use") {
-        finalText = content
-          .filter((b) => b.type === "text")
-          .map((b) => b.text)
-          .join("");
-        break;
-      }
-
-      // Preserve the FULL assistant content array (including any
-      // thinking blocks) verbatim — required for extended-thinking +
-      // tool-use multi-turn continuity.
-      anthropicMessages.push({ role: "assistant", content });
-
-      const toolResults = [];
-      for (const block of content) {
-        if (block.type !== "tool_use") continue;
-        const entry = TOOLS[block.name!];
-        let resultPayload: unknown;
-        if (!entry) {
-          resultPayload = { error: "unknown_tool" };
-        } else {
-          const [impl, requiredPermission] = entry;
-          if (!hasAccess(membership, requiredPermission)) {
-            resultPayload = PERMISSION_DENIED(requiredPermission);
-          } else {
-            try {
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              resultPayload = await impl((block.input ?? {}) as any, ctx);
-            } catch (e) {
-              resultPayload = { error: "tool_failed", message: String(e) };
-            }
+    // From here on the response is committed to SSE — everything
+    // above this point (auth, validation, membership) can still fail
+    // with a normal HTTP status; nothing below can, so it's all
+    // reported as {type:"error"} events on the stream instead.
+    const encoder = new TextEncoder();
+    const upstreamController = new AbortController();
+    const stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        function send(event: Record<string, unknown>) {
+          try {
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+          } catch {
+            // downstream already closed (client navigated away/closed
+            // the panel) — nothing left to do.
           }
         }
-        toolResults.push({
-          type: "tool_result",
-          tool_use_id: block.id,
-          content: JSON.stringify(resultPayload),
-        });
-      }
-      anthropicMessages.push({ role: "user", content: toolResults });
-    }
 
-    if (finalText == null) {
-      return json(
-        {
-          ok: false,
-          error: "Ran out of tool-call turns without a final answer — try a narrower question.",
-        },
-        502,
-      );
-    }
+        try {
+          let finalText: string | null = null;
 
-    return json(
-      {
-        ok: true,
-        reply:
-          finalText.trim() || "I wasn't able to put together an answer for that — try rephrasing.",
+          for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
+            const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
+              method: "POST",
+              signal: upstreamController.signal,
+              headers: {
+                "x-api-key": ANTHROPIC_API_KEY,
+                "anthropic-version": "2023-06-01",
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                model: "claude-opus-5",
+                max_tokens: 8192,
+                thinking: { type: "adaptive" },
+                system: SYSTEM_PROMPT,
+                tools: TOOL_DEFINITIONS,
+                messages: anthropicMessages,
+                stream: true,
+              }),
+            });
+            if (!anthropicRes.ok || !anthropicRes.body) {
+              const errBody = await anthropicRes.text().catch(() => "");
+              send({ type: "error", error: `Claude API error ${anthropicRes.status}: ${errBody}` });
+              controller.close();
+              return;
+            }
+
+            const blocks = new Map<number, StreamBlock>();
+            let stopReason: string | null = null;
+
+            for await (const evt of iterateSSE(anthropicRes.body)) {
+              if (evt.event === "content_block_start") {
+                const index = evt.data.index as number;
+                const block: StreamBlock = { ...evt.data.content_block };
+                blocks.set(index, block);
+                if (block.type === "tool_use" && block.name) {
+                  send({ type: "tool_start", label: TOOL_LABELS[block.name] ?? "your data" });
+                }
+              } else if (evt.event === "content_block_delta") {
+                const block = blocks.get(evt.data.index as number);
+                if (!block) continue;
+                const delta = evt.data.delta;
+                if (delta.type === "text_delta") {
+                  block.text = (block.text ?? "") + delta.text;
+                  send({ type: "text", text: delta.text as string });
+                } else if (delta.type === "input_json_delta") {
+                  block._partialJson = (block._partialJson ?? "") + delta.partial_json;
+                } else if (delta.type === "thinking_delta") {
+                  block.thinking = (block.thinking ?? "") + delta.thinking;
+                } else if (delta.type === "signature_delta") {
+                  block.signature = (block.signature ?? "") + delta.signature;
+                }
+              } else if (evt.event === "content_block_stop") {
+                const block = blocks.get(evt.data.index as number);
+                if (block?.type === "tool_use") {
+                  try {
+                    block.input = block._partialJson ? JSON.parse(block._partialJson) : {};
+                  } catch {
+                    block.input = {};
+                  }
+                  delete block._partialJson;
+                }
+              } else if (evt.event === "message_delta") {
+                stopReason = evt.data.delta?.stop_reason ?? stopReason;
+              }
+            }
+
+            const content = Array.from(blocks.entries())
+              .sort((a, b) => a[0] - b[0])
+              .map(([, b]) => b);
+
+            if (stopReason !== "tool_use") {
+              finalText = content
+                .filter((b) => b.type === "text")
+                .map((b) => b.text)
+                .join("");
+              break;
+            }
+
+            // Preserve the FULL assistant content array (including any
+            // thinking blocks) verbatim — required for extended-thinking
+            // + tool-use multi-turn continuity.
+            anthropicMessages.push({ role: "assistant", content });
+
+            const toolResults = [];
+            for (const block of content) {
+              if (block.type !== "tool_use") continue;
+              const entry = TOOLS[block.name!];
+              let resultPayload: unknown;
+              if (!entry) {
+                resultPayload = { error: "unknown_tool" };
+              } else {
+                const [impl, requiredPermission] = entry;
+                if (!hasAccess(membership, requiredPermission)) {
+                  resultPayload = PERMISSION_DENIED(requiredPermission);
+                } else {
+                  try {
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    resultPayload = await impl((block.input ?? {}) as any, ctx);
+                  } catch (e) {
+                    resultPayload = { error: "tool_failed", message: String(e) };
+                  }
+                }
+              }
+              toolResults.push({
+                type: "tool_result",
+                tool_use_id: block.id,
+                content: JSON.stringify(resultPayload),
+              });
+            }
+            anthropicMessages.push({ role: "user", content: toolResults });
+          }
+
+          if (finalText == null) {
+            send({
+              type: "error",
+              error: "Ran out of tool-call turns without a final answer — try a narrower question.",
+            });
+          } else if (!finalText.trim()) {
+            send({
+              type: "text",
+              text: "I wasn't able to put together an answer for that — try rephrasing.",
+            });
+          }
+          send({ type: "done" });
+          controller.close();
+        } catch (e) {
+          send({ type: "error", error: String(e) });
+          try {
+            controller.close();
+          } catch {
+            // already closed
+          }
+        }
       },
-      200,
-    );
+      cancel() {
+        // Client disconnected (closed the panel, navigated away) —
+        // stop paying for tokens it'll never see.
+        upstreamController.abort();
+      },
+    });
+
+    return new Response(stream, {
+      headers: {
+        ...CORS_HEADERS,
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+      },
+    });
   } catch (e) {
     return json({ ok: false, error: String(e) }, 500);
   }

@@ -12,7 +12,8 @@ import {
   SheetTitle,
   SheetDescription,
 } from "@/components/ui/sheet";
-import { useSendChatMessage, type ChatMessage } from "@/lib/chat/queries";
+import { streamChatMessage, type ChatMessage } from "@/lib/chat/queries";
+import { useRestaurantIds } from "@/lib/supabase/scope";
 import { cn } from "@/lib/utils";
 
 const EXAMPLE_PROMPTS = [
@@ -26,7 +27,10 @@ const EXAMPLE_PROMPTS = [
 // — per the chat edge function's system prompt (AVAILABLE PAGES). Parses
 // just that one pattern (no other markdown) and renders it as a real
 // in-app Link, closing the panel on click so the user actually lands
-// on the page rather than reading it behind an open sheet.
+// on the page rather than reading it behind an open sheet. Matches
+// against partial/still-streaming text fine — an incomplete
+// "[Recipes](/reci" simply doesn't match yet and renders as plain
+// text until the closing ")" arrives.
 const PAGE_LINK_PATTERN = /\[([^\]]+)\]\((\/[a-zA-Z0-9\-/]*)\)/g;
 
 function MessageContent({ content, onNavigate }: { content: string; onNavigate: () => void }) {
@@ -53,28 +57,70 @@ function MessageContent({ content, onNavigate }: { content: string; onNavigate: 
 }
 
 export function ChatWidget() {
+  const restaurantId = useRestaurantIds()[0];
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const send = useSendChatMessage();
+  // Non-null while a response is streaming in — the in-progress text,
+  // committed into `messages` once the stream finishes. Kept separate
+  // from `messages` so a live-updating bubble doesn't mean re-rendering
+  // (and re-diffing) the whole history on every token.
+  const [streamingText, setStreamingText] = useState<string | null>(null);
+  // "Checking your P&L…" while a tool call is in flight and no
+  // visible text has arrived yet for the current turn.
+  const [statusLabel, setStatusLabel] = useState<string | null>(null);
   const scrollBottomRef = useRef<HTMLDivElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     scrollBottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, send.isPending]);
+  }, [messages, streamingText, statusLabel]);
+
+  // Stop paying for tokens nobody's listening to if the widget itself
+  // is ever torn down mid-stream (it isn't today — mounted once at the
+  // app root — but this is the correct thing to do if that changes).
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   function submit(text: string) {
     const content = text.trim();
-    if (!content || send.isPending) return;
+    if (!content || streamingText != null || !restaurantId) return;
     setError(null);
     const next: ChatMessage[] = [...messages, { role: "user", content }];
     setMessages(next);
     setDraft("");
-    send.mutate(next, {
-      onSuccess: (reply) => setMessages((prev) => [...prev, { role: "assistant", content: reply }]),
-      onError: (e) => setError(e instanceof Error ? e.message : String(e)),
-    });
+    setStreamingText("");
+    setStatusLabel(null);
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+    let acc = "";
+
+    streamChatMessage(
+      next,
+      restaurantId,
+      (event) => {
+        if (event.type === "text") {
+          acc += event.text;
+          setStatusLabel(null);
+          setStreamingText(acc);
+        } else if (event.type === "tool_start") {
+          setStatusLabel(`Checking ${event.label}…`);
+        } else if (event.type === "error") {
+          setError(event.error);
+        }
+      },
+      controller.signal,
+    )
+      .catch((e) => {
+        if (e instanceof DOMException && e.name === "AbortError") return;
+        setError(e instanceof Error ? e.message : String(e));
+      })
+      .finally(() => {
+        setMessages((prev) => (acc ? [...prev, { role: "assistant", content: acc }] : prev));
+        setStreamingText(null);
+        setStatusLabel(null);
+      });
   }
 
   return (
@@ -100,7 +146,7 @@ export function ChatWidget() {
           </SheetHeader>
 
           <ScrollArea className="flex-1 px-5 py-4">
-            {messages.length === 0 ? (
+            {messages.length === 0 && streamingText == null ? (
               <div className="space-y-3">
                 <p className="text-sm text-muted-foreground">Try asking:</p>
                 {EXAMPLE_PROMPTS.map((p) => (
@@ -136,10 +182,14 @@ export function ChatWidget() {
                     </div>
                   </div>
                 ))}
-                {send.isPending && (
+                {streamingText != null && (
                   <div className="flex justify-start">
-                    <div className="max-w-[85%] rounded-2xl bg-muted px-3.5 py-2 text-sm text-muted-foreground">
-                      Thinking…
+                    <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl bg-muted px-3.5 py-2 text-sm text-foreground">
+                      {statusLabel && !streamingText ? (
+                        <span className="text-muted-foreground">{statusLabel}</span>
+                      ) : (
+                        <MessageContent content={streamingText} onNavigate={() => setOpen(false)} />
+                      )}
                     </div>
                   </div>
                 )}
@@ -173,7 +223,7 @@ export function ChatWidget() {
               <Button
                 size="icon"
                 onClick={() => submit(draft)}
-                disabled={send.isPending || !draft.trim()}
+                disabled={streamingText != null || !draft.trim()}
                 aria-label="Send"
               >
                 <Send className="h-4 w-4" />
