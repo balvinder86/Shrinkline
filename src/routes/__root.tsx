@@ -25,6 +25,7 @@ import { RestaurantProvider } from "@/lib/restaurant-context";
 import { DateRangeProvider } from "@/lib/date-range-context";
 import { LanguageProvider } from "@/lib/i18n/language-context";
 import { hasAccess, useCurrentMembership, ROUTE_PERMISSION } from "@/lib/permissions";
+import { ChatWidget } from "@/components/chat/ChatWidget";
 import { ShieldOff } from "lucide-react";
 
 function NotFoundComponent() {
@@ -224,6 +225,10 @@ function AuthGate() {
           <RouteGuard pathname={pathname} />
         </SidebarInset>
       </div>
+      {/* Mounted once here (not per-page) so its conversation state
+          survives client-side navigation between pages — only present
+          for authenticated users, never on the login page above. */}
+      <ChatWidget />
     </SidebarProvider>
   );
 }
