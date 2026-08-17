@@ -2,7 +2,6 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
 import {
   Building2,
-  Clock,
   MapPin,
   Bell,
   CreditCard,
@@ -79,7 +78,6 @@ export const Route = createFileRoute("/settings")({
 
 type SectionId =
   | "profile"
-  | "hours"
   | "locations"
   | "notifications"
   | "integrations"
@@ -91,7 +89,6 @@ type SectionId =
 
 const SECTIONS: { id: SectionId; label: string; icon: typeof Building2; group: string }[] = [
   { id: "profile", label: "Restaurant profile", icon: Building2, group: "Business" },
-  { id: "hours", label: "Hours of operation", icon: Clock, group: "Business" },
   { id: "locations", label: "Locations", icon: MapPin, group: "Business" },
   { id: "branding", label: "Branding", icon: Palette, group: "Business" },
   { id: "notifications", label: "Notifications", icon: Bell, group: "Workspace" },
@@ -157,7 +154,6 @@ function SettingsPage() {
           {/* Content */}
           <div className="min-w-0 space-y-6">
             {active === "profile" && <ProfileSection />}
-            {active === "hours" && <HoursSection />}
             {active === "locations" && <LocationsSection />}
             {active === "branding" && <BrandingSection />}
             {active === "notifications" && <NotificationsSection />}
@@ -385,127 +381,6 @@ function ProfileSection() {
               />
             </Field>
           </div>
-        </div>
-      </Card>
-    </div>
-  );
-}
-
-/* ---------- Hours ---------- */
-
-const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
-const DEFAULT_HOURS = [
-  { open: "11:30", close: "22:00", closed: false },
-  { open: "11:30", close: "22:00", closed: false },
-  { open: "11:30", close: "22:00", closed: false },
-  { open: "11:30", close: "23:00", closed: false },
-  { open: "11:30", close: "00:00", closed: false },
-  { open: "10:00", close: "00:00", closed: false },
-  { open: "10:00", close: "21:00", closed: false },
-];
-
-function HoursSection() {
-  const [hours, setHours] = useState(DEFAULT_HOURS);
-  return (
-    <div className="space-y-6">
-      <SectionHeader
-        eyebrow="Business"
-        title="Hours of operation"
-        description="No hours table exists yet — this whole section is a working mockup of what it'd look like, not a real editor."
-      />
-
-      <PlaceholderBanner>
-        Nothing here is saved. Building this for real would need a new table plus deciding whether
-        hours live per-location or per-restaurant.
-      </PlaceholderBanner>
-
-      <Card className="p-6 opacity-60">
-        <div className="space-y-1">
-          {DAYS.map((day, i) => (
-            <div
-              key={day}
-              className="grid grid-cols-[120px_1fr_auto] items-center gap-4 border-b border-border/60 py-3 last:border-0"
-            >
-              <div className="text-sm font-medium">{day}</div>
-              {hours[i].closed ? (
-                <div className="text-sm text-muted-foreground">Closed</div>
-              ) : (
-                <div className="flex items-center gap-2 text-sm">
-                  <Input
-                    type="time"
-                    value={hours[i].open}
-                    disabled
-                    onChange={(e) =>
-                      setHours((h) =>
-                        h.map((d, idx) => (idx === i ? { ...d, open: e.target.value } : d)),
-                      )
-                    }
-                    className="h-9 w-32"
-                  />
-                  <span className="text-muted-foreground">to</span>
-                  <Input
-                    type="time"
-                    value={hours[i].close}
-                    disabled
-                    onChange={(e) =>
-                      setHours((h) =>
-                        h.map((d, idx) => (idx === i ? { ...d, close: e.target.value } : d)),
-                      )
-                    }
-                    className="h-9 w-32"
-                  />
-                </div>
-              )}
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-muted-foreground">Closed</span>
-                <Switch
-                  checked={hours[i].closed}
-                  disabled
-                  onCheckedChange={(v) =>
-                    setHours((h) => h.map((d, idx) => (idx === i ? { ...d, closed: v } : d)))
-                  }
-                />
-              </div>
-            </div>
-          ))}
-        </div>
-      </Card>
-
-      <Card className="p-6 opacity-60">
-        <SectionHeader
-          title="Special hours & holidays"
-          description="Override regular hours for holidays, private events, or unexpected closures."
-          action={
-            <Button size="sm" variant="outline" className="gap-2" disabled>
-              <Plus className="h-3.5 w-3.5" /> Add date
-            </Button>
-          }
-        />
-        <div className="mt-4 space-y-2">
-          {[
-            { date: "Jul 4, 2026", label: "Independence Day", note: "Closing at 6:00 PM" },
-            { date: "Nov 26, 2026", label: "Thanksgiving", note: "Closed all day" },
-          ].map((h) => (
-            <div
-              key={h.date}
-              className="flex items-center justify-between rounded-lg border border-border/60 bg-card/50 px-4 py-3"
-            >
-              <div>
-                <div className="text-sm font-medium">{h.label}</div>
-                <div className="text-xs text-muted-foreground">
-                  {h.date} · {h.note}
-                </div>
-              </div>
-              <div className="flex gap-1">
-                <Button size="icon" variant="ghost" className="h-8 w-8" disabled>
-                  <Pencil className="h-3.5 w-3.5" />
-                </Button>
-                <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive" disabled>
-                  <Trash2 className="h-3.5 w-3.5" />
-                </Button>
-              </div>
-            </div>
-          ))}
         </div>
       </Card>
     </div>
