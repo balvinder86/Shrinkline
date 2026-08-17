@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { FileUp, Pencil, Plus, Search, Sparkles, Trash2, Zap } from "lucide-react";
+import { Eye, EyeOff, FileUp, Pencil, Plus, Search, Sparkles, Trash2, Zap } from "lucide-react";
 
 import { Topbar } from "@/components/dashboard/Topbar";
 import { useDateRange } from "@/lib/date-range-context";
@@ -8,7 +8,7 @@ import {
   useProductMix,
   useUpdateItemCategory,
   useUpdateItemCost,
-  useSetMenuItemHiddenFromRecipes,
+  useSetMenuItemsHiddenFromRecipes,
   type RealMenuItem,
 } from "@/lib/pos/queries";
 import {
@@ -48,6 +48,7 @@ import { Card } from "@/components/ui/card";
 import { AiRecommendationsPanel } from "@/components/insights/AiRecommendationsPanel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -162,6 +163,8 @@ function RecipesPage() {
   const [itemQuery, setItemQuery] = useState("");
   const [unpricedOnly, setUnpricedOnly] = useState(false);
   const [showHidden, setShowHidden] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const setItemsHidden = useSetMenuItemsHiddenFromRecipes();
   const [prepQuery, setPrepQuery] = useState("");
 
   const [importDialogOpen, setImportDialogOpen] = useState(false);
@@ -333,6 +336,40 @@ function RecipesPage() {
     });
   }, [items, categoryTab, unpricedOnly, itemQuery, showHidden]);
 
+  // Selection persists across filter/tab changes — same reasoning as
+  // Stock & Purchasing's bulk vendor assign (src/routes/inventory.tsx):
+  // an owner may search "vodka", select some, search "rum", select
+  // more, before applying one bulk action to everything at once.
+  const toggleSelected = (id: string, checked: boolean) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  };
+  const allFilteredSelected =
+    filteredItems.length > 0 && filteredItems.every((i) => selectedIds.has(i.id));
+  const toggleSelectAll = (checked: boolean) => {
+    setSelectedIds(checked ? new Set(filteredItems.map((i) => i.id)) : new Set());
+  };
+  // "Hide" in the normal view, "Unhide" while looking at the Hidden
+  // list — same action, opposite direction, so one bulk button and one
+  // per-row icon cover both without duplicating the mutation call.
+  // Takes real items (not bare ids) so locationId travels with them —
+  // every item here in practice shares one location (single-location
+  // restaurants only, same simplification useLocationIds()[0] makes
+  // elsewhere), but deriving it from the items being hidden rather
+  // than an arbitrary items[0] keeps this correct if that changes.
+  const applyHidden = (targets: RealMenuItem[], hidden: boolean) => {
+    if (targets.length === 0) return;
+    const locationId = targets[0].locationId;
+    setItemsHidden.mutate(
+      { locationId, posIds: targets.map((t) => t.id), hidden },
+      { onSuccess: () => setSelectedIds(new Set()) },
+    );
+  };
+
   const filteredPrepRecipes = useMemo(() => {
     const q = prepQuery.trim().toLowerCase();
     if (!q) return prepRecipes;
@@ -452,6 +489,35 @@ function RecipesPage() {
               )}
             </div>
 
+            {selectedIds.size > 0 && (
+              <Card className="border-stone-200 bg-cream p-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-sm font-medium text-ink">
+                    {selectedIds.size} item{selectedIds.size === 1 ? "" : "s"} selected
+                  </span>
+                  <Button
+                    size="sm"
+                    disabled={setItemsHidden.isPending}
+                    onClick={() =>
+                      applyHidden(
+                        items.filter((i) => selectedIds.has(i.id)),
+                        !showHidden,
+                      )
+                    }
+                  >
+                    {setItemsHidden.isPending
+                      ? "Working…"
+                      : showHidden
+                        ? `Unhide ${selectedIds.size}`
+                        : `Hide ${selectedIds.size}`}
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => setSelectedIds(new Set())}>
+                    Clear selection
+                  </Button>
+                </div>
+              </Card>
+            )}
+
             <Card className="overflow-hidden">
               <div className="flex flex-col gap-2 border-b p-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="text-sm text-muted-foreground">
@@ -514,41 +580,70 @@ function RecipesPage() {
                     const marginPct = margin != null ? (margin / item.price) * 100 : null;
                     const q = quadrant(item, popMedian, marginMedian);
                     return (
-                      <button
-                        key={item.id}
-                        type="button"
-                        className="flex w-full flex-col gap-1.5 p-3 text-left active:bg-muted/40"
-                        onClick={() => setSelectedItemId(item.id)}
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <span className="font-medium">{item.name}</span>
-                          <Badge
-                            className="shrink-0 text-xs font-normal"
-                            style={{
-                              background: `${QUAD_COLOR[q]}22`,
-                              color: QUAD_COLOR[q],
-                              border: `1px solid ${QUAD_COLOR[q]}55`,
-                            }}
-                          >
-                            {q}
-                          </Badge>
+                      <div key={item.id} className="flex items-start gap-1 p-3 active:bg-muted/40">
+                        <div
+                          className="flex shrink-0 items-center pt-0.5"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <Checkbox
+                            checked={selectedIds.has(item.id)}
+                            onCheckedChange={(checked) => toggleSelected(item.id, checked === true)}
+                            aria-label={`Select ${item.name}`}
+                          />
                         </div>
-                        <div className="flex items-center gap-2">
-                          <Badge variant="outline" className="font-normal">
-                            {item.category}
-                          </Badge>
-                        </div>
-                        <div className="flex items-center justify-between text-sm">
-                          <span className="font-mono">{formatItemPrice(item)}</span>
-                          {margin != null ? (
-                            <span className="font-mono text-muted-foreground">
-                              ${margin.toFixed(2)} margin ({marginPct!.toFixed(0)}%)
-                            </span>
+                        <button
+                          type="button"
+                          className="flex min-w-0 flex-1 flex-col gap-1.5 text-left"
+                          onClick={() => setSelectedItemId(item.id)}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <span className="font-medium">{item.name}</span>
+                            <Badge
+                              className="shrink-0 text-xs font-normal"
+                              style={{
+                                background: `${QUAD_COLOR[q]}22`,
+                                color: QUAD_COLOR[q],
+                                border: `1px solid ${QUAD_COLOR[q]}55`,
+                              }}
+                            >
+                              {q}
+                            </Badge>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Badge variant="outline" className="font-normal">
+                              {item.category}
+                            </Badge>
+                          </div>
+                          <div className="flex items-center justify-between text-sm">
+                            <span className="font-mono">{formatItemPrice(item)}</span>
+                            {margin != null ? (
+                              <span className="font-mono text-muted-foreground">
+                                ${margin.toFixed(2)} margin ({marginPct!.toFixed(0)}%)
+                              </span>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">Add recipe</span>
+                            )}
+                          </div>
+                        </button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 shrink-0"
+                          title={
+                            item.hiddenFromRecipes ? "Unhide from Recipes" : "Hide from Recipes"
+                          }
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            applyHidden([item], !item.hiddenFromRecipes);
+                          }}
+                        >
+                          {item.hiddenFromRecipes ? (
+                            <Eye className="h-3.5 w-3.5" />
                           ) : (
-                            <span className="text-xs text-muted-foreground">Add recipe</span>
+                            <EyeOff className="h-3.5 w-3.5" />
                           )}
-                        </div>
-                      </button>
+                        </Button>
+                      </div>
                     );
                   })
                 )}
@@ -557,19 +652,27 @@ function RecipesPage() {
                 <Table>
                   <TableHeader>
                     <TableRow>
+                      <TableHead className="w-[40px]">
+                        <Checkbox
+                          checked={allFilteredSelected}
+                          onCheckedChange={(checked) => toggleSelectAll(checked === true)}
+                          aria-label="Select all items"
+                        />
+                      </TableHead>
                       <TableHead>Item</TableHead>
                       <TableHead>Category</TableHead>
                       <TableHead className="text-right">Price</TableHead>
                       <TableHead className="text-right">Cost</TableHead>
                       <TableHead className="text-right">Margin</TableHead>
                       <TableHead>Quadrant</TableHead>
+                      <TableHead className="w-[48px]"></TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {isLoading ? (
                       <TableRow>
                         <TableCell
-                          colSpan={6}
+                          colSpan={8}
                           className="py-8 text-center text-sm text-muted-foreground"
                         >
                           Loading real menu items…
@@ -578,7 +681,7 @@ function RecipesPage() {
                     ) : filteredItems.length === 0 ? (
                       <TableRow>
                         <TableCell
-                          colSpan={6}
+                          colSpan={8}
                           className="py-8 text-center text-sm text-muted-foreground"
                         >
                           No items match these filters.
@@ -598,6 +701,15 @@ function RecipesPage() {
                             className="cursor-pointer"
                             onClick={() => setSelectedItemId(item.id)}
                           >
+                            <TableCell onClick={(e) => e.stopPropagation()}>
+                              <Checkbox
+                                checked={selectedIds.has(item.id)}
+                                onCheckedChange={(checked) =>
+                                  toggleSelected(item.id, checked === true)
+                                }
+                                aria-label={`Select ${item.name}`}
+                              />
+                            </TableCell>
                             <TableCell className="font-medium">{item.name}</TableCell>
                             <TableCell>
                               <Badge variant="outline" className="font-normal">
@@ -635,6 +747,25 @@ function RecipesPage() {
                               >
                                 {q}
                               </Badge>
+                            </TableCell>
+                            <TableCell onClick={(e) => e.stopPropagation()}>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7"
+                                title={
+                                  item.hiddenFromRecipes
+                                    ? "Unhide from Recipes"
+                                    : "Hide from Recipes"
+                                }
+                                onClick={() => applyHidden([item], !item.hiddenFromRecipes)}
+                              >
+                                {item.hiddenFromRecipes ? (
+                                  <Eye className="h-3.5 w-3.5" />
+                                ) : (
+                                  <EyeOff className="h-3.5 w-3.5" />
+                                )}
+                              </Button>
                             </TableCell>
                           </TableRow>
                         );
@@ -1264,7 +1395,6 @@ function MenuItemRecipeSheet({
   const [draftLines, setDraftLines] = useState<DraftLine[] | null>(initialDraftLines ?? null);
   const updateCategory = useUpdateItemCategory();
   const updateCost = useUpdateItemCost();
-  const setHidden = useSetMenuItemHiddenFromRecipes();
 
   const totalCents = useMemo(() => {
     if (lines.length === 0) return null;
@@ -1320,30 +1450,7 @@ function MenuItemRecipeSheet({
   return (
     <>
       <SheetHeader>
-        <div className="flex items-start justify-between gap-3 pr-8">
-          <SheetTitle className="font-serif text-2xl">{item.name}</SheetTitle>
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-8 shrink-0 gap-1.5 text-muted-foreground hover:text-destructive"
-            disabled={setHidden.isPending}
-            title={
-              item.hiddenFromRecipes
-                ? "Show this item on the Recipes page again"
-                : "Hide this item from the Recipes page — it stays on Product Mix and POS unchanged"
-            }
-            onClick={() =>
-              setHidden.mutate({
-                locationId: item.locationId,
-                posId: item.id,
-                hidden: !item.hiddenFromRecipes,
-              })
-            }
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-            {item.hiddenFromRecipes ? "Unhide" : "Hide"}
-          </Button>
-        </div>
+        <SheetTitle className="font-serif text-2xl">{item.name}</SheetTitle>
         <SheetDescription>{item.rawCategory}</SheetDescription>
       </SheetHeader>
 

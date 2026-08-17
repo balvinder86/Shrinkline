@@ -476,27 +476,28 @@ export function useUpdateItemCost() {
   });
 }
 
-// Toggles a menu item's Recipes-page visibility — see RealMenuItem's
-// own hiddenFromRecipes comment. Reversible, and scoped to Recipes
-// only: Product Mix keeps showing every active item regardless of
-// this flag.
-export function useSetMenuItemHiddenFromRecipes() {
+// Toggles one or many menu items' Recipes-page visibility in a single
+// request — see RealMenuItem's own hiddenFromRecipes comment.
+// Reversible, and scoped to Recipes only: Product Mix keeps showing
+// every active item regardless of this flag. A single-row quick-hide
+// click is just a one-element posIds array, same call as a bulk hide.
+export function useSetMenuItemsHiddenFromRecipes() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({
       locationId,
-      posId,
+      posIds,
       hidden,
     }: {
       locationId: string;
-      posId: string;
+      posIds: string[];
       hidden: boolean;
     }) => {
       const { error } = await supabase
         .from("menu_items")
         .update({ hidden_from_recipes: hidden })
         .eq("location_id", locationId)
-        .eq("pos_id", posId);
+        .in("pos_id", posIds);
       if (error) throw error;
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["product-mix"] }),
