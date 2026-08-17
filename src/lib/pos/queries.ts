@@ -328,6 +328,11 @@ export type RealMenuItem = {
   // had a discount/comp/modifier surcharge. Use this for revenue, never price*qty.
   revenueWk: number;
   revenuePrevWk: number;
+  // A "don't show me this on Recipes" preference — see
+  // db/phase2/67_menu_item_hidden_from_recipes.sql. Sync never touches
+  // this column; only the Recipes page's own item list reads it.
+  // Product Mix and everywhere else shows the item exactly as before.
+  hiddenFromRecipes: boolean;
 };
 
 // Popularity across the selected range vs. the immediately preceding
@@ -355,7 +360,7 @@ export function useProductMix(range: DateRange) {
         supabase
           .from("menu_items")
           .select(
-            "pos_id, location_id, name, category, category_override, price_cents, price_is_starting_price, cost_cents",
+            "pos_id, location_id, name, category, category_override, price_cents, price_is_starting_price, cost_cents, hidden_from_recipes",
           )
           .in("location_id", locationIds!)
           .eq("active", true),
@@ -441,6 +446,7 @@ export function useProductMix(range: DateRange) {
           soldPrevWk: prev.get(m.pos_id) ?? 0,
           revenueWk: (currentRevenueCents.get(m.pos_id) ?? 0) / 100,
           revenuePrevWk: (prevRevenueCents.get(m.pos_id) ?? 0) / 100,
+          hiddenFromRecipes: m.hidden_from_recipes ?? false,
         };
       });
     },
@@ -462,6 +468,33 @@ export function useUpdateItemCost() {
       const { error } = await supabase
         .from("menu_items")
         .update({ cost_cents: costCents })
+        .eq("location_id", locationId)
+        .eq("pos_id", posId);
+      if (error) throw error;
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["product-mix"] }),
+  });
+}
+
+// Toggles a menu item's Recipes-page visibility — see RealMenuItem's
+// own hiddenFromRecipes comment. Reversible, and scoped to Recipes
+// only: Product Mix keeps showing every active item regardless of
+// this flag.
+export function useSetMenuItemHiddenFromRecipes() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      locationId,
+      posId,
+      hidden,
+    }: {
+      locationId: string;
+      posId: string;
+      hidden: boolean;
+    }) => {
+      const { error } = await supabase
+        .from("menu_items")
+        .update({ hidden_from_recipes: hidden })
         .eq("location_id", locationId)
         .eq("pos_id", posId);
       if (error) throw error;

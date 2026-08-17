@@ -1,0 +1,12 @@
+-- Same reasoning as 52_menu_item_category_override.sql: Toast's own
+-- sync job (sync/src/db.ts upsertMenuItems) unconditionally writes
+-- active: true on every real sync run for every item Toast still
+-- returns, so there's no Toast-owned column safe to flip off manually
+-- — a plain `menu_items.active = false` would get silently reverted
+-- within minutes. This is a separate, sync-untouched flag: purely a
+-- "don't show me this on the Recipes page" preference (a modifier, a
+-- discontinued special, a test item cluttering the recipe-costing
+-- workflow), not a claim that the item is inactive in Toast. Product
+-- Mix and everywhere else keeps showing the item exactly as before —
+-- only the Recipes page's own item list reads this column.
+alter table menu_items add column if not exists hidden_from_recipes boolean not null default false;

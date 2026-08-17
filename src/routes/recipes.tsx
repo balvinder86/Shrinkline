@@ -8,6 +8,7 @@ import {
   useProductMix,
   useUpdateItemCategory,
   useUpdateItemCost,
+  useSetMenuItemHiddenFromRecipes,
   type RealMenuItem,
 } from "@/lib/pos/queries";
 import {
@@ -160,6 +161,7 @@ function RecipesPage() {
   const [categoryTab, setCategoryTab] = useState<string>("All");
   const [itemQuery, setItemQuery] = useState("");
   const [unpricedOnly, setUnpricedOnly] = useState(false);
+  const [showHidden, setShowHidden] = useState(false);
   const [prepQuery, setPrepQuery] = useState("");
 
   const [importDialogOpen, setImportDialogOpen] = useState(false);
@@ -307,19 +309,29 @@ function RecipesPage() {
     [items],
   );
 
+  // Hidden items never show up in the normal, category-filtered view —
+  // "Show hidden" replaces that view entirely with just the hidden
+  // ones, so there's always a way back in to unhide something.
+  const hiddenItems = useMemo(() => items.filter((i) => i.hiddenFromRecipes), [items]);
+
   const filteredItems = useMemo(() => {
     const q = itemQuery.trim().toLowerCase();
     return items.filter((item) => {
-      if (
-        categoryTab !== "All" &&
-        classifyMenuItemCategory(item.category, item.name) !== categoryTab
-      )
-        return false;
-      if (unpricedOnly && item.hasRecipe) return false;
+      if (showHidden) {
+        if (!item.hiddenFromRecipes) return false;
+      } else {
+        if (item.hiddenFromRecipes) return false;
+        if (
+          categoryTab !== "All" &&
+          classifyMenuItemCategory(item.category, item.name) !== categoryTab
+        )
+          return false;
+        if (unpricedOnly && item.hasRecipe) return false;
+      }
       if (q && !item.name.toLowerCase().includes(q)) return false;
       return true;
     });
-  }, [items, categoryTab, unpricedOnly, itemQuery]);
+  }, [items, categoryTab, unpricedOnly, itemQuery, showHidden]);
 
   const filteredPrepRecipes = useMemo(() => {
     const q = prepQuery.trim().toLowerCase();
@@ -428,6 +440,16 @@ function RecipesPage() {
               >
                 Needs recipe {unpricedItemIds.length > 0 && `(${unpricedItemIds.length})`}
               </Button>
+              {hiddenItems.length > 0 && (
+                <Button
+                  size="sm"
+                  variant={showHidden ? "default" : "outline"}
+                  className="h-9 shrink-0"
+                  onClick={() => setShowHidden((v) => !v)}
+                >
+                  Hidden ({hiddenItems.length})
+                </Button>
+              )}
             </div>
 
             <Card className="overflow-hidden">
@@ -1242,6 +1264,7 @@ function MenuItemRecipeSheet({
   const [draftLines, setDraftLines] = useState<DraftLine[] | null>(initialDraftLines ?? null);
   const updateCategory = useUpdateItemCategory();
   const updateCost = useUpdateItemCost();
+  const setHidden = useSetMenuItemHiddenFromRecipes();
 
   const totalCents = useMemo(() => {
     if (lines.length === 0) return null;
@@ -1297,7 +1320,30 @@ function MenuItemRecipeSheet({
   return (
     <>
       <SheetHeader>
-        <SheetTitle className="font-serif text-2xl">{item.name}</SheetTitle>
+        <div className="flex items-start justify-between gap-3 pr-8">
+          <SheetTitle className="font-serif text-2xl">{item.name}</SheetTitle>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-8 shrink-0 gap-1.5 text-muted-foreground hover:text-destructive"
+            disabled={setHidden.isPending}
+            title={
+              item.hiddenFromRecipes
+                ? "Show this item on the Recipes page again"
+                : "Hide this item from the Recipes page — it stays on Product Mix and POS unchanged"
+            }
+            onClick={() =>
+              setHidden.mutate({
+                locationId: item.locationId,
+                posId: item.id,
+                hidden: !item.hiddenFromRecipes,
+              })
+            }
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            {item.hiddenFromRecipes ? "Unhide" : "Hide"}
+          </Button>
+        </div>
         <SheetDescription>{item.rawCategory}</SheetDescription>
       </SheetHeader>
 
