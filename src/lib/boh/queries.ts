@@ -840,14 +840,16 @@ export type InventoryCountSummary = {
 
 export function useInventoryCounts() {
   const restaurantId = useCurrentRestaurantId();
+  const locationId = useCurrentLocationId();
   return useQuery({
-    queryKey: ["inventory-counts", restaurantId],
-    enabled: !!restaurantId,
+    queryKey: ["inventory-counts", restaurantId, locationId],
+    enabled: !!restaurantId && !!locationId,
     queryFn: async (): Promise<InventoryCountSummary[]> => {
       const { data, error } = await supabase
         .from("inventory_counts")
         .select("id, counted_at, total_value_cents, item_count, notes")
         .eq("restaurant_id", restaurantId!)
+        .eq("location_id", locationId!)
         .order("counted_at", { ascending: false })
         .order("created_at", { ascending: false });
       if (error) throw error;
@@ -1162,9 +1164,10 @@ export type PurchaseOrderSummary = {
 
 export function usePurchaseOrders() {
   const restaurantId = useCurrentRestaurantId();
+  const locationId = useCurrentLocationId();
   return useQuery({
-    queryKey: ["purchase-orders", restaurantId],
-    enabled: !!restaurantId,
+    queryKey: ["purchase-orders", restaurantId, locationId],
+    enabled: !!restaurantId && !!locationId,
     queryFn: async (): Promise<PurchaseOrderSummary[]> => {
       const { data, error } = await supabase
         .from("purchase_orders")
@@ -1172,6 +1175,7 @@ export function usePurchaseOrders() {
           "id, status, total_cents, created_at, emailed_at, email_error, vendors(name, contact_email), purchase_order_lines(id)",
         )
         .eq("restaurant_id", restaurantId!)
+        .eq("location_id", locationId!)
         .order("created_at", { ascending: false });
       if (error) throw error;
       type Row = {
@@ -1795,9 +1799,10 @@ export type RealInvoice = {
 
 export function useRealInvoices() {
   const restaurantId = useCurrentRestaurantId();
+  const locationId = useCurrentLocationId();
   return useQuery({
-    queryKey: ["real-invoices", restaurantId],
-    enabled: !!restaurantId,
+    queryKey: ["real-invoices", restaurantId, locationId],
+    enabled: !!restaurantId && !!locationId,
     queryFn: async (): Promise<RealInvoice[]> => {
       const { data, error } = await supabase
         .from("invoices")
@@ -1805,6 +1810,7 @@ export function useRealInvoices() {
           "id, vendor_id, invoice_number, invoice_date, total_cents, discount_cents, status, ocr_status, source_file_url, created_at, source_email_from, source_email_subject, flags, document_type, vendors(name)",
         )
         .eq("restaurant_id", restaurantId!)
+        .eq("location_id", locationId!)
         .order("created_at", { ascending: false });
       if (error) throw error;
       type Row = {
@@ -2047,16 +2053,18 @@ export type VendorSpendSummary = {
 
 export function useVendorSpendSummary(dateRange?: DateRange) {
   const restaurantId = useCurrentRestaurantId();
+  const locationId = useCurrentLocationId();
   return useQuery({
-    queryKey: ["vendor-spend-summary", restaurantId, dateRange?.from, dateRange?.to],
-    enabled: !!restaurantId,
+    queryKey: ["vendor-spend-summary", restaurantId, locationId, dateRange?.from, dateRange?.to],
+    enabled: !!restaurantId && !!locationId,
     queryFn: async (): Promise<VendorSpendSummary[]> => {
       const [vendorsRes, invoicesRes] = await Promise.all([
         supabase.from("vendors").select("*").eq("restaurant_id", restaurantId!).order("name"),
         supabase
           .from("invoices")
           .select("vendor_id, status, total_cents, invoice_date, created_at")
-          .eq("restaurant_id", restaurantId!),
+          .eq("restaurant_id", restaurantId!)
+          .eq("location_id", locationId!),
       ]);
       if (vendorsRes.error) throw vendorsRes.error;
       if (invoicesRes.error) throw invoicesRes.error;
@@ -2114,9 +2122,10 @@ export type ExpenseCategorySpend = {
 
 export function useExpenseCategorySpend(dateRange?: DateRange) {
   const restaurantId = useCurrentRestaurantId();
+  const locationId = useCurrentLocationId();
   return useQuery({
-    queryKey: ["expense-category-spend", restaurantId, dateRange?.from, dateRange?.to],
-    enabled: !!restaurantId,
+    queryKey: ["expense-category-spend", restaurantId, locationId, dateRange?.from, dateRange?.to],
+    enabled: !!restaurantId && !!locationId,
     queryFn: async (): Promise<ExpenseCategorySpend[]> => {
       const [vendorsRes, invoicesRes] = await Promise.all([
         supabase.from("vendors").select("id, category").eq("restaurant_id", restaurantId!),
@@ -2124,6 +2133,7 @@ export function useExpenseCategorySpend(dateRange?: DateRange) {
           .from("invoices")
           .select("vendor_id, status, total_cents, invoice_date, created_at")
           .eq("restaurant_id", restaurantId!)
+          .eq("location_id", locationId!)
           .eq("status", "approved"),
       ]);
       if (vendorsRes.error) throw vendorsRes.error;
@@ -2178,9 +2188,10 @@ export type SavingsSummary = {
 
 export function useSavingsSummary(dateRange?: DateRange) {
   const restaurantId = useCurrentRestaurantId();
+  const locationId = useCurrentLocationId();
   return useQuery({
-    queryKey: ["savings-summary", restaurantId, dateRange?.from, dateRange?.to],
-    enabled: !!restaurantId,
+    queryKey: ["savings-summary", restaurantId, locationId, dateRange?.from, dateRange?.to],
+    enabled: !!restaurantId && !!locationId,
     queryFn: async (): Promise<SavingsSummary> => {
       const { data, error } = await supabase
         .from("invoices")
@@ -2188,6 +2199,7 @@ export function useSavingsSummary(dateRange?: DateRange) {
           "id, invoice_number, invoice_date, created_at, total_cents, discount_cents, status, vendor_id, vendors(name)",
         )
         .eq("restaurant_id", restaurantId!)
+        .eq("location_id", locationId!)
         .eq("status", "approved")
         .order("invoice_date", { ascending: false });
       if (error) throw error;
@@ -2264,16 +2276,21 @@ export type CategorySpend = { category: string; spendCents: number };
 
 export function useTopLineItems(dateRange?: DateRange) {
   const restaurantId = useCurrentRestaurantId();
+  const locationId = useCurrentLocationId();
   return useQuery({
-    queryKey: ["top-line-items", restaurantId, dateRange?.from, dateRange?.to],
-    enabled: !!restaurantId,
+    queryKey: ["top-line-items", restaurantId, locationId, dateRange?.from, dateRange?.to],
+    enabled: !!restaurantId && !!locationId,
     queryFn: async (): Promise<TopLineItem[]> => {
+      // invoice_lines has no location_id of its own — location scoping
+      // is enforced by filtering the invoices!inner join, same reason
+      // useCategorySpend below does it too.
       const { data, error } = await supabase
         .from("invoice_lines")
         .select(
           "line_total_cents, ingredient_id, ingredients(name), invoices!inner(status, invoice_date, created_at, vendors(name))",
         )
-        .eq("restaurant_id", restaurantId!);
+        .eq("restaurant_id", restaurantId!)
+        .eq("invoices.location_id", locationId!);
       if (error) throw error;
       type Row = {
         line_total_cents: number | null;
@@ -2360,16 +2377,18 @@ export function useTopLineItems(dateRange?: DateRange) {
 
 export function useCategorySpend(dateRange?: DateRange) {
   const restaurantId = useCurrentRestaurantId();
+  const locationId = useCurrentLocationId();
   return useQuery({
-    queryKey: ["category-spend", restaurantId, dateRange?.from, dateRange?.to],
-    enabled: !!restaurantId,
+    queryKey: ["category-spend", restaurantId, locationId, dateRange?.from, dateRange?.to],
+    enabled: !!restaurantId && !!locationId,
     queryFn: async (): Promise<CategorySpend[]> => {
       const { data, error } = await supabase
         .from("invoice_lines")
         .select(
           "line_total_cents, ingredients(category), invoices!inner(status, invoice_date, created_at)",
         )
-        .eq("restaurant_id", restaurantId!);
+        .eq("restaurant_id", restaurantId!)
+        .eq("invoices.location_id", locationId!);
       if (error) throw error;
       type Row = {
         line_total_cents: number | null;
