@@ -39,6 +39,164 @@ export function useUpdateRestaurantName() {
   });
 }
 
+export type RestaurantProfile = {
+  id: string;
+  name: string;
+  logoUrl: string | null;
+  legalName: string | null;
+  cuisine: string | null;
+  priceTier: string | null;
+  publicEmail: string | null;
+  phone: string | null;
+  website: string | null;
+  description: string | null;
+};
+
+// Separate from RestaurantProvider's own restaurant-names query
+// (src/lib/restaurant-context.tsx) — that one is fetched globally for
+// every restaurant the user belongs to (sidebar switcher etc.) and
+// deliberately stays lean (id, name only). These extra profile fields
+// are only ever needed on the Settings page, so they get their own
+// scoped query rather than bloating the global one.
+export function useRestaurantProfile() {
+  const restaurantId = useRestaurantIds()[0];
+  return useQuery({
+    queryKey: ["restaurant-profile", restaurantId],
+    enabled: !!restaurantId,
+    queryFn: async (): Promise<RestaurantProfile | null> => {
+      const { data, error } = await supabase
+        .from("restaurants")
+        .select(
+          "id, name, logo_url, legal_name, cuisine, price_tier, public_email, phone, website, description",
+        )
+        .eq("id", restaurantId!)
+        .single();
+      if (error) throw error;
+      return {
+        id: data.id,
+        name: data.name,
+        logoUrl: data.logo_url,
+        legalName: data.legal_name,
+        cuisine: data.cuisine,
+        priceTier: data.price_tier,
+        publicEmail: data.public_email,
+        phone: data.phone,
+        website: data.website,
+        description: data.description,
+      };
+    },
+  });
+}
+
+export type RestaurantProfileDetails = {
+  legalName: string;
+  cuisine: string;
+  priceTier: string;
+  publicEmail: string;
+  phone: string;
+  website: string;
+  description: string;
+};
+
+// Empty strings are stored as null rather than "" so an unfilled field
+// reads as "never set" (and can show a placeholder) instead of a saved
+// blank value.
+export function useUpdateRestaurantProfileDetails() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, details }: { id: string; details: RestaurantProfileDetails }) => {
+      const { data, error } = await supabase
+        .from("restaurants")
+        .update({
+          legal_name: details.legalName.trim() || null,
+          cuisine: details.cuisine.trim() || null,
+          price_tier: details.priceTier.trim() || null,
+          public_email: details.publicEmail.trim() || null,
+          phone: details.phone.trim() || null,
+          website: details.website.trim() || null,
+          description: details.description.trim() || null,
+        })
+        .eq("id", id)
+        .select("id");
+      if (error) throw error;
+      if (!data || data.length === 0) {
+        throw new Error("Nothing was updated — you may not have owner access.");
+      }
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["restaurant-profile"] }),
+  });
+}
+
+// Uploads to the restaurant's own folder in the public restaurant-logos
+// bucket (db/phase2/69_restaurant_profile_fields.sql), then best-effort
+// removes the previous logo file so replacing a logo doesn't leave
+// orphaned files behind — failure to clean up the old file isn't worth
+// failing the whole upload over, so that removal is fire-and-forget.
+export function useUploadRestaurantLogo() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      id,
+      file,
+      previousLogoUrl,
+    }: {
+      id: string;
+      file: File;
+      previousLogoUrl: string | null;
+    }) => {
+      const ext = file.name.split(".").pop() || "png";
+      const path = `${id}/logo-${crypto.randomUUID()}.${ext}`;
+      const { error: uploadError } = await supabase.storage
+        .from("restaurant-logos")
+        .upload(path, file, { contentType: file.type || "image/png" });
+      if (uploadError) throw uploadError;
+
+      const { data: urlData } = supabase.storage.from("restaurant-logos").getPublicUrl(path);
+
+      const { data, error } = await supabase
+        .from("restaurants")
+        .update({ logo_url: urlData.publicUrl })
+        .eq("id", id)
+        .select("id");
+      if (error) throw error;
+      if (!data || data.length === 0) {
+        throw new Error("Nothing was updated — you may not have owner access.");
+      }
+
+      if (previousLogoUrl) {
+        const previousPath = previousLogoUrl.split("/restaurant-logos/")[1];
+        if (previousPath) {
+          void supabase.storage.from("restaurant-logos").remove([previousPath]);
+        }
+      }
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["restaurant-profile"] }),
+  });
+}
+
+export function useRemoveRestaurantLogo() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, logoUrl }: { id: string; logoUrl: string }) => {
+      const { data, error } = await supabase
+        .from("restaurants")
+        .update({ logo_url: null })
+        .eq("id", id)
+        .select("id");
+      if (error) throw error;
+      if (!data || data.length === 0) {
+        throw new Error("Nothing was updated — you may not have owner access.");
+      }
+
+      const path = logoUrl.split("/restaurant-logos/")[1];
+      if (path) {
+        void supabase.storage.from("restaurant-logos").remove([path]);
+      }
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["restaurant-profile"] }),
+  });
+}
+
 export type SettingsLocation = {
   id: string;
   name: string;

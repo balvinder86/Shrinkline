@@ -69,6 +69,11 @@ import {
   useUpdateRestaurantName,
   useLocationsForSettings,
   useUpdateLocation,
+  useRestaurantProfile,
+  useUpdateRestaurantProfileDetails,
+  useUploadRestaurantLogo,
+  useRemoveRestaurantLogo,
+  type RestaurantProfileDetails,
 } from "@/lib/settings/queries";
 
 export const Route = createFileRoute("/settings")({
@@ -257,26 +262,92 @@ function PlaceholderBanner({ children }: { children: React.ReactNode }) {
 
 /* ---------- Profile ---------- */
 
+const CUISINE_OPTIONS = [
+  "American",
+  "Gastropub",
+  "Sports Bar",
+  "Bar & Grill",
+  "Pizza",
+  "BBQ",
+  "Seafood",
+  "Steakhouse",
+  "Italian",
+  "Mexican",
+  "Asian",
+  "Other",
+];
+
+const PRICE_TIER_OPTIONS = [
+  { value: "$", label: "$ – Budget" },
+  { value: "$$", label: "$$ – Casual" },
+  { value: "$$$", label: "$$$ – Upscale" },
+  { value: "$$$$", label: "$$$$ – Fine dining" },
+];
+
+const EMPTY_DETAILS: RestaurantProfileDetails = {
+  legalName: "",
+  cuisine: "",
+  priceTier: "",
+  publicEmail: "",
+  phone: "",
+  website: "",
+  description: "",
+};
+
 function ProfileSection() {
   const { currentRestaurant } = useCurrentRestaurant();
   const updateName = useUpdateRestaurantName();
   const [name, setName] = useState(currentRestaurant?.name ?? "");
-  const [saved, setSaved] = useState(false);
+  const [nameSaved, setNameSaved] = useState(false);
 
   useEffect(() => {
     setName(currentRestaurant?.name ?? "");
   }, [currentRestaurant?.name]);
 
-  const dirty =
+  const nameDirty =
     currentRestaurant != null && name.trim() !== currentRestaurant.name && name.trim() !== "";
+
+  const { data: profile } = useRestaurantProfile();
+  const updateDetails = useUpdateRestaurantProfileDetails();
+  const uploadLogo = useUploadRestaurantLogo();
+  const removeLogo = useRemoveRestaurantLogo();
+  const [details, setDetails] = useState<RestaurantProfileDetails>(EMPTY_DETAILS);
+  const [detailsSaved, setDetailsSaved] = useState(false);
+
+  useEffect(() => {
+    if (!profile) return;
+    setDetails({
+      legalName: profile.legalName ?? "",
+      cuisine: profile.cuisine ?? "",
+      priceTier: profile.priceTier ?? "",
+      publicEmail: profile.publicEmail ?? "",
+      phone: profile.phone ?? "",
+      website: profile.website ?? "",
+      description: profile.description ?? "",
+    });
+  }, [profile]);
+
+  const detailsDirty =
+    profile != null &&
+    (details.legalName !== (profile.legalName ?? "") ||
+      details.cuisine !== (profile.cuisine ?? "") ||
+      details.priceTier !== (profile.priceTier ?? "") ||
+      details.publicEmail !== (profile.publicEmail ?? "") ||
+      details.phone !== (profile.phone ?? "") ||
+      details.website !== (profile.website ?? "") ||
+      details.description !== (profile.description ?? ""));
+
+  function updateField<K extends keyof RestaurantProfileDetails>(
+    key: K,
+    value: RestaurantProfileDetails[K],
+  ) {
+    setDetails((d) => ({ ...d, [key]: value }));
+    setDetailsSaved(false);
+  }
 
   return (
     <div className="space-y-6">
-      <SectionHeader
-        eyebrow="Business"
-        title="Restaurant profile"
-        description="Only the restaurant name is real right now — everything else on this page is a placeholder for what a full profile would eventually cover."
-      />
+      <SectionHeader eyebrow="Business" title="Restaurant profile" />
 
       <Card className="p-6">
         <div className="max-w-md">
@@ -289,18 +360,18 @@ function ProfileSection() {
                 value={name}
                 onChange={(e) => {
                   setName(e.target.value);
-                  setSaved(false);
+                  setNameSaved(false);
                 }}
                 disabled={!currentRestaurant}
               />
               <Button
                 size="sm"
-                disabled={!dirty || updateName.isPending}
+                disabled={!nameDirty || updateName.isPending}
                 onClick={() => {
                   if (!currentRestaurant) return;
                   updateName.mutate(
                     { id: currentRestaurant.id, name: name.trim() },
-                    { onSuccess: () => setSaved(true) },
+                    { onSuccess: () => setNameSaved(true) },
                   );
                 }}
               >
@@ -311,76 +382,170 @@ function ProfileSection() {
           {updateName.isError && (
             <p className="mt-2 text-xs text-destructive">{(updateName.error as Error).message}</p>
           )}
-          {saved && !updateName.isError && <p className="mt-2 text-xs text-emerald-700">Saved.</p>}
+          {nameSaved && !updateName.isError && (
+            <p className="mt-2 text-xs text-emerald-700">Saved.</p>
+          )}
         </div>
       </Card>
 
       <Card className="p-6 space-y-4">
-        <PlaceholderBanner>
-          Logo, legal business name, cuisine/category, price tier, public contact info, and
-          description have no database columns yet — nothing below is saved.
-        </PlaceholderBanner>
-        <div className="flex items-start gap-5 opacity-60">
-          <div className="grid h-20 w-20 place-items-center rounded-2xl bg-primary/10 font-display text-2xl text-primary">
-            {(currentRestaurant?.name ?? "?").slice(0, 2).toUpperCase()}
-          </div>
+        <div className="flex items-start gap-5">
+          {profile?.logoUrl ? (
+            <img
+              src={profile.logoUrl}
+              alt="Restaurant logo"
+              className="h-20 w-20 rounded-2xl object-cover"
+            />
+          ) : (
+            <div className="grid h-20 w-20 place-items-center rounded-2xl bg-primary/10 font-display text-2xl text-primary">
+              {(currentRestaurant?.name ?? "?").slice(0, 2).toUpperCase()}
+            </div>
+          )}
           <div className="flex-1 space-y-1">
             <div className="text-sm font-medium">Logo & brand mark</div>
             <p className="text-xs text-muted-foreground">
-              Square PNG or SVG, transparent background. Used on receipts, email, and social.
+              Square PNG or SVG, transparent background. Used across the dashboard.
             </p>
-            <div className="mt-3 flex gap-2">
-              <Button size="sm" variant="outline" className="gap-2" disabled>
-                <Upload className="h-3.5 w-3.5" /> Upload
+            <div className="mt-3 flex items-center gap-2">
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/svg+xml,image/webp"
+                className="hidden"
+                id="logo-upload-input"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = "";
+                  if (!file || !currentRestaurant) return;
+                  uploadLogo.mutate({
+                    id: currentRestaurant.id,
+                    file,
+                    previousLogoUrl: profile?.logoUrl ?? null,
+                  });
+                }}
+              />
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-2"
+                disabled={!currentRestaurant || uploadLogo.isPending}
+                onClick={() => document.getElementById("logo-upload-input")?.click()}
+              >
+                <Upload className="h-3.5 w-3.5" /> {uploadLogo.isPending ? "Uploading…" : "Upload"}
               </Button>
-              <Button size="sm" variant="ghost" disabled>
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={!profile?.logoUrl || removeLogo.isPending}
+                onClick={() => {
+                  if (!currentRestaurant || !profile?.logoUrl) return;
+                  removeLogo.mutate({ id: currentRestaurant.id, logoUrl: profile.logoUrl });
+                }}
+              >
                 Remove
               </Button>
             </div>
+            {uploadLogo.isError && (
+              <p className="text-xs text-destructive">{(uploadLogo.error as Error).message}</p>
+            )}
+            {removeLogo.isError && (
+              <p className="text-xs text-destructive">{(removeLogo.error as Error).message}</p>
+            )}
           </div>
         </div>
-        <div className="grid gap-5 opacity-60 md:grid-cols-2">
+        <div className="grid gap-5 md:grid-cols-2">
           <Field label="Legal business name">
-            <Input defaultValue="Thrasher's Pub LLC" disabled />
+            <Input
+              value={details.legalName}
+              onChange={(e) => updateField("legalName", e.target.value)}
+            />
           </Field>
           <Field label="Cuisine / category">
-            <Select defaultValue="pub" disabled>
+            <Select
+              value={details.cuisine || undefined}
+              onValueChange={(v) => updateField("cuisine", v)}
+            >
               <SelectTrigger>
-                <SelectValue />
+                <SelectValue placeholder="Select a category" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="pub">Gastropub</SelectItem>
+                {CUISINE_OPTIONS.map((c) => (
+                  <SelectItem key={c} value={c}>
+                    {c}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </Field>
           <Field label="Price tier">
-            <Select defaultValue="$$" disabled>
+            <Select
+              value={details.priceTier || undefined}
+              onValueChange={(v) => updateField("priceTier", v)}
+            >
               <SelectTrigger>
-                <SelectValue />
+                <SelectValue placeholder="Select a price tier" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="$$">$$ – Casual</SelectItem>
+                {PRICE_TIER_OPTIONS.map((t) => (
+                  <SelectItem key={t.value} value={t.value}>
+                    {t.label}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </Field>
           <Field label="Public email">
-            <Input defaultValue="hello@thrasherspub.com" disabled />
+            <Input
+              type="email"
+              value={details.publicEmail}
+              onChange={(e) => updateField("publicEmail", e.target.value)}
+              placeholder="hello@yourrestaurant.com"
+            />
           </Field>
           <Field label="Reservations phone">
-            <Input defaultValue="(202) 555-0144" disabled />
+            <Input
+              value={details.phone}
+              onChange={(e) => updateField("phone", e.target.value)}
+              placeholder="(202) 555-0144"
+            />
           </Field>
           <Field label="Website">
-            <Input defaultValue="https://thrasherspub.com" disabled />
+            <Input
+              value={details.website}
+              onChange={(e) => updateField("website", e.target.value)}
+              placeholder="https://yourrestaurant.com"
+            />
           </Field>
           <div className="md:col-span-2">
             <Field label="Short description">
               <Textarea
                 rows={3}
-                defaultValue="Neighborhood gastropub with seasonal small plates, wood-fired classics, and a 40+ craft beer lineup."
-                disabled
+                value={details.description}
+                onChange={(e) => updateField("description", e.target.value)}
+                placeholder="A short blurb shown wherever this restaurant is described."
               />
             </Field>
           </div>
+        </div>
+        <div className="flex items-center gap-3">
+          <Button
+            size="sm"
+            disabled={!detailsDirty || updateDetails.isPending}
+            onClick={() => {
+              if (!currentRestaurant) return;
+              updateDetails.mutate(
+                { id: currentRestaurant.id, details },
+                { onSuccess: () => setDetailsSaved(true) },
+              );
+            }}
+          >
+            {updateDetails.isPending ? "Saving…" : "Save"}
+          </Button>
+          {updateDetails.isError && (
+            <p className="text-xs text-destructive">{(updateDetails.error as Error).message}</p>
+          )}
+          {detailsSaved && !updateDetails.isError && (
+            <p className="text-xs text-emerald-700">Saved.</p>
+          )}
         </div>
       </Card>
     </div>
