@@ -961,14 +961,6 @@ function ProductMixPage() {
                         : `Slipping ${(((selected.soldPrevWk - selected.soldWk) / selected.soldPrevWk) * 100).toFixed(0)}%. Try repositioning on menu or pairing with a fast attach item.`}
                   </div>
                 </div>
-                <div className="flex gap-2">
-                  <Button className="flex-1 bg-[#c4654a] hover:bg-[#a8553e] text-white">
-                    Edit on menu
-                  </Button>
-                  <Button variant="outline" className="flex-1">
-                    View on POS
-                  </Button>
-                </div>
               </div>
             </>
           )}
