@@ -1,28 +1,25 @@
-import { useQuery } from "@tanstack/react-query";
-
-import { supabase } from "./client";
 import { useCurrentRestaurant } from "@/lib/restaurant-context";
+import { useCurrentLocation } from "@/lib/location-context";
 
 // RLS already scopes every query to the signed-in user's own
 // restaurants — this resolves which location_id(s) to filter on for
-// the currently-*selected* restaurant only (a restaurant can have more
-// than one location, but a user with memberships in multiple
-// restaurants should only ever see one restaurant's data at a time —
-// see src/lib/restaurant-context.tsx for the selection itself).
-export function useLocationIds() {
+// the currently-*selected* location only (a restaurant can have more
+// than one location; LocationProvider — src/lib/location-context.tsx —
+// tracks which one is picked via the sidebar switcher). Every read
+// query in the app that does `.in("location_id", locationIds)`, and
+// every write hook's `useLocationIds().data?.[0]`, both flow through
+// here — so switching locations re-scopes the whole dashboard from
+// this one spot rather than needing every call site touched.
+//
+// Kept in this query-result shape (an object with `.data`) rather than
+// returning the array directly, since every existing call site already
+// destructures `{ data: locationIds } = useLocationIds()` — matching
+// that shape meant zero changes were needed anywhere else in the app.
+export function useLocationIds(): { data: string[] | undefined; isLoading: boolean } {
   const { currentRestaurantId } = useCurrentRestaurant();
-  return useQuery({
-    queryKey: ["locations", currentRestaurantId],
-    enabled: !!currentRestaurantId,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("locations")
-        .select("id")
-        .eq("restaurant_id", currentRestaurantId!);
-      if (error) throw error;
-      return (data ?? []).map((l) => l.id as string);
-    },
-  });
+  const { currentLocationId, isLoading } = useCurrentLocation();
+  if (!currentRestaurantId) return { data: undefined, isLoading };
+  return { data: currentLocationId ? [currentLocationId] : [], isLoading };
 }
 
 // Single-element array (or empty while the selection is still

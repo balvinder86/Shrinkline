@@ -68,6 +68,7 @@ import { supabase } from "@/lib/supabase/client";
 import {
   useUpdateRestaurantName,
   useLocationsForSettings,
+  useCreateLocation,
   useUpdateLocation,
   useRestaurantProfile,
   useUpdateRestaurantProfileDetails,
@@ -643,31 +644,88 @@ function LocationEditor({
   );
 }
 
+function AddLocationCard({ onDone }: { onDone: () => void }) {
+  const createLocation = useCreateLocation();
+  const [name, setName] = useState("");
+  const [timezone, setTimezone] = useState(TIMEZONES[0]);
+
+  return (
+    <Card className="border-primary/30 p-5">
+      <div className="flex items-start justify-between gap-3">
+        <div className="grid h-10 w-10 place-items-center rounded-lg bg-primary/10 text-primary">
+          <MapPin className="h-4 w-4" />
+        </div>
+      </div>
+      <div className="mt-4 space-y-3">
+        <Field label="Name">
+          <Input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="e.g. Thrasher's Pub — Downtown"
+            autoFocus
+          />
+        </Field>
+        <Field label="Timezone">
+          <Select value={timezone} onValueChange={setTimezone}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {TIMEZONES.map((tz) => (
+                <SelectItem key={tz} value={tz}>
+                  {tz}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
+      </div>
+      <Separator className="my-4" />
+      <div className="flex items-center gap-2">
+        <Button
+          size="sm"
+          disabled={!name.trim() || createLocation.isPending}
+          onClick={() =>
+            createLocation.mutate({ name: name.trim(), timezone }, { onSuccess: () => onDone() })
+          }
+        >
+          {createLocation.isPending ? "Creating…" : "Create location"}
+        </Button>
+        <Button size="sm" variant="ghost" onClick={onDone} disabled={createLocation.isPending}>
+          Cancel
+        </Button>
+        {createLocation.isError && (
+          <span className="text-xs text-destructive">
+            {(createLocation.error as Error).message}
+          </span>
+        )}
+      </div>
+    </Card>
+  );
+}
+
 function LocationsSection() {
   const { data: locations = [], isLoading } = useLocationsForSettings();
+  const [adding, setAdding] = useState(false);
   return (
     <div className="space-y-6">
       <SectionHeader
         eyebrow="Business"
         title="Locations"
-        description="Real locations, editable name and timezone. Adding a new location isn't built here — locations are provisioned during Toast setup."
+        description="Add locations, edit their name and timezone, and switch between them from the sidebar."
         action={
-          <Button
-            size="sm"
-            className="gap-2 rounded-full"
-            disabled
-            title="Not built yet — add locations via Toast setup"
-          >
-            <Plus className="h-3.5 w-3.5" /> Add location
-          </Button>
+          !adding && (
+            <Button size="sm" className="gap-2 rounded-full" onClick={() => setAdding(true)}>
+              <Plus className="h-3.5 w-3.5" /> Add location
+            </Button>
+          )
         }
       />
       {isLoading ? (
         <p className="text-sm text-muted-foreground">Loading…</p>
-      ) : locations.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No locations found for this restaurant.</p>
       ) : (
         <div className="grid gap-4 md:grid-cols-2">
+          {adding && <AddLocationCard onDone={() => setAdding(false)} />}
           {locations.map((l) => (
             <LocationEditor key={l.id} location={l} />
           ))}

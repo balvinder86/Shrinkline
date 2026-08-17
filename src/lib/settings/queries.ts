@@ -223,6 +223,30 @@ export function useLocationsForSettings() {
   });
 }
 
+export function useCreateLocation() {
+  const restaurantId = useRestaurantIds()[0];
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ name, timezone }: { name: string; timezone: string }) => {
+      if (!restaurantId) throw new Error("No current restaurant.");
+      const { data, error } = await supabase
+        .from("locations")
+        .insert({ restaurant_id: restaurantId, name, timezone })
+        .select("id")
+        .single();
+      if (error) throw error;
+      return data.id as string;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["settings-locations"] });
+      // LocationProvider's own query key (src/lib/location-context.tsx)
+      // — invalidating it is what makes the new location show up in the
+      // sidebar switcher immediately instead of only after a refresh.
+      queryClient.invalidateQueries({ queryKey: ["locations-for-switcher"] });
+    },
+  });
+}
+
 export function useUpdateLocation() {
   const queryClient = useQueryClient();
   return useMutation({

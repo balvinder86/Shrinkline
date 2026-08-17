@@ -51,7 +51,7 @@ export type TranslationDict = {
     lastMonth: string;
     apply: string;
   };
-  profile: { language: string; restaurant: string; logout: string };
+  profile: { language: string; restaurant: string; location: string; logout: string };
 };
 
 export const translations: Record<Language, TranslationDict> = {
@@ -104,6 +104,7 @@ export const translations: Record<Language, TranslationDict> = {
     profile: {
       language: "Language",
       restaurant: "Restaurant",
+      location: "Location",
       logout: "Log out",
     },
   },
@@ -156,6 +157,7 @@ export const translations: Record<Language, TranslationDict> = {
     profile: {
       language: "Idioma",
       restaurant: "Restaurante",
+      location: "Ubicación",
       logout: "Cerrar sesión",
     },
   },

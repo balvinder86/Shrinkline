@@ -37,6 +37,7 @@ import {
 } from "@/lib/nav-items";
 import { useAuth } from "@/lib/supabase/auth-context";
 import { useCurrentRestaurant } from "@/lib/restaurant-context";
+import { useCurrentLocation } from "@/lib/location-context";
 import { useLanguage } from "@/lib/i18n/language-context";
 import { LANGUAGES, type Language } from "@/lib/i18n/translations";
 
@@ -56,6 +57,7 @@ export function AppSidebar() {
   const { language, setLanguage, t } = useLanguage();
   const { restaurants, currentRestaurantId, currentRestaurant, setCurrentRestaurantId } =
     useCurrentRestaurant();
+  const { locations, currentLocationId, setCurrentLocationId } = useCurrentLocation();
 
   const visibleOverview = visibleFor(NAV_OVERVIEW, membership);
   const visibleGrowth = visibleFor(NAV_GROWTH, membership);
@@ -181,6 +183,24 @@ export function AppSidebar() {
                   {restaurants.map((r) => (
                     <DropdownMenuRadioItem key={r.id} value={r.id}>
                       {r.name}
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+                <DropdownMenuSeparator />
+              </>
+            )}
+            {locations.length > 1 && (
+              <>
+                <DropdownMenuLabel className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+                  {t.profile.location}
+                </DropdownMenuLabel>
+                <DropdownMenuRadioGroup
+                  value={currentLocationId ?? ""}
+                  onValueChange={(v) => setCurrentLocationId(v)}
+                >
+                  {locations.map((l) => (
+                    <DropdownMenuRadioItem key={l.id} value={l.id}>
+                      {l.name}
                     </DropdownMenuRadioItem>
                   ))}
                 </DropdownMenuRadioGroup>

@@ -22,6 +22,7 @@ import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/AppSidebar";
 import { AuthProvider, useAuth } from "@/lib/supabase/auth-context";
 import { RestaurantProvider } from "@/lib/restaurant-context";
+import { LocationProvider } from "@/lib/location-context";
 import { DateRangeProvider } from "@/lib/date-range-context";
 import { LanguageProvider } from "@/lib/i18n/language-context";
 import { hasAccess, useCurrentMembership, ROUTE_PERMISSION } from "@/lib/permissions";
@@ -156,11 +157,13 @@ function RootComponent() {
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
         <RestaurantProvider>
-          <LanguageProvider>
-            <DateRangeProvider>
-              <AuthGate />
-            </DateRangeProvider>
-          </LanguageProvider>
+          <LocationProvider>
+            <LanguageProvider>
+              <DateRangeProvider>
+                <AuthGate />
+              </DateRangeProvider>
+            </LanguageProvider>
+          </LocationProvider>
         </RestaurantProvider>
       </AuthProvider>
     </QueryClientProvider>
