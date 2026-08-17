@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { MessageCircle, Send, Sparkles, X } from "lucide-react";
+import { MessageCircle, Send, Sparkles } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -59,19 +59,9 @@ export function ChatWidget() {
       <Sheet open={open} onOpenChange={setOpen}>
         <SheetContent className="flex w-full flex-col p-0 sm:max-w-md">
           <SheetHeader className="border-b px-5 py-4 text-left">
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <Sparkles className="h-4 w-4 text-primary" />
-                <SheetTitle className="font-display text-lg">Ask about your restaurant</SheetTitle>
-              </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7"
-                onClick={() => setOpen(false)}
-              >
-                <X className="h-4 w-4" />
-              </Button>
+            <div className="flex items-center gap-2">
+              <Sparkles className="h-4 w-4 text-primary" />
+              <SheetTitle className="font-display text-lg">Ask about your restaurant</SheetTitle>
             </div>
             <SheetDescription>
               Grounded in your real data — food cost, labor, vendors, inventory, price trends.
