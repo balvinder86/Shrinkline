@@ -120,7 +120,10 @@ function sumQtyByIngredient(
       unreliable.add(line.ingredient_id);
       continue;
     }
-    qtyByIngredient.set(line.ingredient_id, (qtyByIngredient.get(line.ingredient_id) ?? 0) + converted);
+    qtyByIngredient.set(
+      line.ingredient_id,
+      (qtyByIngredient.get(line.ingredient_id) ?? 0) + converted,
+    );
   }
   return { qtyByIngredient, unreliable };
 }
@@ -277,7 +280,10 @@ async function toolGetPnlSummary(input: { from?: string; to?: string }, ctx: Ctx
   const qtyByItem = new Map<string, number>();
   for (const r of sales) {
     netSalesCents += Number(r.net_sales_cents);
-    qtyByItem.set(r.menu_item_pos_id, (qtyByItem.get(r.menu_item_pos_id) ?? 0) + Number(r.quantity_sold));
+    qtyByItem.set(
+      r.menu_item_pos_id,
+      (qtyByItem.get(r.menu_item_pos_id) ?? 0) + Number(r.quantity_sold),
+    );
   }
 
   let theoreticalFoodCostCents = 0;
@@ -314,7 +320,10 @@ async function toolGetPnlSummary(input: { from?: string; to?: string }, ctx: Ctx
   }
 
   const expenseByCategory = new Map<string, number>();
-  for (const inv of (allInvoicesRes.data ?? []) as unknown as { total_cents: number | null; vendors: { category: string } | null }[]) {
+  for (const inv of (allInvoicesRes.data ?? []) as unknown as {
+    total_cents: number | null;
+    vendors: { category: string } | null;
+  }[]) {
     const cat = inv.vendors?.category ?? "other";
     expenseByCategory.set(cat, (expenseByCategory.get(cat) ?? 0) + (inv.total_cents ?? 0));
   }
@@ -324,7 +333,8 @@ async function toolGetPnlSummary(input: { from?: string; to?: string }, ctx: Ctx
     dateRange: { from: fromIso, to: toIso },
     netSalesCents,
     theoreticalFoodCostCents,
-    theoreticalFoodCostPct: netSalesCents > 0 ? (theoreticalFoodCostCents / netSalesCents) * 100 : null,
+    theoreticalFoodCostPct:
+      netSalesCents > 0 ? (theoreticalFoodCostCents / netSalesCents) * 100 : null,
     actualFoodCostCents,
     actualFoodCostPct: netSalesCents > 0 ? (actualFoodCostCents / netSalesCents) * 100 : null,
     laborCostCents,
@@ -373,7 +383,10 @@ async function toolGetFoodCostVariance(
 
   const qtyByItem = new Map<string, number>();
   for (const r of sales) {
-    qtyByItem.set(r.menu_item_pos_id, (qtyByItem.get(r.menu_item_pos_id) ?? 0) + Number(r.quantity_sold));
+    qtyByItem.set(
+      r.menu_item_pos_id,
+      (qtyByItem.get(r.menu_item_pos_id) ?? 0) + Number(r.quantity_sold),
+    );
   }
 
   const theoreticalByIngredient = new Map<string, number>();
@@ -411,7 +424,10 @@ async function toolGetFoodCostVariance(
   }[]) {
     if (row.invoices?.vendors?.category !== "food_beverage") continue;
     const cents = row.line_total_cents ?? 0;
-    actualByIngredient.set(row.ingredient_id, (actualByIngredient.get(row.ingredient_id) ?? 0) + cents);
+    actualByIngredient.set(
+      row.ingredient_id,
+      (actualByIngredient.get(row.ingredient_id) ?? 0) + cents,
+    );
     matchedActualCents += cents;
   }
 
@@ -468,54 +484,61 @@ async function toolGetInventoryVariance(_input: Record<string, never>, ctx: Ctx)
   const fromIso = previousCount.counted_at as string;
   const toIso = latestCount.counted_at as string;
 
-  const [latestLinesRes, previousLinesRes, ingredientsRes, salesRows, recipeCtx, invoiceLineRows, wasteRows] =
-    await Promise.all([
+  const [
+    latestLinesRes,
+    previousLinesRes,
+    ingredientsRes,
+    salesRows,
+    recipeCtx,
+    invoiceLineRows,
+    wasteRows,
+  ] = await Promise.all([
+    supabase
+      .from("inventory_count_lines")
+      .select("ingredient_id, quantity, unit")
+      .eq("inventory_count_id", latestCount.id),
+    supabase
+      .from("inventory_count_lines")
+      .select("ingredient_id, quantity, unit")
+      .eq("inventory_count_id", previousCount.id),
+    supabase
+      .from("ingredients")
+      .select("id, name, category, unit, unit_cost_cents, container_size_ml, container_size_g")
+      .eq("restaurant_id", ctx.restaurantId),
+    fetchAllRows((from, to) =>
       supabase
-        .from("inventory_count_lines")
+        .from("pmix_sales")
+        .select("menu_item_pos_id, quantity_sold")
+        .in("location_id", ctx.locationIds)
+        .gt("business_date", fromIso)
+        .lte("business_date", toIso)
+        .order("business_date", { ascending: true })
+        .range(from, to),
+    ),
+    fetchRecipeCostContext(ctx.locationIds),
+    fetchAllRows((from, to) =>
+      supabase
+        .from("invoice_lines")
+        .select("id, ingredient_id, quantity, unit, invoices!inner(status, vendors(category))")
+        .not("ingredient_id", "is", null)
+        .eq("invoices.status", "approved")
+        .in("invoices.location_id", ctx.locationIds)
+        .gt("invoices.invoice_date", fromIso)
+        .lte("invoices.invoice_date", toIso)
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
+    fetchAllRows((from, to) =>
+      supabase
+        .from("waste_log")
         .select("ingredient_id, quantity, unit")
-        .eq("inventory_count_id", latestCount.id),
-      supabase
-        .from("inventory_count_lines")
-        .select("ingredient_id, quantity, unit")
-        .eq("inventory_count_id", previousCount.id),
-      supabase
-        .from("ingredients")
-        .select("id, name, category, unit, unit_cost_cents, container_size_ml, container_size_g")
-        .eq("restaurant_id", ctx.restaurantId),
-      fetchAllRows((from, to) =>
-        supabase
-          .from("pmix_sales")
-          .select("menu_item_pos_id, quantity_sold")
-          .in("location_id", ctx.locationIds)
-          .gt("business_date", fromIso)
-          .lte("business_date", toIso)
-          .order("business_date", { ascending: true })
-          .range(from, to),
-      ),
-      fetchRecipeCostContext(ctx.locationIds),
-      fetchAllRows((from, to) =>
-        supabase
-          .from("invoice_lines")
-          .select("id, ingredient_id, quantity, unit, invoices!inner(status, vendors(category))")
-          .not("ingredient_id", "is", null)
-          .eq("invoices.status", "approved")
-          .in("invoices.location_id", ctx.locationIds)
-          .gt("invoices.invoice_date", fromIso)
-          .lte("invoices.invoice_date", toIso)
-          .order("id", { ascending: true })
-          .range(from, to),
-      ),
-      fetchAllRows((from, to) =>
-        supabase
-          .from("waste_log")
-          .select("ingredient_id, quantity, unit")
-          .in("location_id", ctx.locationIds)
-          .gt("logged_at", fromIso)
-          .lte("logged_at", toIso)
-          .order("id", { ascending: true })
-          .range(from, to),
-      ),
-    ]);
+        .in("location_id", ctx.locationIds)
+        .gt("logged_at", fromIso)
+        .lte("logged_at", toIso)
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
+  ]);
   if (latestLinesRes.error) throw latestLinesRes.error;
   if (previousLinesRes.error) throw previousLinesRes.error;
   if (ingredientsRes.error) throw ingredientsRes.error;
@@ -549,9 +572,15 @@ async function toolGetInventoryVariance(_input: Record<string, never>, ctx: Ctx)
       unit: string | null;
       invoices: { status: string; vendors: { category: string } | null } | null;
     }[]
-  ).filter((r) => r.invoices?.vendors?.category === "food_beverage" && r.quantity != null && r.unit);
+  ).filter(
+    (r) => r.invoices?.vendors?.category === "food_beverage" && r.quantity != null && r.unit,
+  );
   const { qtyByIngredient: purchasedQty, unreliable: purchaseUnreliable } = sumQtyByIngredient(
-    matchedInvoiceLines.map((r) => ({ ingredient_id: r.ingredient_id, quantity: r.quantity!, unit: r.unit! })),
+    matchedInvoiceLines.map((r) => ({
+      ingredient_id: r.ingredient_id,
+      quantity: r.quantity!,
+      unit: r.unit!,
+    })),
     ingredientInfoById,
   );
   const { qtyByIngredient: wastedQty, unreliable: wasteUnreliable } = sumQtyByIngredient(
@@ -561,7 +590,10 @@ async function toolGetInventoryVariance(_input: Record<string, never>, ctx: Ctx)
 
   const qtyByPosItem = new Map<string, number>();
   for (const r of salesRows) {
-    qtyByPosItem.set(r.menu_item_pos_id, (qtyByPosItem.get(r.menu_item_pos_id) ?? 0) + Number(r.quantity_sold));
+    qtyByPosItem.set(
+      r.menu_item_pos_id,
+      (qtyByPosItem.get(r.menu_item_pos_id) ?? 0) + Number(r.quantity_sold),
+    );
   }
   const usedQty = new Map<string, number>();
   let itemsMissingRecipeCount = 0;
@@ -587,7 +619,12 @@ async function toolGetInventoryVariance(_input: Record<string, never>, ctx: Ctx)
     for (const [id, q] of acc) usedQty.set(id, (usedQty.get(id) ?? 0) + q);
   }
 
-  const unreliable = new Set([...latestUnreliable, ...previousUnreliable, ...purchaseUnreliable, ...wasteUnreliable]);
+  const unreliable = new Set([
+    ...latestUnreliable,
+    ...previousUnreliable,
+    ...purchaseUnreliable,
+    ...wasteUnreliable,
+  ]);
   let excludedIngredientCount = 0;
   const rows: {
     ingredientName: string;
@@ -622,12 +659,15 @@ async function toolGetInventoryVariance(_input: Record<string, never>, ctx: Ctx)
       expectedEndQty,
       actualEndQty: endQty,
       varianceQty,
-      varianceCostCents: info.unitCostCents != null ? Math.round(varianceQty * info.unitCostCents) : null,
+      varianceCostCents:
+        info.unitCostCents != null ? Math.round(varianceQty * info.unitCostCents) : null,
     });
   }
   rows.sort((a, b) => {
-    const av = a.varianceCostCents != null ? Math.abs(a.varianceCostCents) : Math.abs(a.varianceQty);
-    const bv = b.varianceCostCents != null ? Math.abs(b.varianceCostCents) : Math.abs(b.varianceQty);
+    const av =
+      a.varianceCostCents != null ? Math.abs(a.varianceCostCents) : Math.abs(a.varianceQty);
+    const bv =
+      b.varianceCostCents != null ? Math.abs(b.varianceCostCents) : Math.abs(b.varianceQty);
     return bv - av;
   });
 
@@ -670,7 +710,12 @@ async function toolGetVendorSpend(input: { from?: string; to?: string }, ctx: Ct
   const rows = (vendorsRes.data ?? [])
     .map((v) => {
       const stats = byVendor.get(v.id) ?? { spendCents: 0, invoiceCount: 0 };
-      return { vendorName: v.name, category: v.category, spendCents: stats.spendCents, invoiceCount: stats.invoiceCount };
+      return {
+        vendorName: v.name,
+        category: v.category,
+        spendCents: stats.spendCents,
+        invoiceCount: stats.invoiceCount,
+      };
     })
     .filter((r) => r.spendCents > 0)
     .sort((a, b) => b.spendCents - a.spendCents);
@@ -690,13 +735,18 @@ async function toolGetIngredientPriceTrends(input: { limit?: number }, ctx: Ctx)
     fetchAllRows<Row>((from, to) =>
       supabase
         .from("ingredient_cost_history")
-        .select("ingredient_id, unit_cost_cents, effective_date, invoice_lines(invoices(vendors(name)))")
+        .select(
+          "ingredient_id, unit_cost_cents, effective_date, invoice_lines(invoices(vendors(name)))",
+        )
         .eq("restaurant_id", ctx.restaurantId)
         .order("effective_date", { ascending: true })
         .order("created_at", { ascending: true })
         .range(from, to),
     ),
-    supabase.from("ingredients").select("id, name, category, unit").eq("restaurant_id", ctx.restaurantId),
+    supabase
+      .from("ingredients")
+      .select("id, name, category, unit")
+      .eq("restaurant_id", ctx.restaurantId),
   ]);
   if (ingredientsRes.error) throw ingredientsRes.error;
 
@@ -707,7 +757,10 @@ async function toolGetIngredientPriceTrends(input: { limit?: number }, ctx: Ctx)
     byIngredient.set(row.ingredient_id, list);
   }
   const ingredientInfoById = new Map(
-    (ingredientsRes.data ?? []).map((i) => [i.id, { name: i.name, category: i.category, unit: i.unit }]),
+    (ingredientsRes.data ?? []).map((i) => [
+      i.id,
+      { name: i.name, category: i.category, unit: i.unit },
+    ]),
   );
 
   const rows = [];
@@ -728,7 +781,8 @@ async function toolGetIngredientPriceTrends(input: { limit?: number }, ctx: Ctx)
       currentCostCents: latest.unit_cost_cents,
       firstCostCents: first.unit_cost_cents,
       changePct: pctChange(first.unit_cost_cents, latest.unit_cost_cents),
-      vendorLabel: vendors.size === 0 ? "—" : vendors.size === 1 ? Array.from(vendors)[0] : "Multiple vendors",
+      vendorLabel:
+        vendors.size === 0 ? "—" : vendors.size === 1 ? Array.from(vendors)[0] : "Multiple vendors",
       latestDate: latest.effective_date,
     });
   }
@@ -825,7 +879,8 @@ async function toolSearchIngredient(input: { name: string }, ctx: Ctx) {
   const historyByIngredient = new Map<string, { unitCostCents: number; effectiveDate: string }[]>();
   for (const h of historyRes.data ?? []) {
     const list = historyByIngredient.get(h.ingredient_id) ?? [];
-    if (list.length < 5) list.push({ unitCostCents: h.unit_cost_cents, effectiveDate: h.effective_date });
+    if (list.length < 5)
+      list.push({ unitCostCents: h.unit_cost_cents, effectiveDate: h.effective_date });
     historyByIngredient.set(h.ingredient_id, list);
   }
 
@@ -841,7 +896,105 @@ async function toolSearchIngredient(input: { name: string }, ctx: Ctx) {
   };
 }
 
-// name -> [implementation, requiredPermission]
+// Real units-sold/revenue per menu item name, straight off pmix_sales
+// (Toast's own denormalized item name — no menu_items join needed,
+// matching the lean useTopItems precedent in src/lib/pos/queries.ts
+// rather than the heavier useProductMix, which additionally resolves
+// cost/margin this tool doesn't need). Revenue is Toast's real
+// net_sales_cents, never price × quantity (diverges on discounts/
+// comps/modifiers).
+async function toolGetTopMenuItems(
+  input: { from?: string; to?: string; limit?: number; sortBy?: "quantity" | "revenue" },
+  ctx: Ctx,
+) {
+  const { fromIso, toIso } = resolveDateRange(input.from, input.to);
+  const limit = Math.min(Math.max(input.limit ?? 10, 1), 30);
+  const rows = await fetchAllRows((from, to) =>
+    supabase
+      .from("pmix_sales")
+      .select("name, quantity_sold, net_sales_cents")
+      .in("location_id", ctx.locationIds)
+      .gte("business_date", fromIso)
+      .lte("business_date", toIso)
+      .order("business_date", { ascending: true })
+      .range(from, to),
+  );
+
+  const byName = new Map<string, { unitsSold: number; revenueCents: number }>();
+  for (const r of rows) {
+    const cur = byName.get(r.name) ?? { unitsSold: 0, revenueCents: 0 };
+    cur.unitsSold += Number(r.quantity_sold);
+    cur.revenueCents += Number(r.net_sales_cents);
+    byName.set(r.name, cur);
+  }
+
+  const items = Array.from(byName.entries()).map(([name, v]) => ({
+    name,
+    unitsSold: v.unitsSold,
+    revenueCents: Math.round(v.revenueCents),
+  }));
+  const sortBy = input.sortBy ?? "quantity";
+  items.sort((a, b) =>
+    sortBy === "revenue" ? b.revenueCents - a.revenueCents : b.unitsSold - a.unitsSold,
+  );
+
+  return {
+    dateRange: { from: fromIso, to: toIso },
+    sortedBy: sortBy,
+    items: items.slice(0, limit),
+  };
+}
+
+const RECOMMENDATION_TABS = ["food_cost", "inventory", "invoices", "recipes"] as const;
+
+// Reads the SAME ai_recommendations rows the P&L page's
+// AiRecommendationsPanel shows — generated nightly by the insights
+// Railway service's Batch API pipeline, not computed here. This tool
+// surfaces existing curated recommendations rather than having the
+// chat improvise its own from scratch every time.
+async function toolGetAiRecommendations(input: { tab?: string }, ctx: Ctx) {
+  const tabs = (
+    input.tab && (RECOMMENDATION_TABS as readonly string[]).includes(input.tab)
+      ? [input.tab]
+      : RECOMMENDATION_TABS
+  ) as string[];
+  const locationId = ctx.locationIds[0];
+  const { data, error } = await supabase
+    .from("ai_recommendations")
+    .select("tab, severity, headline, body, business_date, generated_at")
+    .eq("location_id", locationId)
+    .in("tab", tabs)
+    .order("business_date", { ascending: false });
+  if (error) throw error;
+  const rows = data ?? [];
+
+  const latestDateByTab = new Map<string, string>();
+  for (const r of rows) {
+    if (!latestDateByTab.has(r.tab)) latestDateByTab.set(r.tab, r.business_date);
+  }
+  const latest = rows.filter((r) => r.business_date === latestDateByTab.get(r.tab));
+
+  return {
+    recommendations: latest.map((r) => ({
+      tab: r.tab,
+      severity: r.severity,
+      headline: r.headline,
+      body: r.body,
+      date: r.business_date,
+    })),
+    note:
+      latest.length === 0
+        ? "No AI recommendations generated yet for this restaurant — they run nightly, check back tomorrow."
+        : undefined,
+  };
+}
+
+// name -> [implementation, requiredPermission]. Each tool's own input
+// type is narrower than `any` — `any` here is deliberate, only to let
+// a heterogeneous dispatch table hold functions with different input
+// shapes; real validation of what the model actually sent happens
+// inside each tool via its own typed parameter.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const TOOLS: Record<string, [(input: any, ctx: Ctx) => Promise<unknown>, string]> = {
   get_pnl_summary: [toolGetPnlSummary, "pnl"],
   get_food_cost_variance: [toolGetFoodCostVariance, "pnl"],
@@ -850,6 +1003,8 @@ const TOOLS: Record<string, [(input: any, ctx: Ctx) => Promise<unknown>, string]
   get_ingredient_price_trends: [toolGetIngredientPriceTrends, "pnl"],
   get_labor_cost_summary: [toolGetLaborCostSummary, "scheduling"],
   search_ingredient: [toolSearchIngredient, "inventory"],
+  get_top_menu_items: [toolGetTopMenuItems, "product_mix"],
+  get_ai_recommendations: [toolGetAiRecommendations, "pnl"],
 };
 
 const TOOL_DEFINITIONS = [
@@ -860,7 +1015,10 @@ const TOOL_DEFINITIONS = [
     input_schema: {
       type: "object",
       properties: {
-        from: { type: "string", description: "Start date, YYYY-MM-DD. Defaults to 30 days before today." },
+        from: {
+          type: "string",
+          description: "Start date, YYYY-MM-DD. Defaults to 30 days before today.",
+        },
         to: { type: "string", description: "End date, YYYY-MM-DD. Defaults to today." },
       },
     },
@@ -872,7 +1030,10 @@ const TOOL_DEFINITIONS = [
     input_schema: {
       type: "object",
       properties: {
-        from: { type: "string", description: "Start date, YYYY-MM-DD. Defaults to 30 days before today." },
+        from: {
+          type: "string",
+          description: "Start date, YYYY-MM-DD. Defaults to 30 days before today.",
+        },
         to: { type: "string", description: "End date, YYYY-MM-DD. Defaults to today." },
         category: {
           type: "string",
@@ -894,7 +1055,10 @@ const TOOL_DEFINITIONS = [
     input_schema: {
       type: "object",
       properties: {
-        from: { type: "string", description: "Start date, YYYY-MM-DD. Defaults to 30 days before today." },
+        from: {
+          type: "string",
+          description: "Start date, YYYY-MM-DD. Defaults to 30 days before today.",
+        },
         to: { type: "string", description: "End date, YYYY-MM-DD. Defaults to today." },
       },
     },
@@ -905,7 +1069,9 @@ const TOOL_DEFINITIONS = [
       "Every ingredient with recorded cost history, ranked by how much its price has moved since it was first tracked — surfaces vendor price creep. Use for 'any big price increases' questions.",
     input_schema: {
       type: "object",
-      properties: { limit: { type: "number", description: "Max rows to return, default 10, max 30." } },
+      properties: {
+        limit: { type: "number", description: "Max rows to return, default 10, max 30." },
+      },
     },
   },
   {
@@ -914,7 +1080,10 @@ const TOOL_DEFINITIONS = [
     input_schema: {
       type: "object",
       properties: {
-        from: { type: "string", description: "Start date, YYYY-MM-DD. Defaults to 30 days before today." },
+        from: {
+          type: "string",
+          description: "Start date, YYYY-MM-DD. Defaults to 30 days before today.",
+        },
         to: { type: "string", description: "End date, YYYY-MM-DD. Defaults to today." },
       },
     },
@@ -929,9 +1098,45 @@ const TOOL_DEFINITIONS = [
       required: ["name"],
     },
   },
+  {
+    name: "get_top_menu_items",
+    description:
+      "Units sold and revenue per menu item for a date range, ranked by popularity or revenue. Use for 'what's my most sold item', 'best sellers', or 'top revenue items' questions.",
+    input_schema: {
+      type: "object",
+      properties: {
+        from: {
+          type: "string",
+          description: "Start date, YYYY-MM-DD. Defaults to 30 days before today.",
+        },
+        to: { type: "string", description: "End date, YYYY-MM-DD. Defaults to today." },
+        limit: { type: "number", description: "Max items to return, default 10, max 30." },
+        sortBy: {
+          type: "string",
+          enum: ["quantity", "revenue"],
+          description: "Rank by units sold (default) or by revenue.",
+        },
+      },
+    },
+  },
+  {
+    name: "get_ai_recommendations",
+    description:
+      "The restaurant's existing nightly-generated AI recommendations (the same ones shown on the P&L page's Price Alerts panel) — curated flags on food cost, inventory, invoices, or recipes. Call this FIRST whenever the user broadly asks for suggestions, recommendations, or 'what should I do' before adding your own observations.",
+    input_schema: {
+      type: "object",
+      properties: {
+        tab: {
+          type: "string",
+          enum: ["food_cost", "inventory", "invoices", "recipes"],
+          description: "Optional filter to one area. Omit to get all.",
+        },
+      },
+    },
+  },
 ];
 
-const SYSTEM_PROMPT = `You are the in-app data assistant for Thrasher's Pub's restaurant-ops dashboard. You help this restaurant's own owner/manager/staff understand THEIR restaurant's real numbers — food cost, labor, vendor spend, inventory, ingredient price trends — by calling tools that query their live data. Never guess or estimate a number yourself; always call a tool to get it.
+const SYSTEM_PROMPT = `You are the in-app data assistant for Thrasher's Pub's restaurant-ops dashboard. You help this restaurant's own owner/manager/staff understand THEIR restaurant's real numbers — food cost, labor, vendor spend, inventory, ingredient price trends, top sellers — by calling tools that query their live data. Never guess or estimate a number yourself; always call a tool to get it.
 
 Rules:
 - If the user doesn't specify a date range, the tool defaults to the last 30 days — say that plainly in your answer (e.g. "over the last 30 days").
@@ -939,7 +1144,29 @@ Rules:
 - If a tool result has error: "not_permitted", tell the user plainly they don't have access to that data and suggest asking an owner/manager to grant it — don't try another tool to work around it.
 - Keep answers short and conversational — a couple of sentences or a short "-" bullet list. No headers, no tables, no heavy markdown.
 - You can only answer questions about this restaurant's own operational data. You cannot take actions (log waste, change prices, edit recipes, etc.) — if asked to DO something rather than answer a question, say so.
-- All dollar amounts in tool results are in cents — always convert to dollars in your answer.`;
+- All dollar amounts in tool results are in cents — always convert to dollars in your answer.
+- When the user asks for suggestions, recommendations, or "what should I do", call get_ai_recommendations FIRST and lead your answer with those (they're the restaurant's real curated flags, generated nightly) — then, if a tool result you already pulled clearly shows something worth acting on (a big variance, a price spike, a shrinkage number), add 1-2 short, concrete, specific-to-this-data suggestions of your own. Never invent generic restaurant advice unconnected to a real number you just pulled.
+- When it would genuinely help — the user seems stuck, asks "where do I find X", or a page would let them explore/act on something further than you can in chat (a chart, a full table, editing a recipe, saving a count) — link to the single most relevant page using markdown: [Label](/path). Only use exact paths from AVAILABLE PAGES below; never invent one. Don't link on every message — only when it adds real value.
+
+AVAILABLE PAGES:
+- /product-mix — Product Mix: menu engineering (stars/plowhorses/puzzles/dogs), full sales-by-item view
+- /recipes — Recipes: ingredients, cost, and margin per dish; edit recipe lines
+- /invoices — Invoices: vendor invoices, line-item spend, payment status
+- /inventory — Ordering: par levels, smart carts, AI ordering agent
+- /inventory-count — Count Inventory: save a physical count
+- /vendors — Vendors: contacts, terms, delivery days
+- /purchase-orders — Purchase Orders: sent POs and status
+- /waste-log — Waste Log: log ingredient waste and its dollar cost
+- /inventory-variance — Inventory Variance: full shrinkage table from count reconciliation
+- /pnl — P&L: full sales/food cost/labor/prime cost/opex breakdown
+- /variance — Cost Variance: full per-ingredient theoretical-vs-actual table, filterable by category
+- /labor — Labor Cost: full hours/overtime/cost breakdown, trend chart
+- /ingredient-price-trends — Ingredient Price Trends: full price-history table and per-ingredient chart
+- /reviews — Reviews: Google reviews and the AI reply agent
+- /seo — SEO: local search rankings, Google Business health
+- /marketing — Marketing: campaigns across email/SMS/social/loyalty/ads
+- /loyalty — Loyalty: program tiers, rewards, referrals
+- /scheduling — Scheduling: staff scheduling`;
 
 // ------------------------------------------------------------------
 // Handler
@@ -967,7 +1194,10 @@ Deno.serve(async (req) => {
 
     const { restaurant_id, messages } = await req.json();
     if (!restaurant_id || !Array.isArray(messages) || messages.length === 0) {
-      return json({ ok: false, error: "restaurant_id and a non-empty messages array are required" }, 400);
+      return json(
+        { ok: false, error: "restaurant_id and a non-empty messages array are required" },
+        400,
+      );
     }
     if (messages.length > MAX_MESSAGES) {
       return json({ ok: false, error: `too many messages (max ${MAX_MESSAGES})` }, 400);
@@ -998,15 +1228,22 @@ Deno.serve(async (req) => {
       permissions: membershipRow.permissions ?? {},
     };
 
-    const { data: locations } = await supabase.from("locations").select("id").eq("restaurant_id", restaurant_id);
+    const { data: locations } = await supabase
+      .from("locations")
+      .select("id")
+      .eq("restaurant_id", restaurant_id);
     const locationIds = (locations ?? []).map((l: { id: string }) => l.id);
     if (locationIds.length === 0) {
       return json({ ok: false, error: "no locations found for this restaurant" }, 400);
     }
     const ctx: Ctx = { restaurantId: restaurant_id, locationIds };
 
+    // Anthropic's Messages API content blocks (text/thinking/tool_use/
+    // tool_result) aren't worth fully typing here — this array is only
+    // ever built up and passed straight back to fetch() verbatim.
     // deno-lint-ignore no-explicit-any
-    let anthropicMessages: any[] = messages.map((m: { role: string; content: string }) => ({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const anthropicMessages: any[] = messages.map((m: { role: string; content: string }) => ({
       role: m.role,
       content: m.content,
     }));
@@ -1031,11 +1268,19 @@ Deno.serve(async (req) => {
       });
       if (!anthropicRes.ok) {
         const errBody = await anthropicRes.text().catch(() => "");
-        return json({ ok: false, error: `Claude API error ${anthropicRes.status}: ${errBody}` }, 502);
+        return json(
+          { ok: false, error: `Claude API error ${anthropicRes.status}: ${errBody}` },
+          502,
+        );
       }
       const body = await anthropicRes.json();
-      const content: { type: string; text?: string; id?: string; name?: string; input?: unknown }[] =
-        body.content ?? [];
+      const content: {
+        type: string;
+        text?: string;
+        id?: string;
+        name?: string;
+        input?: unknown;
+      }[] = body.content ?? [];
 
       if (body.stop_reason !== "tool_use") {
         finalText = content
@@ -1063,6 +1308,7 @@ Deno.serve(async (req) => {
             resultPayload = PERMISSION_DENIED(requiredPermission);
           } else {
             try {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
               resultPayload = await impl((block.input ?? {}) as any, ctx);
             } catch (e) {
               resultPayload = { error: "tool_failed", message: String(e) };
@@ -1080,13 +1326,20 @@ Deno.serve(async (req) => {
 
     if (finalText == null) {
       return json(
-        { ok: false, error: "Ran out of tool-call turns without a final answer — try a narrower question." },
+        {
+          ok: false,
+          error: "Ran out of tool-call turns without a final answer — try a narrower question.",
+        },
         502,
       );
     }
 
     return json(
-      { ok: true, reply: finalText.trim() || "I wasn't able to put together an answer for that — try rephrasing." },
+      {
+        ok: true,
+        reply:
+          finalText.trim() || "I wasn't able to put together an answer for that — try rephrasing.",
+      },
       200,
     );
   } catch (e) {

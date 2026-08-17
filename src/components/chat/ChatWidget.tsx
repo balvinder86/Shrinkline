@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Link } from "@tanstack/react-router";
 import { MessageCircle, Send, Sparkles } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -18,8 +19,38 @@ const EXAMPLE_PROMPTS = [
   "What's my food cost variance this month?",
   "Which vendor am I spending the most with?",
   "Any ingredients with a big price jump lately?",
-  "How's my labor cost doing this week?",
+  "What's my most sold item?",
 ];
+
+// Assistant replies can include markdown-style page links — [Label](/path)
+// — per the chat edge function's system prompt (AVAILABLE PAGES). Parses
+// just that one pattern (no other markdown) and renders it as a real
+// in-app Link, closing the panel on click so the user actually lands
+// on the page rather than reading it behind an open sheet.
+const PAGE_LINK_PATTERN = /\[([^\]]+)\]\((\/[a-zA-Z0-9\-/]*)\)/g;
+
+function MessageContent({ content, onNavigate }: { content: string; onNavigate: () => void }) {
+  const nodes: ReactNode[] = [];
+  let lastIndex = 0;
+  let key = 0;
+  for (const match of content.matchAll(PAGE_LINK_PATTERN)) {
+    const index = match.index ?? 0;
+    if (index > lastIndex) nodes.push(content.slice(lastIndex, index));
+    nodes.push(
+      <Link
+        key={key++}
+        to={match[2]}
+        onClick={onNavigate}
+        className="font-medium text-primary underline underline-offset-2 hover:opacity-80"
+      >
+        {match[1]}
+      </Link>,
+    );
+    lastIndex = index + match[0].length;
+  }
+  if (lastIndex < content.length) nodes.push(content.slice(lastIndex));
+  return <>{nodes}</>;
+}
 
 export function ChatWidget() {
   const [open, setOpen] = useState(false);
@@ -97,7 +128,11 @@ export function ChatWidget() {
                           : "bg-muted text-foreground",
                       )}
                     >
-                      {m.content}
+                      {m.role === "assistant" ? (
+                        <MessageContent content={m.content} onNavigate={() => setOpen(false)} />
+                      ) : (
+                        m.content
+                      )}
                     </div>
                   </div>
                 ))}
