@@ -77,6 +77,8 @@ import {
   useRemoveRestaurantLogo,
   type RestaurantProfileDetails,
 } from "@/lib/settings/queries";
+import { useBrandsOverview } from "@/lib/restaurants/queries";
+import { AddBrandDialog } from "@/components/BrandLocationSwitcher";
 
 export const Route = createFileRoute("/settings")({
   head: () => ({ meta: [{ title: "Settings · Thrasher's Pub" }] }),
@@ -296,6 +298,64 @@ const EMPTY_DETAILS: RestaurantProfileDetails = {
   description: "",
 };
 
+function BrandsCard() {
+  const { data: brands = [], isLoading } = useBrandsOverview();
+  const { currentRestaurantId, setCurrentRestaurantId } = useCurrentRestaurant();
+  const [addBrandOpen, setAddBrandOpen] = useState(false);
+
+  return (
+    <Card className="p-6">
+      <SectionHeader
+        title="Your brands"
+        description="Every restaurant you belong to. Switch here, or from the sidebar switcher."
+        action={
+          <Button size="sm" className="gap-2 rounded-full" onClick={() => setAddBrandOpen(true)}>
+            <Plus className="h-3.5 w-3.5" /> Add brand
+          </Button>
+        }
+      />
+      <div className="mt-4 space-y-2">
+        {isLoading ? (
+          <p className="text-sm text-muted-foreground">Loading…</p>
+        ) : (
+          brands.map((b) => {
+            const isCurrent = b.id === currentRestaurantId;
+            return (
+              <div
+                key={b.id}
+                className={cn(
+                  "flex items-center justify-between gap-3 rounded-lg border px-4 py-3",
+                  isCurrent ? "border-primary/50 bg-primary/5" : "border-border/60",
+                )}
+              >
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-medium">{b.name}</div>
+                  <div className="text-xs capitalize text-muted-foreground">
+                    {b.role} · {b.locations.length} location{b.locations.length === 1 ? "" : "s"}
+                  </div>
+                </div>
+                {isCurrent ? (
+                  <Badge className="shrink-0">Current</Badge>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="shrink-0"
+                    onClick={() => setCurrentRestaurantId(b.id)}
+                  >
+                    Switch
+                  </Button>
+                )}
+              </div>
+            );
+          })
+        )}
+      </div>
+      <AddBrandDialog open={addBrandOpen} onOpenChange={setAddBrandOpen} />
+    </Card>
+  );
+}
+
 function ProfileSection() {
   const { currentRestaurant } = useCurrentRestaurant();
   const updateName = useUpdateRestaurantName();
@@ -350,6 +410,8 @@ function ProfileSection() {
   return (
     <div className="space-y-6">
       <SectionHeader eyebrow="Business" title="Restaurant profile" />
+
+      <BrandsCard />
 
       <Card className="p-6">
         <div className="max-w-md">
