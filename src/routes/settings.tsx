@@ -79,7 +79,11 @@ import {
 } from "@/lib/settings/queries";
 import { useBrandsOverview } from "@/lib/restaurants/queries";
 import { AddBrandDialog } from "@/components/BrandLocationSwitcher";
-import { useSubscription, useCreateCheckoutSession } from "@/lib/billing/queries";
+import {
+  useSubscription,
+  useCreateCheckoutSession,
+  useUpdateSubscriptionPlan,
+} from "@/lib/billing/queries";
 
 export const Route = createFileRoute("/settings")({
   head: () => ({ meta: [{ title: "Settings · Thrasher's Pub" }] }),
@@ -1517,7 +1521,9 @@ const STATUS_BADGE: Record<string, { label: string; className: string }> = {
 function BillingSection() {
   const { data: subscription, isLoading } = useSubscription();
   const createCheckout = useCreateCheckoutSession();
+  const updatePlan = useUpdateSubscriptionPlan();
   const [planTier, setPlanTier] = useState<"boh" | "full">("boh");
+  const [changingPlan, setChangingPlan] = useState(false);
 
   const checkoutParam = new URLSearchParams(window.location.search).get("checkout");
   const awaitingConfirmation = checkoutParam === "success" && !subscription && !isLoading;
@@ -1539,6 +1545,58 @@ function BillingSection() {
       <Card className="overflow-hidden">
         {isLoading ? (
           <div className="p-6 text-sm text-muted-foreground">Loading…</div>
+        ) : subscription && changingPlan ? (
+          <div className="p-6">
+            <div className="text-sm font-medium">Change plan</div>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              {(["boh", "full"] as const).map((tier) => (
+                <button
+                  key={tier}
+                  type="button"
+                  onClick={() => setPlanTier(tier)}
+                  className={cn(
+                    "rounded-lg border p-4 text-left transition-colors",
+                    planTier === tier ? "border-primary bg-primary/5" : "border-border/60",
+                    tier === subscription.planTier && "opacity-50",
+                  )}
+                  disabled={tier === subscription.planTier}
+                >
+                  <div className="text-sm font-medium">
+                    {PLAN_LABEL[tier]}
+                    {tier === subscription.planTier && " (current)"}
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {tier === "boh"
+                      ? "Sales, Product Mix, Invoices, Inventory/Par, Food Cost %."
+                      : "Everything in Back of House, plus Reviews, Marketing/SEO, Loyalty, Scheduling."}
+                  </p>
+                </button>
+              ))}
+            </div>
+            <div className="mt-4 flex items-center gap-3">
+              <Button
+                disabled={updatePlan.isPending || planTier === subscription.planTier}
+                onClick={() => {
+                  updatePlan.mutate({ planTier }, { onSuccess: () => setChangingPlan(false) });
+                }}
+              >
+                {updatePlan.isPending ? "Updating…" : `Switch to ${PLAN_LABEL[planTier]}`}
+              </Button>
+              <Button
+                variant="ghost"
+                disabled={updatePlan.isPending}
+                onClick={() => {
+                  setChangingPlan(false);
+                  setPlanTier(subscription.planTier);
+                }}
+              >
+                Cancel
+              </Button>
+            </div>
+            {updatePlan.isError && (
+              <p className="mt-2 text-xs text-destructive">{(updatePlan.error as Error).message}</p>
+            )}
+          </div>
         ) : subscription ? (
           <div className="bg-gradient-to-br from-primary/15 via-card to-card p-6">
             <div className="flex flex-wrap items-start justify-between gap-4">
@@ -1565,6 +1623,16 @@ function BillingSection() {
                     ` · renews ${new Date(subscription.currentPeriodEnd).toLocaleDateString()}`}
                 </p>
               </div>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  setPlanTier(subscription.planTier);
+                  setChangingPlan(true);
+                }}
+              >
+                Change plan
+              </Button>
             </div>
           </div>
         ) : awaitingConfirmation ? (

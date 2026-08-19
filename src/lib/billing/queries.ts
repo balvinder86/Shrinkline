@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { supabase } from "@/lib/supabase/client";
 import { useRestaurantIds } from "@/lib/supabase/scope";
@@ -64,6 +64,35 @@ export function useCreateCheckoutSession() {
         );
       }
       return (data as { url: string }).url;
+    },
+  });
+}
+
+// Changes an existing subscription's tier — Checkout only handles
+// brand-new subscriptions, this is the "Change plan" path for a
+// restaurant that's already subscribed (see
+// supabase/functions/update-subscription-plan/index.ts). Never writes
+// to `subscriptions` itself, same single-writer-is-the-webhook rule.
+export function useUpdateSubscriptionPlan() {
+  const restaurantId = useRestaurantIds()[0];
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ planTier }: { planTier: "boh" | "full" }) => {
+      if (!restaurantId) throw new Error("no current restaurant");
+      const { data, error } = await supabase.functions.invoke("update-subscription-plan", {
+        body: { restaurant_id: restaurantId, plan_tier: planTier },
+      });
+      if (error || !(data as { ok?: boolean } | null)?.ok) {
+        throw new Error(
+          (data as { error?: string } | null)?.error ?? error?.message ?? "request failed",
+        );
+      }
+    },
+    onSuccess: () => {
+      // Best-effort — the real new plan_tier only lands a few seconds
+      // later once Stripe's webhook actually fires, same reasoning as
+      // useCreateLocation's quantity-sync invalidation.
+      queryClient.invalidateQueries({ queryKey: ["subscription"] });
     },
   });
 }
