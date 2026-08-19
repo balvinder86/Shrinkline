@@ -22,6 +22,7 @@ import {
   PackageSearch,
   LineChart,
   Store,
+  Building2,
   type LucideIcon,
 } from "lucide-react";
 
@@ -139,3 +140,13 @@ export const NAV_UNGATED: {
   { titleKey: "admin", url: "/admin", icon: Shield },
   { titleKey: "settings", url: "/settings", icon: Settings },
 ];
+
+// Gated on a different axis than everything else here — usePlatformAdmin(),
+// not a restaurant permission — so it's a separate array rather than
+// living in NAV_UNGATED, which really means "ungated within a
+// restaurant" (every member sees it), not "ungated entirely."
+export const NAV_PLATFORM: {
+  titleKey: keyof TranslationDict["nav"];
+  url: string;
+  icon: LucideIcon;
+}[] = [{ titleKey: "company", url: "/company", icon: Building2 }];

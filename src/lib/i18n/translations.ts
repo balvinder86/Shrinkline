@@ -15,7 +15,7 @@ export const LANGUAGES: { code: Language; label: string }[] = [
 // different literal values, and inferring the dict type from one of
 // them would make the other variant fail to structurally match it.
 export type TranslationDict = {
-  navSection: { overview: string; growth: string; operations: string };
+  navSection: { overview: string; growth: string; operations: string; platform: string };
   nav: {
     home: string;
     productMix: string;
@@ -41,6 +41,7 @@ export type TranslationDict = {
     brands: string;
     admin: string;
     settings: string;
+    company: string;
   };
   sidebar: { tagline: string };
   topbar: { searchPlaceholder: string; noMatch: string };
@@ -61,6 +62,7 @@ export const translations: Record<Language, TranslationDict> = {
       overview: "Overview",
       growth: "Growth",
       operations: "Operations",
+      platform: "Platform",
     },
     nav: {
       home: "Home",
@@ -87,6 +89,7 @@ export const translations: Record<Language, TranslationDict> = {
       brands: "Brands",
       admin: "Admin",
       settings: "Settings",
+      company: "Company",
     },
     sidebar: {
       tagline: "Owner Dashboard",
@@ -115,6 +118,7 @@ export const translations: Record<Language, TranslationDict> = {
       overview: "Resumen",
       growth: "Crecimiento",
       operations: "Operaciones",
+      platform: "Plataforma",
     },
     nav: {
       home: "Inicio",
@@ -141,6 +145,7 @@ export const translations: Record<Language, TranslationDict> = {
       brands: "Marcas",
       admin: "Administración",
       settings: "Configuración",
+      company: "Empresa",
     },
     sidebar: {
       tagline: "Panel del propietario",

@@ -31,6 +31,7 @@ import { Route as InventoryVarianceRouteImport } from './routes/inventory-varian
 import { Route as InventoryCountRouteImport } from './routes/inventory-count'
 import { Route as InventoryRouteImport } from './routes/inventory'
 import { Route as IngredientPriceTrendsRouteImport } from './routes/ingredient-price-trends'
+import { Route as CompanyRouteImport } from './routes/company'
 import { Route as BrandsRouteImport } from './routes/brands'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
@@ -145,6 +146,11 @@ const IngredientPriceTrendsRoute = IngredientPriceTrendsRouteImport.update({
   path: '/ingredient-price-trends',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CompanyRoute = CompanyRouteImport.update({
+  id: '/company',
+  path: '/company',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const BrandsRoute = BrandsRouteImport.update({
   id: '/brands',
   path: '/brands',
@@ -165,6 +171,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/brands': typeof BrandsRoute
+  '/company': typeof CompanyRoute
   '/ingredient-price-trends': typeof IngredientPriceTrendsRoute
   '/inventory': typeof InventoryRoute
   '/inventory-count': typeof InventoryCountRoute
@@ -192,6 +199,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/brands': typeof BrandsRoute
+  '/company': typeof CompanyRoute
   '/ingredient-price-trends': typeof IngredientPriceTrendsRoute
   '/inventory': typeof InventoryRoute
   '/inventory-count': typeof InventoryCountRoute
@@ -220,6 +228,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/brands': typeof BrandsRoute
+  '/company': typeof CompanyRoute
   '/ingredient-price-trends': typeof IngredientPriceTrendsRoute
   '/inventory': typeof InventoryRoute
   '/inventory-count': typeof InventoryCountRoute
@@ -249,6 +258,7 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/brands'
+    | '/company'
     | '/ingredient-price-trends'
     | '/inventory'
     | '/inventory-count'
@@ -276,6 +286,7 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/brands'
+    | '/company'
     | '/ingredient-price-trends'
     | '/inventory'
     | '/inventory-count'
@@ -303,6 +314,7 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/brands'
+    | '/company'
     | '/ingredient-price-trends'
     | '/inventory'
     | '/inventory-count'
@@ -331,6 +343,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminRoute: typeof AdminRoute
   BrandsRoute: typeof BrandsRoute
+  CompanyRoute: typeof CompanyRoute
   IngredientPriceTrendsRoute: typeof IngredientPriceTrendsRoute
   InventoryRoute: typeof InventoryRoute
   InventoryCountRoute: typeof InventoryCountRoute
@@ -511,6 +524,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IngredientPriceTrendsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/company': {
+      id: '/company'
+      path: '/company'
+      fullPath: '/company'
+      preLoaderRoute: typeof CompanyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/brands': {
       id: '/brands'
       path: '/brands'
@@ -539,6 +559,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRoute,
   BrandsRoute: BrandsRoute,
+  CompanyRoute: CompanyRoute,
   IngredientPriceTrendsRoute: IngredientPriceTrendsRoute,
   InventoryRoute: InventoryRoute,
   InventoryCountRoute: InventoryCountRoute,
