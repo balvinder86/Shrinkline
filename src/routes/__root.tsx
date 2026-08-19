@@ -25,9 +25,11 @@ import { RestaurantProvider } from "@/lib/restaurant-context";
 import { LocationProvider } from "@/lib/location-context";
 import { DateRangeProvider } from "@/lib/date-range-context";
 import { LanguageProvider } from "@/lib/i18n/language-context";
-import { hasAccess, useCurrentMembership, ROUTE_PERMISSION } from "@/lib/permissions";
+import { useCurrentMembership, ROUTE_PERMISSION, PERMISSION_LABEL } from "@/lib/permissions";
+import { canAccess, tierIsTheBlocker } from "@/lib/billing/tierGate";
+import { useSubscription } from "@/lib/billing/queries";
 import { ChatWidget } from "@/components/chat/ChatWidget";
-import { ShieldOff } from "lucide-react";
+import { ShieldOff, Lock } from "lucide-react";
 
 function NotFoundComponent() {
   return (
@@ -243,17 +245,39 @@ function AuthGate() {
 function RouteGuard({ pathname }: { pathname: string }) {
   const { membershipsLoading } = useAuth();
   const membership = useCurrentMembership();
+  const { data: subscription, isLoading: subscriptionLoading } = useSubscription();
   const requiredPermission = ROUTE_PERMISSION[pathname];
 
   if (!requiredPermission) {
     return <Outlet />;
   }
 
-  if (membershipsLoading) {
+  if (membershipsLoading || subscriptionLoading) {
     return null;
   }
 
-  if (!hasAccess(membership, requiredPermission)) {
+  // Two independent gates, distinguished so the message actually
+  // matches the real reason: hasAccess (permissions.ts) is "did an
+  // owner grant you this," tierIsTheBlocker (billing/tierGate.ts) is
+  // "does the restaurant's plan include this module" — a page can
+  // fail the second without ever failing the first (e.g. the owner
+  // themself, viewing a module their own plan doesn't cover).
+  if (tierIsTheBlocker(membership, subscription ?? null, requiredPermission)) {
+    return (
+      <div className="flex min-h-screen items-center justify-center px-4">
+        <div className="max-w-md text-center">
+          <Lock className="mx-auto h-10 w-10 text-muted-foreground" />
+          <h1 className="mt-4 text-xl font-semibold text-foreground">Not included in your plan</h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            {PERMISSION_LABEL[requiredPermission]} is part of Full Suite. Upgrade from Settings →
+            Billing & plan to unlock it.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!canAccess(membership, subscription ?? null, requiredPermission)) {
     return (
       <div className="flex min-h-screen items-center justify-center px-4">
         <div className="max-w-md text-center">

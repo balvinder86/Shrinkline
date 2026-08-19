@@ -27,7 +27,9 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { hasAccess, useCurrentMembership, type PermissionKey } from "@/lib/permissions";
+import { useCurrentMembership, type PermissionKey } from "@/lib/permissions";
+import { canAccess } from "@/lib/billing/tierGate";
+import { useSubscription, type Subscription } from "@/lib/billing/queries";
 import {
   NAV_OVERVIEW,
   NAV_GROWTH,
@@ -44,22 +46,24 @@ import { BrandLocationSwitcher } from "@/components/BrandLocationSwitcher";
 function visibleFor<T extends { permission: PermissionKey }>(
   items: T[],
   membership: ReturnType<typeof useCurrentMembership>,
+  subscription: Subscription | null,
 ): T[] {
-  return items.filter((item) => hasAccess(membership, item.permission));
+  return items.filter((item) => canAccess(membership, subscription, item.permission));
 }
 
 export function AppSidebar() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const isActive = (url: string) => (url === "/" ? pathname === "/" : pathname.startsWith(url));
   const membership = useCurrentMembership();
+  const { data: subscription } = useSubscription();
   const { setOpenMobile } = useSidebar();
   const { signOut } = useAuth();
   const { language, setLanguage, t } = useLanguage();
   const { currentRestaurant } = useCurrentRestaurant();
 
-  const visibleOverview = visibleFor(NAV_OVERVIEW, membership);
-  const visibleGrowth = visibleFor(NAV_GROWTH, membership);
-  const visibleOperations = visibleFor(NAV_OPERATIONS, membership);
+  const visibleOverview = visibleFor(NAV_OVERVIEW, membership, subscription ?? null);
+  const visibleGrowth = visibleFor(NAV_GROWTH, membership, subscription ?? null);
+  const visibleOperations = visibleFor(NAV_OPERATIONS, membership, subscription ?? null);
 
   const renderGroup = (label: string, items: (NavItem | (typeof NAV_UNGATED)[number])[]) => {
     if (items.length === 0) return null;
@@ -72,7 +76,9 @@ export function AppSidebar() {
           <SidebarMenu>
             {items.map((item) => {
               const children =
-                "children" in item ? visibleFor(item.children ?? [], membership) : [];
+                "children" in item
+                  ? visibleFor(item.children ?? [], membership, subscription ?? null)
+                  : [];
               if (children.length > 0) {
                 const groupOpen = isActive(item.url) || children.some((c) => isActive(c.url));
                 return (
