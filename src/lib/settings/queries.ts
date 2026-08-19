@@ -248,6 +248,25 @@ export function useCreateLocation() {
       // the header switcher's Add Location dialog) leaves its card
       // showing a stale location list until a manual reload.
       queryClient.invalidateQueries({ queryKey: ["brands-overview"] });
+
+      // Phase 3 Part D: "when locations are added/removed later,
+      // update the Stripe subscription quantity; the webhook mirrors
+      // the change." A no-op server-side if this restaurant isn't
+      // subscribed yet — fire-and-forget so a Stripe hiccup never
+      // blocks or fails the location creation itself, which already
+      // succeeded by this point.
+      if (restaurantId) {
+        supabase.functions
+          .invoke("sync-subscription-quantity", { body: { restaurant_id: restaurantId } })
+          .catch((e) => console.error("sync-subscription-quantity failed:", e))
+          .finally(() => {
+            // Best-effort refresh — the real new quantity only lands a
+            // few seconds later once Stripe's webhook actually fires,
+            // so this may still show the old value until the next
+            // natural refetch; not worth polling for here.
+            queryClient.invalidateQueries({ queryKey: ["subscription"] });
+          });
+      }
     },
   });
 }
