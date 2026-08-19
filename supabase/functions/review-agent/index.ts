@@ -15,6 +15,7 @@
 //   { action: "competitor_reviews", restaurant_id, competitor_name } — read-only, real competitor review scrape
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import { assertTierAccess } from "../_shared/tierGate.ts";
 
 const supabase = createClient(
   Deno.env.get("SUPABASE_URL")!,
@@ -36,6 +37,9 @@ function json(body: unknown, status: number) {
   return Response.json(body, { status, headers: CORS_HEADERS });
 }
 
+// Every action in this file operates on Reviews-domain data — gating
+// here covers all 7 branches below from one place, same reasoning as
+// assertOwner being checked once per call site elsewhere in this repo.
 async function assertMember(userId: string, restaurantId: string) {
   const { data: membership } = await supabase
     .from("memberships")
@@ -44,6 +48,7 @@ async function assertMember(userId: string, restaurantId: string) {
     .eq("restaurant_id", restaurantId)
     .maybeSingle();
   if (!membership) throw new Error("not a member of this restaurant");
+  await assertTierAccess(supabase, restaurantId, "reviews");
 }
 
 Deno.serve(async (req) => {

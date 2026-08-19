@@ -8,6 +8,7 @@
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { fetchPageMeta } from "../_shared/page-meta.ts";
+import { assertTierAccess } from "../_shared/tierGate.ts";
 
 const supabase = createClient(
   Deno.env.get("SUPABASE_URL")!,
@@ -63,6 +64,12 @@ Deno.serve(async (req) => {
       .maybeSingle();
     if (!membership) {
       return json({ ok: false, error: "not a member of this restaurant" }, 403);
+    }
+
+    try {
+      await assertTierAccess(supabase, restaurant_id, "seo");
+    } catch (e) {
+      return json({ ok: false, error: (e as Error).message }, 402);
     }
 
     const targetUrls: string[] = [...new Set(urls)].slice(0, MAX_URLS);
