@@ -79,6 +79,7 @@ import {
 } from "@/lib/settings/queries";
 import { useBrandsOverview } from "@/lib/restaurants/queries";
 import { AddBrandDialog } from "@/components/BrandLocationSwitcher";
+import { useSubscription, useCreateCheckoutSession } from "@/lib/billing/queries";
 
 export const Route = createFileRoute("/settings")({
   head: () => ({ meta: [{ title: "Settings · Thrasher's Pub" }] }),
@@ -112,10 +113,17 @@ function SettingsPage() {
   // The Gmail OAuth callback (connect-gmail-callback) redirects back
   // here with ?gmail=connected|error after a full page navigation —
   // land on Integrations instead of the default Profile tab so the
-  // result is immediately visible.
-  const [active, setActive] = useState<SectionId>(() =>
-    new URLSearchParams(window.location.search).has("gmail") ? "integrations" : "profile",
-  );
+  // result is immediately visible. Stripe Checkout's success/cancel
+  // redirect (create-checkout-session) uses the more general
+  // ?section=<id> instead, since "land on Billing" isn't tied to one
+  // specific query param the way the gmail flag is.
+  const [active, setActive] = useState<SectionId>(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.has("gmail")) return "integrations";
+    const section = params.get("section");
+    if (section && SECTIONS.some((s) => s.id === section)) return section as SectionId;
+    return "profile";
+  });
   const grouped = SECTIONS.reduce<Record<string, typeof SECTIONS>>((acc, s) => {
     (acc[s.group] ||= []).push(s);
     return acc;
@@ -1493,8 +1501,27 @@ function ApiSection() {
 
 /* ---------- Billing ---------- */
 
+const PLAN_LABEL: Record<"boh", string> & Record<"full", string> = {
+  boh: "Back of House",
+  full: "Full Suite",
+};
+
+const STATUS_BADGE: Record<string, { label: string; className: string }> = {
+  active: { label: "Active", className: "bg-emerald-100 text-emerald-800" },
+  trialing: { label: "Trialing", className: "bg-primary/15 text-primary" },
+  past_due: { label: "Past due", className: "bg-amber-100 text-amber-900" },
+  canceled: { label: "Canceled", className: "bg-muted text-muted-foreground" },
+  incomplete: { label: "Incomplete", className: "bg-muted text-muted-foreground" },
+};
+
 function BillingSection() {
-  const invoices = [{ id: "INV-2026-0006", date: "Jun 01, 2026", amt: "$249.00", status: "Paid" }];
+  const { data: subscription, isLoading } = useSubscription();
+  const createCheckout = useCreateCheckoutSession();
+  const [planTier, setPlanTier] = useState<"boh" | "full">("boh");
+
+  const checkoutParam = new URLSearchParams(window.location.search).get("checkout");
+  const awaitingConfirmation = checkoutParam === "success" && !subscription && !isLoading;
+
   return (
     <div className="space-y-6">
       <SectionHeader
@@ -1502,117 +1529,112 @@ function BillingSection() {
         title="Billing & plan"
         description="Manage subscription, payment method, and invoices."
       />
-      <PlaceholderBanner>
-        No Stripe subscription is wired up — the restaurants table has a stripe_customer_id column
-        but nothing populates or reads it yet. Everything below is a mockup.
-      </PlaceholderBanner>
-      <Card className="overflow-hidden opacity-60">
-        <div className="bg-gradient-to-br from-primary/15 via-card to-card p-6">
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div>
-              <div className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground">
-                Current plan
-              </div>
-              <div className="mt-1 flex items-center gap-2">
-                <h3 className="font-display text-2xl">Hospitality Pro</h3>
-                <Badge variant="secondary" className="bg-primary/15 text-primary">
-                  Example
-                </Badge>
-              </div>
-              <p className="mt-1 text-sm text-muted-foreground">
-                $249/month · billed monthly · renews Jul 01, 2026
-              </p>
-            </div>
-            <div className="flex gap-2">
-              <Button size="sm" variant="outline" disabled>
-                Change plan
-              </Button>
-              <Button size="sm" variant="ghost" disabled>
-                Cancel
-              </Button>
-            </div>
-          </div>
-          <Separator className="my-5" />
-          <div className="grid gap-6 sm:grid-cols-3">
-            <UsageMeter label="AI replies" used={3210} total={5000} />
-            <UsageMeter label="SMS sends" used={812} total={2000} />
-            <UsageMeter label="Locations" used={2} total={5} />
-          </div>
+
+      {checkoutParam === "cancelled" && (
+        <div className="rounded-lg border border-border/60 bg-muted/30 px-3.5 py-2.5 text-sm text-muted-foreground">
+          Checkout was cancelled — no subscription was started.
         </div>
+      )}
+
+      <Card className="overflow-hidden">
+        {isLoading ? (
+          <div className="p-6 text-sm text-muted-foreground">Loading…</div>
+        ) : subscription ? (
+          <div className="bg-gradient-to-br from-primary/15 via-card to-card p-6">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <div className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground">
+                  Current plan
+                </div>
+                <div className="mt-1 flex items-center gap-2">
+                  <h3 className="font-display text-2xl">{PLAN_LABEL[subscription.planTier]}</h3>
+                  <Badge
+                    variant="secondary"
+                    className={
+                      STATUS_BADGE[subscription.status]?.className ??
+                      "bg-muted text-muted-foreground"
+                    }
+                  >
+                    {STATUS_BADGE[subscription.status]?.label ?? subscription.status}
+                  </Badge>
+                </div>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Billed for {subscription.quantity} location
+                  {subscription.quantity === 1 ? "" : "s"}
+                  {subscription.currentPeriodEnd &&
+                    ` · renews ${new Date(subscription.currentPeriodEnd).toLocaleDateString()}`}
+                </p>
+              </div>
+            </div>
+          </div>
+        ) : awaitingConfirmation ? (
+          <div className="p-6 text-sm text-muted-foreground">
+            Waiting for confirmation from Stripe — this updates automatically once it arrives,
+            usually within a few seconds.
+          </div>
+        ) : (
+          <div className="p-6">
+            <div className="text-sm font-medium">Choose a plan</div>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              {(["boh", "full"] as const).map((tier) => (
+                <button
+                  key={tier}
+                  type="button"
+                  onClick={() => setPlanTier(tier)}
+                  className={cn(
+                    "rounded-lg border p-4 text-left transition-colors",
+                    planTier === tier ? "border-primary bg-primary/5" : "border-border/60",
+                  )}
+                >
+                  <div className="text-sm font-medium">{PLAN_LABEL[tier]}</div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {tier === "boh"
+                      ? "Sales, Product Mix, Invoices, Inventory/Par, Food Cost %."
+                      : "Everything in Back of House, plus Reviews, Marketing/SEO, Loyalty, Scheduling."}
+                  </p>
+                </button>
+              ))}
+            </div>
+            <Button
+              className="mt-4"
+              disabled={createCheckout.isPending}
+              onClick={() => {
+                createCheckout.mutate(
+                  { planTier },
+                  {
+                    onSuccess: (url) => {
+                      window.location.href = url;
+                    },
+                  },
+                );
+              }}
+            >
+              {createCheckout.isPending ? "Redirecting to Stripe…" : "Subscribe"}
+            </Button>
+            {createCheckout.isError && (
+              <p className="mt-2 text-xs text-destructive">
+                {(createCheckout.error as Error).message}
+              </p>
+            )}
+          </div>
+        )}
       </Card>
 
-      <Card className="p-6 opacity-60">
-        <div className="flex items-center justify-between">
+      <Card className="p-6 space-y-4">
+        <PlaceholderBanner>
+          Managing your payment method and viewing past invoices needs a Stripe Customer Portal
+          integration — not built yet. Both live inside Stripe's dashboard for now.
+        </PlaceholderBanner>
+        <div className="flex items-center justify-between opacity-60">
           <div>
             <div className="text-sm font-medium">Payment method</div>
-            <div className="mt-1 text-xs text-muted-foreground">
-              Visa ending in 4242 · expires 09/27
-            </div>
+            <div className="mt-1 text-xs text-muted-foreground">Managed in Stripe</div>
           </div>
           <Button size="sm" variant="outline" disabled>
             Update
           </Button>
         </div>
       </Card>
-
-      <Card className="p-6 opacity-60">
-        <div className="flex items-center justify-between">
-          <div className="text-sm font-medium">Invoices</div>
-          <Button size="sm" variant="ghost" className="gap-2" disabled>
-            <Download className="h-3.5 w-3.5" /> Export all
-          </Button>
-        </div>
-        <Table className="mt-3">
-          <TableHeader>
-            <TableRow>
-              <TableHead>Invoice</TableHead>
-              <TableHead>Date</TableHead>
-              <TableHead>Amount</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {invoices.map((iv) => (
-              <TableRow key={iv.id}>
-                <TableCell className="font-medium">{iv.id}</TableCell>
-                <TableCell className="text-muted-foreground">{iv.date}</TableCell>
-                <TableCell>{iv.amt}</TableCell>
-                <TableCell>
-                  <Badge
-                    variant="secondary"
-                    className="bg-primary/10 text-primary hover:bg-primary/10"
-                  >
-                    {iv.status}
-                  </Badge>
-                </TableCell>
-                <TableCell className="text-right">
-                  <Button size="sm" variant="ghost" className="gap-1" disabled>
-                    <Download className="h-3.5 w-3.5" /> PDF
-                  </Button>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </Card>
-    </div>
-  );
-}
-
-function UsageMeter({ label, used, total }: { label: string; used: number; total: number }) {
-  const pct = Math.min(100, Math.round((used / total) * 100));
-  return (
-    <div>
-      <div className="flex items-baseline justify-between">
-        <div className="text-xs uppercase tracking-wider text-muted-foreground">{label}</div>
-        <div className="text-xs text-muted-foreground">
-          {used.toLocaleString()} / {total.toLocaleString()}
-        </div>
-      </div>
-      <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
-        <div className="h-full rounded-full bg-primary" style={{ width: `${pct}%` }} />
-      </div>
     </div>
   );
 }
