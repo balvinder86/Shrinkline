@@ -350,3 +350,163 @@ export function useUpdateRestaurantBranding() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["restaurant-branding"] }),
   });
 }
+
+export type TaxSettings = {
+  federalEin: string;
+  stateTaxId: string;
+  defaultSalesTaxRate: string;
+  liquorTaxRate: string;
+  taxInclusivePricing: boolean;
+  fiscalYearStartMonth: number;
+};
+
+// Owner-only, both the settings row and documents below
+// (db/phase2/72_tax_compliance.sql) — tax IDs and legal documents are
+// more sensitive than review_agent_settings/restaurant_branding, which
+// use the more permissive tenant_isolation pattern instead.
+export function useTaxSettings() {
+  const restaurantId = useRestaurantIds()[0];
+  return useQuery({
+    queryKey: ["tax-settings", restaurantId],
+    enabled: !!restaurantId,
+    queryFn: async (): Promise<TaxSettings> => {
+      const { data, error } = await supabase
+        .from("restaurant_tax_settings")
+        .select(
+          "federal_ein, state_tax_id, default_sales_tax_rate, liquor_tax_rate, tax_inclusive_pricing, fiscal_year_start_month",
+        )
+        .eq("restaurant_id", restaurantId!)
+        .maybeSingle();
+      if (error) throw error;
+      return {
+        federalEin: data?.federal_ein ?? "",
+        stateTaxId: data?.state_tax_id ?? "",
+        defaultSalesTaxRate: data?.default_sales_tax_rate?.toString() ?? "",
+        liquorTaxRate: data?.liquor_tax_rate?.toString() ?? "",
+        taxInclusivePricing: data?.tax_inclusive_pricing ?? false,
+        fiscalYearStartMonth: data?.fiscal_year_start_month ?? 1,
+      };
+    },
+  });
+}
+
+export function useUpdateTaxSettings() {
+  const restaurantId = useRestaurantIds()[0];
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (settings: TaxSettings) => {
+      if (!restaurantId) throw new Error("no current restaurant");
+      const { data, error } = await supabase
+        .from("restaurant_tax_settings")
+        .upsert(
+          {
+            restaurant_id: restaurantId,
+            federal_ein: settings.federalEin.trim() || null,
+            state_tax_id: settings.stateTaxId.trim() || null,
+            default_sales_tax_rate: settings.defaultSalesTaxRate.trim()
+              ? Number(settings.defaultSalesTaxRate)
+              : null,
+            liquor_tax_rate: settings.liquorTaxRate.trim() ? Number(settings.liquorTaxRate) : null,
+            tax_inclusive_pricing: settings.taxInclusivePricing,
+            fiscal_year_start_month: settings.fiscalYearStartMonth,
+          },
+          { onConflict: "restaurant_id" },
+        )
+        .select("restaurant_id");
+      if (error) throw error;
+      if (!data || data.length === 0) {
+        throw new Error("Nothing was updated — you may not have owner access.");
+      }
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["tax-settings"] }),
+  });
+}
+
+export const TAX_DOC_TYPE_OPTIONS = [
+  { value: "w9", label: "W-9" },
+  { value: "resale_certificate", label: "Resale certificate" },
+  { value: "health_permit", label: "Health permit" },
+  { value: "other", label: "Other" },
+] as const;
+
+export type TaxDocument = {
+  id: string;
+  name: string;
+  docType: string;
+  storagePath: string;
+  uploadedAt: string;
+};
+
+export function useTaxDocuments() {
+  const restaurantId = useRestaurantIds()[0];
+  return useQuery({
+    queryKey: ["tax-documents", restaurantId],
+    enabled: !!restaurantId,
+    queryFn: async (): Promise<TaxDocument[]> => {
+      const { data, error } = await supabase
+        .from("tax_documents")
+        .select("id, name, doc_type, storage_path, uploaded_at")
+        .eq("restaurant_id", restaurantId!)
+        .order("uploaded_at", { ascending: false });
+      if (error) throw error;
+      return (data ?? []).map((d) => ({
+        id: d.id,
+        name: d.name,
+        docType: d.doc_type,
+        storagePath: d.storage_path,
+        uploadedAt: d.uploaded_at,
+      }));
+    },
+  });
+}
+
+export function useUploadTaxDocument() {
+  const restaurantId = useRestaurantIds()[0];
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ file, docType }: { file: File; docType: string }) => {
+      if (!restaurantId) throw new Error("no current restaurant");
+      const path = `${restaurantId}/${crypto.randomUUID()}-${file.name}`;
+      const { error: uploadError } = await supabase.storage
+        .from("tax-documents")
+        .upload(path, file, { contentType: file.type || "application/octet-stream" });
+      if (uploadError) throw uploadError;
+
+      const { error } = await supabase.from("tax_documents").insert({
+        restaurant_id: restaurantId,
+        name: file.name,
+        doc_type: docType,
+        storage_path: path,
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["tax-documents"] }),
+  });
+}
+
+export function useDeleteTaxDocument() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (doc: TaxDocument) => {
+      const { error } = await supabase.from("tax_documents").delete().eq("id", doc.id);
+      if (error) throw error;
+      void supabase.storage.from("tax-documents").remove([doc.storagePath]);
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["tax-documents"] }),
+  });
+}
+
+// tax-documents is private — mint a fresh short-lived signed URL per
+// click rather than a stored one, same as useOriginalInvoiceUrl (this
+// file, invoice-uploads' equivalent).
+export function useTaxDocumentSignedUrl() {
+  return useMutation({
+    mutationFn: async (storagePath: string): Promise<string> => {
+      const { data, error } = await supabase.storage
+        .from("tax-documents")
+        .createSignedUrl(storagePath, 60);
+      if (error) throw error;
+      return data.signedUrl;
+    },
+  });
+}

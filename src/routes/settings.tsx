@@ -78,8 +78,16 @@ import {
   useRestaurantBranding,
   useUpdateRestaurantBranding,
   VOICE_TONE_OPTIONS,
+  useTaxSettings,
+  useUpdateTaxSettings,
+  useTaxDocuments,
+  useUploadTaxDocument,
+  useDeleteTaxDocument,
+  useTaxDocumentSignedUrl,
+  TAX_DOC_TYPE_OPTIONS,
   type RestaurantProfileDetails,
   type RestaurantBranding,
+  type TaxSettings,
 } from "@/lib/settings/queries";
 import { useBrandsOverview } from "@/lib/restaurants/queries";
 import { AddBrandDialog } from "@/components/BrandLocationSwitcher";
@@ -1954,7 +1962,52 @@ function BillingSection() {
 
 /* ---------- Tax ---------- */
 
+const FISCAL_MONTH_OPTIONS = [
+  { value: 1, label: "January" },
+  { value: 2, label: "February" },
+  { value: 3, label: "March" },
+  { value: 4, label: "April" },
+  { value: 5, label: "May" },
+  { value: 6, label: "June" },
+  { value: 7, label: "July" },
+  { value: 8, label: "August" },
+  { value: 9, label: "September" },
+  { value: 10, label: "October" },
+  { value: 11, label: "November" },
+  { value: 12, label: "December" },
+];
+
 function TaxSection() {
+  const { data: taxSettings, isLoading } = useTaxSettings();
+  const updateTaxSettings = useUpdateTaxSettings();
+  const [form, setForm] = useState<TaxSettings>({
+    federalEin: "",
+    stateTaxId: "",
+    defaultSalesTaxRate: "",
+    liquorTaxRate: "",
+    taxInclusivePricing: false,
+    fiscalYearStartMonth: 1,
+  });
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    if (!taxSettings) return;
+    setForm(taxSettings);
+  }, [taxSettings]);
+
+  const dirty = taxSettings != null && JSON.stringify(form) !== JSON.stringify(taxSettings);
+
+  function updateField<K extends keyof TaxSettings>(key: K, value: TaxSettings[K]) {
+    setForm((f) => ({ ...f, [key]: value }));
+    setSaved(false);
+  }
+
+  const { data: documents = [], isLoading: docsLoading } = useTaxDocuments();
+  const uploadDoc = useUploadTaxDocument();
+  const deleteDoc = useDeleteTaxDocument();
+  const getSignedUrl = useTaxDocumentSignedUrl();
+  const [docType, setDocType] = useState<string>("w9");
+
   return (
     <div className="space-y-6">
       <SectionHeader
@@ -1962,76 +2015,190 @@ function TaxSection() {
         title="Tax & compliance"
         description="Sales tax rates, registration IDs, and 1099/W-9 records used across invoicing."
       />
-      <PlaceholderBanner>
-        No tax-settings table or document storage exists yet — nothing below is saved.
-      </PlaceholderBanner>
-      <Card className="p-6 opacity-60">
-        <div className="grid gap-5 md:grid-cols-2">
-          <Field label="Federal EIN">
-            <Input defaultValue="83-1248901" disabled />
-          </Field>
-          <Field label="State sales tax ID">
-            <Input defaultValue="DC-2018-4421" disabled />
-          </Field>
-          <Field label="Default sales tax rate">
-            <Input defaultValue="10.00%" disabled />
-          </Field>
-          <Field label="Liquor tax rate">
-            <Input defaultValue="10.25%" disabled />
-          </Field>
-          <Field label="Tax inclusive pricing">
-            <Select defaultValue="exclusive" disabled>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="exclusive">Tax added at checkout</SelectItem>
-              </SelectContent>
-            </Select>
-          </Field>
-          <Field label="Fiscal year start">
-            <Select defaultValue="jan" disabled>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="jan">January</SelectItem>
-              </SelectContent>
-            </Select>
-          </Field>
-        </div>
-      </Card>
+      {isLoading ? (
+        <p className="text-sm text-muted-foreground">Loading…</p>
+      ) : (
+        <Card className="p-6">
+          <div className="grid gap-5 md:grid-cols-2">
+            <Field label="Federal EIN">
+              <Input
+                value={form.federalEin}
+                onChange={(e) => updateField("federalEin", e.target.value)}
+                placeholder="83-1248901"
+              />
+            </Field>
+            <Field label="State sales tax ID">
+              <Input
+                value={form.stateTaxId}
+                onChange={(e) => updateField("stateTaxId", e.target.value)}
+                placeholder="DC-2018-4421"
+              />
+            </Field>
+            <Field label="Default sales tax rate">
+              <Input
+                type="number"
+                step="0.01"
+                value={form.defaultSalesTaxRate}
+                onChange={(e) => updateField("defaultSalesTaxRate", e.target.value)}
+                placeholder="10.00"
+              />
+            </Field>
+            <Field label="Liquor tax rate">
+              <Input
+                type="number"
+                step="0.01"
+                value={form.liquorTaxRate}
+                onChange={(e) => updateField("liquorTaxRate", e.target.value)}
+                placeholder="10.25"
+              />
+            </Field>
+            <Field label="Tax inclusive pricing">
+              <Select
+                value={form.taxInclusivePricing ? "inclusive" : "exclusive"}
+                onValueChange={(v) => updateField("taxInclusivePricing", v === "inclusive")}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="exclusive">Tax added at checkout</SelectItem>
+                  <SelectItem value="inclusive">Tax included in menu price</SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label="Fiscal year start">
+              <Select
+                value={String(form.fiscalYearStartMonth)}
+                onValueChange={(v) => updateField("fiscalYearStartMonth", Number(v))}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {FISCAL_MONTH_OPTIONS.map((m) => (
+                    <SelectItem key={m.value} value={String(m.value)}>
+                      {m.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+          </div>
+          <div className="mt-5 flex items-center gap-3">
+            <Button
+              size="sm"
+              disabled={!dirty || updateTaxSettings.isPending}
+              onClick={() => {
+                updateTaxSettings.mutate(form, { onSuccess: () => setSaved(true) });
+              }}
+            >
+              {updateTaxSettings.isPending ? "Saving…" : "Save"}
+            </Button>
+            {updateTaxSettings.isError && (
+              <p className="text-xs text-destructive">
+                {(updateTaxSettings.error as Error).message}
+              </p>
+            )}
+            {saved && !updateTaxSettings.isError && (
+              <p className="text-xs text-emerald-700">Saved.</p>
+            )}
+          </div>
+        </Card>
+      )}
 
-      <Card className="p-6 opacity-60">
+      <Card className="p-6">
         <SectionHeader
           title="Documents"
           description="Stored W-9s, resale certificates, and health permits."
           action={
-            <Button size="sm" variant="outline" className="gap-2" disabled>
-              <Upload className="h-3.5 w-3.5" /> Upload
-            </Button>
+            <div className="flex items-center gap-2">
+              <Select value={docType} onValueChange={setDocType}>
+                <SelectTrigger className="w-[180px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {TAX_DOC_TYPE_OPTIONS.map((opt) => (
+                    <SelectItem key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <input
+                type="file"
+                className="hidden"
+                id="tax-doc-upload-input"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = "";
+                  if (!file) return;
+                  uploadDoc.mutate({ file, docType });
+                }}
+              />
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-2"
+                disabled={uploadDoc.isPending}
+                onClick={() => document.getElementById("tax-doc-upload-input")?.click()}
+              >
+                <Upload className="h-3.5 w-3.5" /> {uploadDoc.isPending ? "Uploading…" : "Upload"}
+              </Button>
+            </div>
           }
         />
+        {uploadDoc.isError && (
+          <p className="mt-2 text-xs text-destructive">{(uploadDoc.error as Error).message}</p>
+        )}
         <div className="mt-4 space-y-2">
-          {[{ name: "W-9 — example.pdf", date: "Jan 12, 2026" }].map((d) => (
-            <div
-              key={d.name}
-              className="flex items-center justify-between rounded-lg border border-border/60 bg-card/50 px-4 py-3"
-            >
-              <div>
-                <div className="text-sm font-medium">{d.name}</div>
-                <div className="text-xs text-muted-foreground">Uploaded {d.date}</div>
+          {docsLoading ? (
+            <p className="text-sm text-muted-foreground">Loading…</p>
+          ) : documents.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No documents uploaded yet.</p>
+          ) : (
+            documents.map((d) => (
+              <div
+                key={d.id}
+                className="flex items-center justify-between rounded-lg border border-border/60 bg-card/50 px-4 py-3"
+              >
+                <div className="flex items-center gap-2">
+                  <div>
+                    <div className="text-sm font-medium">{d.name}</div>
+                    <div className="text-xs text-muted-foreground">
+                      Uploaded {new Date(d.uploadedAt).toLocaleDateString()}
+                    </div>
+                  </div>
+                  <Badge variant="outline" className="font-normal">
+                    {TAX_DOC_TYPE_OPTIONS.find((o) => o.value === d.docType)?.label ?? d.docType}
+                  </Badge>
+                </div>
+                <div className="flex gap-1">
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-8 w-8"
+                    disabled={getSignedUrl.isPending}
+                    onClick={() => {
+                      getSignedUrl.mutate(d.storagePath, {
+                        onSuccess: (url) => window.open(url, "_blank"),
+                      });
+                    }}
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-8 w-8 text-destructive"
+                    disabled={deleteDoc.isPending}
+                    onClick={() => deleteDoc.mutate(d)}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
               </div>
-              <div className="flex gap-1">
-                <Button size="icon" variant="ghost" className="h-8 w-8" disabled>
-                  <Download className="h-3.5 w-3.5" />
-                </Button>
-                <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive" disabled>
-                  <Trash2 className="h-3.5 w-3.5" />
-                </Button>
-              </div>
-            </div>
-          ))}
+            ))
+          )}
         </div>
       </Card>
     </div>
