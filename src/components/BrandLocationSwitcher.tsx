@@ -36,8 +36,9 @@ import { useCreateLocation } from "@/lib/settings/queries";
 import { useLanguage } from "@/lib/i18n/language-context";
 import { TIMEZONES } from "@/lib/timezones";
 
-// Exported so the Brands overview page (src/routes/brands.tsx) can
-// reuse the exact same creation flow instead of a second copy.
+// Exported so Settings' "Your brands" card (BrandsCard in
+// src/routes/settings.tsx) can reuse the exact same creation flow
+// instead of a second copy.
 export function AddBrandDialog({
   open,
   onOpenChange,

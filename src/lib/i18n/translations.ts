@@ -38,7 +38,6 @@ export type TranslationDict = {
     pnl: string;
     variance: string;
     ingredientPriceTrends: string;
-    brands: string;
     admin: string;
     settings: string;
   };
@@ -84,7 +83,6 @@ export const translations: Record<Language, TranslationDict> = {
       pnl: "P&L",
       variance: "Cost Variance",
       ingredientPriceTrends: "Ingredient Price Trends",
-      brands: "Brands",
       admin: "Admin",
       settings: "Settings",
     },
@@ -138,7 +136,6 @@ export const translations: Record<Language, TranslationDict> = {
       pnl: "Pérdidas y ganancias",
       variance: "Variación de costos",
       ingredientPriceTrends: "Tendencias de precios",
-      brands: "Marcas",
       admin: "Administración",
       settings: "Configuración",
     },
