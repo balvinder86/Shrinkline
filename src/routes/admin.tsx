@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
 import {
   useTeamMembers,
@@ -8,6 +8,7 @@ import {
   type Role,
   type TeamMember,
 } from "@/lib/admin/queries";
+import { useSetupStatus, useSkipSetupStep, type SetupStatus } from "@/lib/setup/queries";
 import { useAuth } from "@/lib/supabase/auth-context";
 import { useRestaurantIds } from "@/lib/supabase/scope";
 import { useCurrentRestaurant } from "@/lib/restaurant-context";
@@ -52,7 +53,21 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Pencil, Shield, UserPlus, X } from "lucide-react";
+import {
+  Pencil,
+  Shield,
+  UserPlus,
+  X,
+  ListChecks,
+  Plug,
+  ChefHat,
+  Package,
+  CreditCard,
+  CircleCheckBig,
+  CircleDashed,
+  type LucideIcon,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
 
 type Permissions = Partial<Record<PermissionKey, boolean>>;
 
@@ -83,7 +98,211 @@ function timeAgo(iso: string): string {
 
 const ROLE_LABEL: Record<Role, string> = { owner: "Owner", manager: "Manager", staff: "Staff" };
 
+type SectionId = "team" | "setup";
+
 function AdminPage() {
+  const [active, setActive] = useState<SectionId>(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get("section") === "setup" ? "setup" : "team";
+  });
+
+  return (
+    <div className="min-h-screen bg-background">
+      <Topbar eyebrow="Workspace" title="Admin" />
+      <main className="px-8 py-8 max-w-4xl mx-auto space-y-6">
+        <div className="flex gap-1 border-b border-border">
+          {(
+            [
+              { id: "team", label: "Team & access", icon: Shield },
+              { id: "setup", label: "Setup", icon: ListChecks },
+            ] as const
+          ).map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActive(tab.id)}
+              className={cn(
+                "flex items-center gap-2 border-b-2 px-3 py-2.5 text-sm transition-colors",
+                active === tab.id
+                  ? "border-primary text-primary font-medium"
+                  : "border-transparent text-muted-foreground hover:text-foreground",
+              )}
+            >
+              <tab.icon className="h-4 w-4" />
+              {tab.label}
+            </button>
+          ))}
+        </div>
+        {active === "team" ? <TeamSection /> : <SetupSection />}
+      </main>
+    </div>
+  );
+}
+
+/* ---------- Setup ---------- */
+
+type RowState = "todo" | "pending" | "done" | "skipped";
+
+function SetupRow({
+  icon: Icon,
+  title,
+  description,
+  state,
+  actionLabel,
+  actionTo,
+  actionSearch,
+  onSkip,
+}: {
+  icon: LucideIcon;
+  title: string;
+  description: string;
+  state: RowState;
+  actionLabel: string;
+  actionTo: string;
+  actionSearch?: Record<string, string>;
+  onSkip?: () => void;
+}) {
+  const STATE_LABEL: Record<RowState, string> = {
+    todo: "Not started",
+    pending: "In progress",
+    done: "Done",
+    skipped: "Skipped",
+  };
+
+  return (
+    <Card className="flex items-start gap-4 p-4">
+      <div
+        className={cn(
+          "grid h-10 w-10 shrink-0 place-items-center rounded-full",
+          state === "done" ? "bg-[#87a878]/15 text-[#5a7d4a]" : "bg-accent text-muted-foreground",
+        )}
+      >
+        {state === "done" ? (
+          <CircleCheckBig className="h-5 w-5" />
+        ) : (
+          <Icon className="h-[18px] w-[18px]" />
+        )}
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm font-medium">{title}</span>
+          <Badge
+            variant="outline"
+            className={cn(
+              "font-normal",
+              state === "done" && "border-[#87a878]/40 text-[#5a7d4a] bg-[#87a878]/10",
+            )}
+          >
+            {state !== "todo" && state !== "done" && <CircleDashed className="mr-1 h-3 w-3" />}
+            {STATE_LABEL[state]}
+          </Badge>
+        </div>
+        <p className="mt-1 text-xs text-muted-foreground">{description}</p>
+      </div>
+      <div className="flex shrink-0 flex-col items-end gap-1.5">
+        <Button asChild size="sm" variant={state === "done" ? "outline" : "default"}>
+          <Link to={actionTo} search={actionSearch}>
+            {actionLabel}
+          </Link>
+        </Button>
+        {onSkip && (
+          <button
+            onClick={onSkip}
+            className="text-xs text-muted-foreground underline-offset-2 hover:underline"
+          >
+            Skip for now
+          </button>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+function posRowState(status: SetupStatus): RowState {
+  if (!status.posConnected) return "todo";
+  if (!status.menuImported) return "pending";
+  return "done";
+}
+
+function SetupSection() {
+  const { data: status, isLoading, error } = useSetupStatus();
+  const skipStep = useSkipSetupStep();
+
+  if (isLoading || !status) {
+    return <p className="text-sm text-muted-foreground">Loading setup status…</p>;
+  }
+  if (error) {
+    return (
+      <p className="text-sm text-[#a8453a]">
+        Couldn't load setup status: {(error as Error).message}
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <header>
+        <p className="text-xs tracking-[0.2em] uppercase text-muted-foreground mb-2">Get set up</p>
+        <h1 className="font-serif text-4xl text-foreground">Setup checklist</h1>
+        <p className="mt-2 max-w-xl text-sm text-muted-foreground">
+          Connect real data and a plan — each step links to where you finish it.
+        </p>
+      </header>
+
+      <div className="space-y-3">
+        <SetupRow
+          icon={Plug}
+          title="Connect your POS"
+          description={
+            posRowState(status) === "todo"
+              ? "Sync sales, menu, and payments from Toast."
+              : posRowState(status) === "pending"
+                ? "Connected — waiting on the first menu sync (runs automatically, usually within 10 minutes)."
+                : "Connected and syncing."
+          }
+          state={posRowState(status)}
+          actionLabel={posRowState(status) === "todo" ? "Connect" : "Manage"}
+          actionTo="/settings"
+          actionSearch={{ section: "integrations" }}
+        />
+        <SetupRow
+          icon={ChefHat}
+          title="Map recipes"
+          description="Link menu items to ingredients so food cost and par levels can be computed."
+          state={status.recipesDone ? "done" : status.recipesSkipped ? "skipped" : "todo"}
+          actionLabel={status.recipesDone ? "View recipes" : "Start"}
+          actionTo="/recipes"
+          onSkip={
+            !status.recipesDone && !status.recipesSkipped
+              ? () => skipStep.mutate("recipes")
+              : undefined
+          }
+        />
+        <SetupRow
+          icon={Package}
+          title="Set par levels"
+          description="Compute suggested order-up-to quantities from real recipe and sales data."
+          state={status.parDone ? "done" : status.parSkipped ? "skipped" : "todo"}
+          actionLabel={status.parDone ? "View par levels" : "Start"}
+          actionTo="/inventory"
+          onSkip={!status.parDone && !status.parSkipped ? () => skipStep.mutate("par") : undefined}
+        />
+        <SetupRow
+          icon={CreditCard}
+          title="Subscribe to a plan"
+          description="Pick Back of House or Full Suite to unlock the rest of the app."
+          state={status.billingActive ? "done" : "todo"}
+          actionLabel={status.billingActive ? "Manage plan" : "Subscribe"}
+          actionTo="/settings"
+          actionSearch={{ section: "billing" }}
+        />
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Team & access ---------- */
+
+function TeamSection() {
   const { memberships } = useAuth();
   const restaurantId = useRestaurantIds()[0];
   const { currentRestaurant } = useCurrentRestaurant();
@@ -121,9 +340,8 @@ function AdminPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      <Topbar eyebrow="Workspace" title="Admin" />
-      <main className="px-8 py-8 max-w-4xl mx-auto space-y-8">
+    <>
+      <div className="space-y-8">
         <header className="flex flex-wrap items-end justify-between gap-6">
           <div>
             <p className="text-xs tracking-[0.2em] uppercase text-muted-foreground mb-2">
@@ -240,7 +458,7 @@ function AdminPage() {
             {((updateMember.error ?? removeMember.error) as Error).message}
           </p>
         )}
-      </main>
+      </div>
 
       {/* Invite dialog */}
       <Dialog
@@ -515,6 +733,6 @@ function AdminPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </>
   );
 }
