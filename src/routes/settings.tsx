@@ -84,6 +84,13 @@ import {
 import { useBrandsOverview } from "@/lib/restaurants/queries";
 import { AddBrandDialog } from "@/components/BrandLocationSwitcher";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   useSubscription,
   useCreateCheckoutSession,
   useUpdateSubscriptionPlan,
@@ -1055,6 +1062,13 @@ type AppRow = {
   meta?: string;
   channel?: "EDI" | "API" | "Email PO" | "Portal" | "CSV";
   onClick?: () => void;
+  // What connecting this for real would actually take — shown in
+  // IntegrationInfoDialog when a "Not built" row is clicked, instead
+  // of leaving the row dead. Written per-provider, not boilerplate:
+  // some of these (Email PO vendors) turn out to already work today
+  // via send-purchase-order-email, which is worth saying plainly
+  // rather than implying every row needs new work.
+  howToConnect?: string[];
 };
 
 function IntegrationsSection() {
@@ -1063,6 +1077,17 @@ function IntegrationsSection() {
   const { data: toastConnection } = useToastConnection();
   const { data: gmailConnection, refetch: refetchGmail } = useGmailConnection();
   const connectGmail = useConnectGmail();
+  const [infoRow, setInfoRow] = useState<AppRow | null>(null);
+
+  // "Not built" rows still get a real onClick — opens
+  // IntegrationInfoDialog instead of leaving the row dead/disabled.
+  // Rows that already have their own onClick (Toast, Gmail) are left
+  // untouched; rows with no howToConnect content just stay inert.
+  function withInfoDialog(rows: AppRow[]): AppRow[] {
+    return rows.map((r) =>
+      r.onClick || !r.howToConnect ? r : { ...r, onClick: () => setInfoRow(r) },
+    );
+  }
 
   const [callbackBanner, setCallbackBanner] = useState<{
     status: "connected" | "error";
@@ -1118,36 +1143,103 @@ function IntegrationsSection() {
       cat: "Payments",
       status: "Not built",
       desc: "Card processing & online ordering.",
+      howToConnect: [
+        "Register a Square Developer app and implement its OAuth flow — the same shape of work as the Toast connection above.",
+        "Once connected, sync orders and payments via Square's Orders and Payments APIs.",
+        "Realistic to build — Square's API is well-documented and doesn't require a partner approval process.",
+      ],
     },
     {
       name: "QuickBooks Online",
       cat: "Accounting",
       status: "Not built",
       desc: "Pushes invoices, sales, payroll exports.",
+      howToConnect: [
+        "Register an app in Intuit's Developer portal and implement OAuth 2.0.",
+        "Push invoice, sales, and payroll data via the QuickBooks Online Accounting API.",
+        "No partner approval needed — any QuickBooks Online account can authorize a connected app.",
+      ],
     },
     {
       name: "Mailchimp",
       cat: "Email",
       status: "Not built",
       desc: "Sync segments and send campaigns.",
+      howToConnect: [
+        "Connect via Mailchimp's OAuth (or a simple API key for a single account).",
+        "Sync loyalty/customer segments as Mailchimp audiences, and pull campaign performance back via their Marketing API.",
+      ],
     },
-    { name: "Twilio", cat: "SMS", status: "Not built", desc: "Outbound SMS campaigns & alerts." },
+    {
+      name: "Twilio",
+      cat: "SMS",
+      status: "Not built",
+      desc: "Outbound SMS campaigns & alerts.",
+      howToConnect: [
+        "Requires a real Twilio account and a purchased phone number — no free tier for production sending.",
+        "Sends/receives SMS via Twilio's REST API using an Account SID + Auth Token (API key, not OAuth).",
+        "This is also what the deferred SMS notification channel would need — the same Twilio connection would power both.",
+      ],
+    },
     {
       name: "7shifts",
       cat: "Scheduling",
       status: "Not built",
       desc: "Import shifts and labor data.",
+      howToConnect: [
+        "Requires a 7shifts partner API key — request access through 7shifts directly, it's not self-serve.",
+        "Once granted, pulls published shifts and labor-cost data via their REST API.",
+      ],
     },
-    { name: "Resy", cat: "Reservations", status: "Not built", desc: "Sync reservation activity." },
+    {
+      name: "Resy",
+      cat: "Reservations",
+      status: "Not built",
+      desc: "Sync reservation activity.",
+      howToConnect: [
+        "Resy's reservation API is only available to approved partners — you'd need to apply through Resy's partner program before any integration work could even start.",
+      ],
+    },
     {
       name: "Google Business",
       cat: "Listings",
       status: "Not built",
       desc: "Hours, menu, reviews.",
+      howToConnect: [
+        "The official path is the Google Business Profile API — Google's approval process for this is notoriously slow for small businesses and not guaranteed.",
+        "An alternative is the browser-automation scraping approach this app already uses for Google Business Profile Insights in the Reviews module — real, but a different (less official) technique.",
+      ],
     },
-    { name: "Yelp", cat: "Reviews", status: "Not built", desc: "Pull reviews into the inbox." },
-    { name: "Slack", cat: "Notifications", status: "Not built", desc: "Route alerts to channels." },
-    { name: "Stripe", cat: "Payments", status: "Not built", desc: "Gift cards & online sales." },
+    {
+      name: "Yelp",
+      cat: "Reviews",
+      status: "Not built",
+      desc: "Pull reviews into the inbox.",
+      howToConnect: [
+        "Yelp Fusion API supports pulling business reviews with a free API key.",
+        "Realistic to build without a partner-approval process, unlike several others on this list.",
+      ],
+    },
+    {
+      name: "Slack",
+      cat: "Notifications",
+      status: "Not built",
+      desc: "Route alerts to channels.",
+      howToConnect: [
+        "Simplest integration on this entire list — just needs a Slack Incoming Webhook URL from your workspace.",
+        "No OAuth, no approval process — this app would just POST alert messages to that URL.",
+      ],
+    },
+    {
+      name: "Stripe",
+      cat: "Payments",
+      status: "Not built",
+      desc: "Gift cards & online sales.",
+      howToConnect: [
+        "This is a separate connection from the platform's own Stripe billing account — this would link your restaurant's own Stripe account via Stripe Connect OAuth.",
+        "Once linked, syncs gift card and online sale transactions.",
+      ],
+    },
   ];
 
   const vendors: AppRow[] = [
@@ -1157,6 +1249,10 @@ function IntegrationsSection() {
       status: "Not built",
       desc: "Live catalog, pricing, EDI 850/810.",
       channel: "EDI",
+      howToConnect: [
+        "Requires a real EDI trading-partner agreement with Sysco's EDI team — a business relationship step, not something buildable from this app's side alone.",
+        "Once that's set up, connects over AS2 or SFTP, mapping EDI 850 (orders) and 810 (invoices) documents.",
+      ],
     },
     {
       name: "US Foods",
@@ -1164,6 +1260,10 @@ function IntegrationsSection() {
       status: "Not built",
       desc: "MOXē API for catalog, orders, invoices.",
       channel: "API",
+      howToConnect: [
+        "US Foods offers a MOXē API, but access is granted through your US Foods rep, not self-serve.",
+        "Once approved, integrates catalog, order, and invoice endpoints.",
+      ],
     },
     {
       name: "Southern Glazer's",
@@ -1171,6 +1271,10 @@ function IntegrationsSection() {
       status: "Not built",
       desc: "eXchange portal sync + invoice PDFs.",
       channel: "Portal",
+      howToConnect: [
+        "No public API — their eXchange portal has no partner integration path.",
+        "Realistic options are manual export/import of order data, or a browser-automation approach like this app's review-agent already uses elsewhere.",
+      ],
     },
     {
       name: "Columbia Distributing",
@@ -1178,6 +1282,10 @@ function IntegrationsSection() {
       status: "Not built",
       desc: "Auto-send POs by email with PDF attachment.",
       channel: "Email PO",
+      howToConnect: [
+        "This already works today — this app can already send a real purchase order by email (the same Gmail connection used for reading invoices).",
+        "Just add Columbia's order email address under Vendors — no new integration needed.",
+      ],
     },
     {
       name: "Restaurant Depot",
@@ -1185,6 +1293,9 @@ function IntegrationsSection() {
       status: "Not built",
       desc: "Cart export via Instacart Business.",
       channel: "Portal",
+      howToConnect: [
+        "Restaurant Depot has no partner ordering API — the realistic path is exporting a cart via Instacart Business, not a direct integration.",
+      ],
     },
     {
       name: "Performance Food Group",
@@ -1192,6 +1303,10 @@ function IntegrationsSection() {
       status: "Not built",
       desc: "PFG Customer API for catalog & invoices.",
       channel: "API",
+      howToConnect: [
+        "PFG offers a Customer API for approved accounts — request access through your PFG rep.",
+        "Once approved, integrates catalog and invoice endpoints.",
+      ],
     },
     {
       name: "Reinhart (RDC)",
@@ -1199,6 +1314,9 @@ function IntegrationsSection() {
       status: "Not built",
       desc: "EDI 850/855/810 over SFTP.",
       channel: "EDI",
+      howToConnect: [
+        "Same as Sysco — requires a real EDI trading-partner agreement, SFTP connection, and EDI 850/855/810 document mapping.",
+      ],
     },
     {
       name: "Breakthru Beverage",
@@ -1206,6 +1324,9 @@ function IntegrationsSection() {
       status: "Not built",
       desc: "Portal scrape + email confirmations.",
       channel: "Portal",
+      howToConnect: [
+        "No public API — would need portal-scrape automation or manual order-confirmation imports, similar to Southern Glazer's.",
+      ],
     },
     {
       name: "RNDC",
@@ -1213,6 +1334,9 @@ function IntegrationsSection() {
       status: "Not built",
       desc: "eRNDC catalog + email PO fallback.",
       channel: "Email PO",
+      howToConnect: [
+        "Same as Columbia Distributing — this already works today via real email POs. Add RNDC's order email under Vendors, no new integration needed.",
+      ],
     },
     {
       name: "Local Produce Co-op",
@@ -1220,6 +1344,9 @@ function IntegrationsSection() {
       status: "Not built",
       desc: "CSV order sheet emailed nightly.",
       channel: "CSV",
+      howToConnect: [
+        "Simplest on this list — just needs a CSV import feature matching their nightly order-sheet format. No external API or portal involved.",
+      ],
     },
     {
       name: "Bimbo Bakeries",
@@ -1227,6 +1354,9 @@ function IntegrationsSection() {
       status: "Not built",
       desc: "Standing order via email.",
       channel: "Email PO",
+      howToConnect: [
+        "Same as Columbia Distributing and RNDC — already works today via real email POs. Add their order email under Vendors, no new integration needed.",
+      ],
     },
     {
       name: "Edward Don & Co.",
@@ -1234,6 +1364,9 @@ function IntegrationsSection() {
       status: "Not built",
       desc: "B2B portal for non-food supplies.",
       channel: "Portal",
+      howToConnect: [
+        "No public API — B2B ordering portal. Would need manual export/import or portal-scrape automation, same as the other Portal-channel vendors.",
+      ],
     },
   ];
 
@@ -1272,13 +1405,13 @@ function IntegrationsSection() {
       <IntegrationGroup
         title="Platform & operations"
         subtitle="POS, payments, accounting, marketing, and listings."
-        apps={platform}
+        apps={withInfoDialog(platform)}
       />
 
       <IntegrationGroup
         title="Vendor integrations"
         subtitle="How the Ordering agent reaches each supplier — EDI, API, portal, or email PO. Powers auto-send from the Inventory cart and invoice ingestion."
-        apps={vendors}
+        apps={withInfoDialog(vendors)}
         action={
           <Button
             size="sm"
@@ -1293,7 +1426,42 @@ function IntegrationsSection() {
       />
 
       <ToastConnectSheet open={toastSheetOpen} onOpenChange={setToastSheetOpen} />
+      <IntegrationInfoDialog row={infoRow} onOpenChange={(open) => !open && setInfoRow(null)} />
     </div>
+  );
+}
+
+function IntegrationInfoDialog({
+  row,
+  onOpenChange,
+}: {
+  row: AppRow | null;
+  onOpenChange: (open: boolean) => void;
+}) {
+  return (
+    <Dialog open={!!row} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-[480px]">
+        <DialogHeader>
+          <DialogTitle className="font-serif text-2xl">{row?.name}</DialogTitle>
+          <DialogDescription>{row?.desc}</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+            What connecting this for real would take
+          </p>
+          <ol className="space-y-2">
+            {row?.howToConnect?.map((step, i) => (
+              <li key={i} className="flex gap-2.5 text-sm">
+                <span className="mt-0.5 shrink-0 text-xs font-medium text-muted-foreground">
+                  {i + 1}.
+                </span>
+                <span>{step}</span>
+              </li>
+            ))}
+          </ol>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -1418,7 +1586,7 @@ function IntegrationGroup({
       </div>
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {apps.map((a) => (
-          <Card key={a.name} className={cn("p-4", a.status === "Not built" && "opacity-70")}>
+          <Card key={a.name} className="p-4">
             <div className="flex items-start justify-between gap-3">
               <div className="grid h-10 w-10 place-items-center rounded-lg bg-muted text-foreground/70">
                 <Globe className="h-4 w-4" />
@@ -1455,14 +1623,14 @@ function IntegrationGroup({
               className="w-full"
               onClick={a.onClick}
               disabled={!a.onClick}
-              title={!a.onClick ? "Not built yet" : undefined}
+              title={!a.onClick ? "No connection steps available yet" : undefined}
             >
               {a.status === "Connected"
                 ? "Manage"
                 : a.status === "Action needed"
                   ? "Reconnect"
                   : a.status === "Not built"
-                    ? "Not built yet"
+                    ? "How to connect"
                     : "Connect"}
             </Button>
           </Card>
