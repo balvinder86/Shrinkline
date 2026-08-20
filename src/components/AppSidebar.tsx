@@ -35,10 +35,8 @@ import {
   NAV_GROWTH,
   NAV_OPERATIONS,
   NAV_UNGATED,
-  NAV_PLATFORM,
   type NavItem,
 } from "@/lib/nav-items";
-import { usePlatformAdmin } from "@/lib/company/queries";
 import { useAuth } from "@/lib/supabase/auth-context";
 import { useCurrentRestaurant } from "@/lib/restaurant-context";
 import { useLanguage } from "@/lib/i18n/language-context";
@@ -69,7 +67,6 @@ export function AppSidebar() {
     .join("");
   const { language, setLanguage, t } = useLanguage();
   const { currentRestaurant } = useCurrentRestaurant();
-  const isPlatformAdmin = usePlatformAdmin();
 
   const visibleOverview = visibleFor(NAV_OVERVIEW, membership, subscription ?? null);
   const visibleGrowth = visibleFor(NAV_GROWTH, membership, subscription ?? null);
@@ -153,7 +150,6 @@ export function AppSidebar() {
         {renderGroup(t.navSection.overview, visibleOverview)}
         {renderGroup(t.navSection.growth, visibleGrowth)}
         {renderGroup(t.navSection.operations, [...visibleOperations, ...NAV_UNGATED])}
-        {isPlatformAdmin && renderGroup(t.navSection.platform, NAV_PLATFORM)}
       </SidebarContent>
       <SidebarFooter className="border-t border-sidebar-border p-3">
         <DropdownMenu>
