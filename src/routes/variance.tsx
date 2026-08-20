@@ -21,7 +21,7 @@ import { CATEGORIES, type Category } from "@/lib/boh/ingredient-categories";
 export const Route = createFileRoute("/variance")({
   head: () => ({
     meta: [
-      { title: "Cost Variance · Thrasher's Pub" },
+      { title: "Cost Variance · Shrinkline" },
       {
         name: "description",
         content:

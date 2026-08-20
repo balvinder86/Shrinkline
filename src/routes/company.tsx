@@ -27,7 +27,7 @@ import { TIMEZONES } from "@/lib/timezones";
 import { usePlatformAdmin, useTenants, useCreateTenant } from "@/lib/company/queries";
 
 export const Route = createFileRoute("/company")({
-  head: () => ({ meta: [{ title: "Company · Thrasher's Pub" }] }),
+  head: () => ({ meta: [{ title: "Company · Shrinkline" }] }),
   component: CompanyPage,
 });
 

@@ -77,11 +77,11 @@ import { cn } from "@/lib/utils";
 export const Route = createFileRoute("/loyalty")({
   head: () => ({
     meta: [
-      { title: "Loyalty · Thrasher's Pub" },
+      { title: "Loyalty · Shrinkline" },
       {
         name: "description",
         content:
-          "Run Thrasher's Pub loyalty program — tiers, rewards, point rules, referrals, and member analytics.",
+          "Run Shrinkline loyalty program — tiers, rewards, point rules, referrals, and member analytics.",
       },
     ],
   }),

@@ -15,7 +15,7 @@ import { VENDOR_CATEGORY_LABEL, type VendorCategory } from "@/lib/boh/vendor-cat
 export const Route = createFileRoute("/pnl")({
   head: () => ({
     meta: [
-      { title: "P&L · Thrasher's Pub" },
+      { title: "P&L · Shrinkline" },
       {
         name: "description",
         content:

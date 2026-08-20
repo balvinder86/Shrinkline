@@ -11,7 +11,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 
 export const Route = createFileRoute("/login")({
   head: () => ({
-    meta: [{ title: "Sign in · Thrasher's Pub" }],
+    meta: [{ title: "Sign in · Shrinkline" }],
   }),
   component: LoginPage,
 });
@@ -61,7 +61,7 @@ function LoginPage() {
         <h1 className="text-xl font-semibold text-foreground">
           {mode === "signin" ? "Sign in" : "Reset password"}
         </h1>
-        <p className="mt-1 text-sm text-muted-foreground">Thrasher's Pub owner dashboard</p>
+        <p className="mt-1 text-sm text-muted-foreground">Shrinkline owner dashboard</p>
 
         {mode === "signin" ? (
           <form onSubmit={handleSubmit} className="mt-6 space-y-4">

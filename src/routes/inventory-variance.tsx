@@ -21,7 +21,7 @@ import { unitLabel } from "@/lib/units";
 export const Route = createFileRoute("/inventory-variance")({
   head: () => ({
     meta: [
-      { title: "Inventory Variance · Thrasher's Pub" },
+      { title: "Inventory Variance · Shrinkline" },
       {
         name: "description",
         content:

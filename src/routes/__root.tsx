@@ -96,20 +96,20 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Thrasher's Pub · Owner Dashboard" },
+      { title: "Shrinkline · Owner Dashboard" },
       {
         name: "description",
         content: "Restaurant owner dashboard for sales, inventory, reviews, and operations.",
       },
-      { name: "author", content: "Thrasher's Pub" },
-      { property: "og:title", content: "Thrasher's Pub · Owner Dashboard" },
+      { name: "author", content: "Shrinkline" },
+      { property: "og:title", content: "Shrinkline · Owner Dashboard" },
       {
         property: "og:description",
         content: "Restaurant owner dashboard for sales, inventory, reviews, and operations.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
-      { name: "twitter:title", content: "Thrasher's Pub · Owner Dashboard" },
+      { name: "twitter:title", content: "Shrinkline · Owner Dashboard" },
       {
         name: "twitter:description",
         content: "Restaurant owner dashboard for sales, inventory, reviews, and operations.",

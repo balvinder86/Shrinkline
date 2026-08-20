@@ -12,7 +12,7 @@ import { useCurrentRestaurant } from "@/lib/restaurant-context";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/brands")({
-  head: () => ({ meta: [{ title: "Brands · Thrasher's Pub" }] }),
+  head: () => ({ meta: [{ title: "Brands · Shrinkline" }] }),
   component: BrandsPage,
 });
 

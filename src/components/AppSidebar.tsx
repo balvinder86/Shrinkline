@@ -59,7 +59,14 @@ export function AppSidebar() {
   const membership = useCurrentMembership();
   const { data: subscription } = useSubscription();
   const { setOpenMobile } = useSidebar();
-  const { signOut } = useAuth();
+  const { signOut, user } = useAuth();
+  const displayName = (user?.user_metadata?.full_name as string | undefined) || user?.email || "…";
+  const initials = displayName
+    .split(/[\s@.]+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join("");
   const { language, setLanguage, t } = useLanguage();
   const { currentRestaurant } = useCurrentRestaurant();
   const isPlatformAdmin = usePlatformAdmin();
@@ -156,10 +163,10 @@ export function AppSidebar() {
               className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors hover:bg-sidebar-accent"
             >
               <div className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-accent font-display text-sm text-accent-foreground">
-                BS
+                {initials || "…"}
               </div>
               <div className="min-w-0">
-                <div className="truncate text-sm font-medium">Bali Singh</div>
+                <div className="truncate text-sm font-medium">{displayName}</div>
                 <div className="truncate text-[11px] capitalize text-muted-foreground">
                   {membership?.role ?? "…"} · {currentRestaurant?.name ?? "…"}
                 </div>

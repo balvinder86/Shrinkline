@@ -47,6 +47,8 @@ import { Topbar } from "@/components/dashboard/Topbar";
 import { quadrant, QUAD_COLOR, formatItemPrice } from "@/lib/boh/menuEngineering";
 import { formatDateRange } from "@/lib/date-range";
 import { useDateRange } from "@/lib/date-range-context";
+import { useCurrentRestaurant } from "@/lib/restaurant-context";
+import { useCurrentLocation } from "@/lib/location-context";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -72,11 +74,11 @@ import {
 export const Route = createFileRoute("/product-mix")({
   head: () => ({
     meta: [
-      { title: "Product Mix · Thrasher's Pub" },
+      { title: "Product Mix · Shrinkline" },
       {
         name: "description",
         content:
-          "Menu engineering for Thrasher's Pub — stars, plowhorses, puzzles & dogs by category and daypart.",
+          "Menu engineering for Shrinkline — stars, plowhorses, puzzles & dogs by category and daypart.",
       },
     ],
   }),
@@ -1134,6 +1136,8 @@ function PosSyncStrip() {
   const { data: lastSyncAt } = useLastSyncTime();
   const queryClient = useQueryClient();
   const [refreshing, setRefreshing] = useState(false);
+  const { currentRestaurant } = useCurrentRestaurant();
+  const { currentLocation } = useCurrentLocation();
 
   const minutesAgo = lastSyncAt ? (Date.now() - new Date(lastSyncAt).getTime()) / 60_000 : null;
   const healthy = minutesAgo != null && minutesAgo <= SYNC_HEALTHY_THRESHOLD_MIN;
@@ -1184,7 +1188,9 @@ function PosSyncStrip() {
                 <Clock className="h-3 w-3" /> Last sync {lastSyncAt ? timeAgo(lastSyncAt) : "never"}
               </span>
               <span>· Syncs every 10 min</span>
-              <span>· Thrasher's Pub — Main</span>
+              <span>
+                · {currentRestaurant?.name ?? "…"} — {currentLocation?.name ?? "…"}
+              </span>
             </div>
           </div>
         </div>

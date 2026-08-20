@@ -97,10 +97,10 @@ import {
 export const Route = createFileRoute("/marketing")({
   head: () => ({
     meta: [
-      { title: "Marketing · Thrasher's Pub" },
+      { title: "Marketing · Shrinkline" },
       {
         name: "description",
-        content: "Email, SMS, social, loyalty, ads and AI-driven campaigns to grow Thrasher's Pub.",
+        content: "Email, SMS, social, loyalty, ads and AI-driven campaigns to grow Shrinkline.",
       },
     ],
   }),

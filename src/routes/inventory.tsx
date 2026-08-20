@@ -107,7 +107,7 @@ import { CATEGORIES as SHARED_CATEGORIES } from "@/lib/boh/ingredient-categories
 export const Route = createFileRoute("/inventory")({
   head: () => ({
     meta: [
-      { title: "Ordering · Thrasher's Pub" },
+      { title: "Ordering · Shrinkline" },
       {
         name: "description",
         content:

@@ -134,7 +134,7 @@ import { VENDOR_CATEGORIES, VENDOR_CATEGORY_LABEL, VENDOR_CATEGORY_COLOR } from 
 export const Route = createFileRoute("/invoices")({
   head: () => ({
     meta: [
-      { title: "Invoices · Thrasher's Pub" },
+      { title: "Invoices · Shrinkline" },
       {
         name: "description",
         content:

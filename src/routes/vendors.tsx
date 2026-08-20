@@ -50,7 +50,7 @@ import {
 export const Route = createFileRoute("/vendors")({
   head: () => ({
     meta: [
-      { title: "Vendors · Thrasher's Pub" },
+      { title: "Vendors · Shrinkline" },
       {
         name: "description",
         content:

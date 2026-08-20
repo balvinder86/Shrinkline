@@ -41,7 +41,7 @@ import { unitLabel } from "@/lib/units";
 export const Route = createFileRoute("/ingredient-price-trends")({
   head: () => ({
     meta: [
-      { title: "Ingredient Price Trends · Thrasher's Pub" },
+      { title: "Ingredient Price Trends · Shrinkline" },
       {
         name: "description",
         content:

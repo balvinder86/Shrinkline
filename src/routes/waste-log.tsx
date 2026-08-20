@@ -37,7 +37,7 @@ import { compatibleLineUnits, unitLabel } from "@/lib/units";
 export const Route = createFileRoute("/waste-log")({
   head: () => ({
     meta: [
-      { title: "Waste Log · Thrasher's Pub" },
+      { title: "Waste Log · Shrinkline" },
       {
         name: "description",
         content:

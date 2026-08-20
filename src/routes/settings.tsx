@@ -86,7 +86,7 @@ import {
 } from "@/lib/billing/queries";
 
 export const Route = createFileRoute("/settings")({
-  head: () => ({ meta: [{ title: "Settings · Thrasher's Pub" }] }),
+  head: () => ({ meta: [{ title: "Settings · Shrinkline" }] }),
   component: SettingsPage,
 });
 
@@ -726,7 +726,7 @@ function AddLocationCard({ onDone }: { onDone: () => void }) {
           <Input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="e.g. Thrasher's Pub — Downtown"
+            placeholder="e.g. Blue Bird Cafe — Downtown"
             autoFocus
           />
         </Field>
@@ -982,6 +982,7 @@ type AppRow = {
 };
 
 function IntegrationsSection() {
+  const { currentRestaurant } = useCurrentRestaurant();
   const [toastSheetOpen, setToastSheetOpen] = useState(false);
   const { data: toastConnection } = useToastConnection();
   const { data: gmailConnection, refetch: refetchGmail } = useGmailConnection();
@@ -1165,7 +1166,7 @@ function IntegrationsSection() {
       <SectionHeader
         eyebrow="Workspace"
         title="Integrations"
-        description="Connect Thrasher's Pub to the systems you already run."
+        description={`Connect ${currentRestaurant?.name ?? "your restaurant"} to the systems you already run.`}
       />
 
       {callbackBanner && (

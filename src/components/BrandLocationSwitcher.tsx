@@ -183,7 +183,7 @@ function AddLocationDialog({
             <Input
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Thrasher's Pub — Downtown"
+              placeholder="e.g. Blue Bird Cafe — Downtown"
               autoFocus
             />
           </div>

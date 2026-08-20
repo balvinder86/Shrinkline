@@ -52,11 +52,11 @@ import { useDateRange } from "@/lib/date-range-context";
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "Home · Thrasher's Pub" },
+      { title: "Home · Shrinkline" },
       {
         name: "description",
         content:
-          "A single command center for Thrasher's Pub — sales, menu mix, inventory, invoices, reviews, marketing, loyalty, scheduling and SEO.",
+          "A single command center for Shrinkline — sales, menu mix, inventory, invoices, reviews, marketing, loyalty, scheduling and SEO.",
       },
     ],
   }),

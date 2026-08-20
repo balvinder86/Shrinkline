@@ -58,7 +58,7 @@ function resolveNativeQty(item: InventoryItem, qty: number, unit: string): numbe
 export const Route = createFileRoute("/inventory-count")({
   head: () => ({
     meta: [
-      { title: "Inventory Count · Thrasher's Pub" },
+      { title: "Inventory Count · Shrinkline" },
       {
         name: "description",
         content:

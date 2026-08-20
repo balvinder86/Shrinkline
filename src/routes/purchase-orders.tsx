@@ -20,7 +20,7 @@ import {
 export const Route = createFileRoute("/purchase-orders")({
   head: () => ({
     meta: [
-      { title: "Purchase Orders · Thrasher's Pub" },
+      { title: "Purchase Orders · Shrinkline" },
       {
         name: "description",
         content: "Every purchase order sent to a vendor — status, total, and email delivery.",

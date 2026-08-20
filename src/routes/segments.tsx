@@ -33,7 +33,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 export const Route = createFileRoute("/segments")({
   head: () => ({
     meta: [
-      { title: "Audience segments · Thrasher's Pub" },
+      { title: "Audience segments · Shrinkline" },
       {
         name: "description",
         content:

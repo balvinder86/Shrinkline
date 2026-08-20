@@ -89,7 +89,7 @@ export const Route = createFileRoute("/recipes")({
   }),
   head: () => ({
     meta: [
-      { title: "Recipes · Thrasher's Pub" },
+      { title: "Recipes · Shrinkline" },
       {
         name: "description",
         content:

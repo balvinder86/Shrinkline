@@ -19,7 +19,7 @@ import {
 export const Route = createFileRoute("/labor")({
   head: () => ({
     meta: [
-      { title: "Labor Cost · Thrasher's Pub" },
+      { title: "Labor Cost · Shrinkline" },
       {
         name: "description",
         content: "Real labor cost, hours, and overtime pulled from Toast time entries and wages.",

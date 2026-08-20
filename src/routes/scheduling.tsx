@@ -51,7 +51,7 @@ import {
 } from "recharts";
 
 export const Route = createFileRoute("/scheduling")({
-  head: () => ({ meta: [{ title: "Scheduling · Thrasher's Pub" }] }),
+  head: () => ({ meta: [{ title: "Scheduling · Shrinkline" }] }),
   component: SchedulingPage,
 });
 

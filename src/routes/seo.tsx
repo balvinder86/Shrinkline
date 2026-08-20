@@ -106,7 +106,7 @@ import { Separator } from "@/components/ui/separator";
 export const Route = createFileRoute("/seo")({
   head: () => ({
     meta: [
-      { title: "SEO · Thrasher's Pub" },
+      { title: "SEO · Shrinkline" },
       {
         name: "description",
         content:

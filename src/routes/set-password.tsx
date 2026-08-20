@@ -11,7 +11,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 
 export const Route = createFileRoute("/set-password")({
   head: () => ({
-    meta: [{ title: "Set your password · Thrasher's Pub" }],
+    meta: [{ title: "Set your password · Shrinkline" }],
   }),
   component: SetPasswordPage,
 });
@@ -91,7 +91,7 @@ function SetPasswordPage() {
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <Card className="w-full max-w-sm p-6">
         <h1 className="text-xl font-semibold text-foreground">Set your password</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Thrasher's Pub owner dashboard</p>
+        <p className="mt-1 text-sm text-muted-foreground">Shrinkline owner dashboard</p>
 
         {stage === "confirm" && (
           <div className="mt-6 space-y-4">

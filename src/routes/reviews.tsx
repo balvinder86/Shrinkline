@@ -70,7 +70,7 @@ import {
 export const Route = createFileRoute("/reviews")({
   head: () => ({
     meta: [
-      { title: "Reviews · Thrasher's Pub" },
+      { title: "Reviews · Shrinkline" },
       {
         name: "description",
         content:

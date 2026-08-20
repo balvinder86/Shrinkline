@@ -10,6 +10,7 @@ import {
 } from "@/lib/admin/queries";
 import { useAuth } from "@/lib/supabase/auth-context";
 import { useRestaurantIds } from "@/lib/supabase/scope";
+import { useCurrentRestaurant } from "@/lib/restaurant-context";
 import { PERMISSION_KEYS, PERMISSION_LABEL, type PermissionKey } from "@/lib/permissions";
 import { Topbar } from "@/components/dashboard/Topbar";
 import { Card } from "@/components/ui/card";
@@ -66,7 +67,7 @@ function defaultPermissions(role: Role): Permissions {
 }
 
 export const Route = createFileRoute("/admin")({
-  head: () => ({ meta: [{ title: "Admin · Thrasher's Pub" }] }),
+  head: () => ({ meta: [{ title: "Admin · Shrinkline" }] }),
   component: AdminPage,
 });
 
@@ -85,6 +86,8 @@ const ROLE_LABEL: Record<Role, string> = { owner: "Owner", manager: "Manager", s
 function AdminPage() {
   const { memberships } = useAuth();
   const restaurantId = useRestaurantIds()[0];
+  const { currentRestaurant } = useCurrentRestaurant();
+  const restaurantName = currentRestaurant?.name ?? "your restaurant";
   const myRole = memberships.find((m) => m.restaurant_id === restaurantId)?.role;
   const canManage = myRole === "owner";
 
@@ -129,7 +132,7 @@ function AdminPage() {
             <h1 className="font-serif text-4xl text-foreground">Manage users</h1>
             <p className="text-sm text-muted-foreground mt-2 max-w-xl">
               {canManage
-                ? "Invite people to Thrasher's Pub and control what they can do."
+                ? `Invite people to ${restaurantName} and control what they can do.`
                 : "Only an owner can invite people or change access. You can see who's on the team below."}
             </p>
           </div>
@@ -258,7 +261,7 @@ function AdminPage() {
         <DialogContent className="sm:max-w-[440px]">
           <DialogHeader>
             <DialogTitle className="font-serif text-2xl flex items-center gap-2">
-              <Shield className="h-5 w-5 text-muted-foreground" /> Invite to Thrasher's Pub
+              <Shield className="h-5 w-5 text-muted-foreground" /> Invite to {restaurantName}
             </DialogTitle>
             <DialogDescription>
               We'll email them a link to set a password and sign in.
@@ -494,8 +497,8 @@ function AdminPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Remove {memberToRemove?.email}?</AlertDialogTitle>
             <AlertDialogDescription>
-              They'll immediately lose access to Thrasher's Pub. Their account itself isn't deleted
-              — they can be re-invited later.
+              They'll immediately lose access to {restaurantName}. Their account itself isn't
+              deleted — they can be re-invited later.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
