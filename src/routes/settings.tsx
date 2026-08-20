@@ -75,7 +75,11 @@ import {
   useUpdateRestaurantProfileDetails,
   useUploadRestaurantLogo,
   useRemoveRestaurantLogo,
+  useRestaurantBranding,
+  useUpdateRestaurantBranding,
+  VOICE_TONE_OPTIONS,
   type RestaurantProfileDetails,
+  type RestaurantBranding,
 } from "@/lib/settings/queries";
 import { useBrandsOverview } from "@/lib/restaurants/queries";
 import { AddBrandDialog } from "@/components/BrandLocationSwitcher";
@@ -802,77 +806,149 @@ function LocationsSection() {
 
 /* ---------- Branding ---------- */
 
+const DEFAULT_PALETTE = ["#F7F1E6", "#C8553D", "#2C2A29", "#7A8C5C", "#E5A06E"];
+
 function BrandingSection() {
-  const palette = ["#F7F1E6", "#C8553D", "#2C2A29", "#7A8C5C", "#E5A06E"];
+  const { data: branding, isLoading } = useRestaurantBranding();
+  const updateBranding = useUpdateRestaurantBranding();
+  const [form, setForm] = useState<RestaurantBranding>({
+    palette: [],
+    tagline: "",
+    voiceTone: null,
+  });
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    if (!branding) return;
+    setForm({
+      palette: branding.palette.length > 0 ? branding.palette : DEFAULT_PALETTE,
+      tagline: branding.tagline ?? "",
+      voiceTone: branding.voiceTone,
+    });
+  }, [branding]);
+
+  const dirty =
+    branding != null &&
+    (JSON.stringify(form.palette) !==
+      JSON.stringify(branding.palette.length > 0 ? branding.palette : DEFAULT_PALETTE) ||
+      (form.tagline ?? "") !== (branding.tagline ?? "") ||
+      form.voiceTone !== branding.voiceTone);
+
+  function updateColor(index: number, value: string) {
+    setForm((f) => ({ ...f, palette: f.palette.map((c, i) => (i === index ? value : c)) }));
+    setSaved(false);
+  }
+
+  function removeColor(index: number) {
+    setForm((f) => ({ ...f, palette: f.palette.filter((_, i) => i !== index) }));
+    setSaved(false);
+  }
+
+  function addColor() {
+    setForm((f) => ({ ...f, palette: [...f.palette, "#888888"] }));
+    setSaved(false);
+  }
+
   return (
     <div className="space-y-6">
       <SectionHeader
         eyebrow="Business"
         title="Branding"
-        description="Colors and typography applied to receipts, email, marketing campaigns, and your storefront."
+        description="Colors, tagline, and voice — saved for reference, not yet applied anywhere in the app itself."
       />
-      <PlaceholderBanner>
-        No branding table exists — nothing on this page persists. This is a mockup of what a real
-        branding editor could look like.
-      </PlaceholderBanner>
-      <Card className="p-6 opacity-60">
-        <div className="text-sm font-medium">Brand palette</div>
-        <div className="mt-3 flex flex-wrap gap-3">
-          {palette.map((c) => (
-            <div
-              key={c}
-              className="flex items-center gap-2 rounded-lg border border-border/60 bg-card/60 p-2 pr-3"
-            >
-              <div className="h-9 w-9 rounded-md border border-border" style={{ background: c }} />
-              <div className="text-xs">
-                <div className="font-medium">{c}</div>
-                <span className="text-muted-foreground">Replace</span>
-              </div>
+      {isLoading ? (
+        <p className="text-sm text-muted-foreground">Loading…</p>
+      ) : (
+        <>
+          <Card className="p-6">
+            <div className="text-sm font-medium">Brand palette</div>
+            <div className="mt-3 flex flex-wrap gap-3">
+              {form.palette.map((c, i) => (
+                <div
+                  key={i}
+                  className="flex items-center gap-2 rounded-lg border border-border/60 bg-card/60 p-2 pr-3"
+                >
+                  <input
+                    type="color"
+                    value={c}
+                    onChange={(e) => updateColor(i, e.target.value)}
+                    className="h-9 w-9 cursor-pointer rounded-md border border-border bg-transparent p-0"
+                  />
+                  <div className="text-xs">
+                    <div className="font-medium">{c}</div>
+                    <button
+                      onClick={() => removeColor(i)}
+                      className="flex items-center gap-1 text-muted-foreground hover:text-destructive"
+                    >
+                      <Trash2 className="h-3 w-3" /> Remove
+                    </button>
+                  </div>
+                </div>
+              ))}
+              <button
+                onClick={addColor}
+                className="flex h-[52px] items-center gap-2 rounded-lg border border-dashed border-border/80 px-3 text-xs text-muted-foreground hover:border-border hover:text-foreground"
+              >
+                <Plus className="h-3.5 w-3.5" /> Add color
+              </button>
             </div>
-          ))}
-          <div className="flex h-[52px] items-center gap-2 rounded-lg border border-dashed border-border/80 px-3 text-xs text-muted-foreground">
-            <Plus className="h-3.5 w-3.5" /> Add color
-          </div>
-        </div>
-      </Card>
+          </Card>
 
-      <Card className="p-6 opacity-60">
-        <div className="grid gap-5 md:grid-cols-2">
-          <Field label="Display typeface">
-            <Select defaultValue="fraunces" disabled>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="fraunces">Fraunces</SelectItem>
-              </SelectContent>
-            </Select>
-          </Field>
-          <Field label="Body typeface">
-            <Select defaultValue="inter" disabled>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="inter">Inter</SelectItem>
-              </SelectContent>
-            </Select>
-          </Field>
-          <Field label="Voice & tone">
-            <Select defaultValue="warm" disabled>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="warm">Warm & welcoming</SelectItem>
-              </SelectContent>
-            </Select>
-          </Field>
-          <Field label="Tagline">
-            <Input defaultValue="Neighborhood food. Honest drinks." disabled />
-          </Field>
-        </div>
-      </Card>
+          <Card className="p-6">
+            <div className="grid gap-5 md:grid-cols-2">
+              <Field label="Voice & tone">
+                <Select
+                  value={form.voiceTone ?? undefined}
+                  onValueChange={(v) => {
+                    setForm((f) => ({ ...f, voiceTone: v }));
+                    setSaved(false);
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Choose a tone" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {VOICE_TONE_OPTIONS.map((opt) => (
+                      <SelectItem key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field label="Tagline">
+                <Input
+                  value={form.tagline ?? ""}
+                  onChange={(e) => {
+                    setForm((f) => ({ ...f, tagline: e.target.value }));
+                    setSaved(false);
+                  }}
+                  placeholder="e.g. Neighborhood food. Honest drinks."
+                />
+              </Field>
+            </div>
+            <div className="mt-5 flex items-center gap-3">
+              <Button
+                size="sm"
+                disabled={!dirty || updateBranding.isPending}
+                onClick={() => {
+                  updateBranding.mutate(form, { onSuccess: () => setSaved(true) });
+                }}
+              >
+                {updateBranding.isPending ? "Saving…" : "Save"}
+              </Button>
+              {updateBranding.isError && (
+                <p className="text-xs text-destructive">
+                  {(updateBranding.error as Error).message}
+                </p>
+              )}
+              {saved && !updateBranding.isError && (
+                <p className="text-xs text-emerald-700">Saved.</p>
+              )}
+            </div>
+          </Card>
+        </>
+      )}
     </div>
   );
 }

@@ -288,3 +288,65 @@ export function useUpdateLocation() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["settings-locations"] }),
   });
 }
+
+export const VOICE_TONE_OPTIONS = [
+  { value: "warm", label: "Warm & welcoming" },
+  { value: "playful", label: "Playful & bold" },
+  { value: "refined", label: "Refined & upscale" },
+  { value: "casual", label: "Casual & fun" },
+  { value: "straightforward", label: "Straightforward & no-frills" },
+] as const;
+
+export type RestaurantBranding = {
+  palette: string[];
+  tagline: string | null;
+  voiceTone: string | null;
+};
+
+// Settings > Branding — saved data only (db/phase2/71_restaurant_branding.sql).
+// Scope confirmed with the user: this app's own UI does not re-theme
+// per tenant from these colors, and there's no downstream consumer of
+// voiceTone yet (a future AI-copy pass could read it) — both are
+// stored for now, applied nowhere, same "real but not yet wired up
+// everywhere" honesty as other Settings sections.
+export function useRestaurantBranding() {
+  const restaurantId = useRestaurantIds()[0];
+  return useQuery({
+    queryKey: ["restaurant-branding", restaurantId],
+    enabled: !!restaurantId,
+    queryFn: async (): Promise<RestaurantBranding> => {
+      const { data, error } = await supabase
+        .from("restaurant_branding")
+        .select("palette, tagline, voice_tone")
+        .eq("restaurant_id", restaurantId!)
+        .maybeSingle();
+      if (error) throw error;
+      return {
+        palette: data?.palette ?? [],
+        tagline: data?.tagline ?? null,
+        voiceTone: data?.voice_tone ?? null,
+      };
+    },
+  });
+}
+
+export function useUpdateRestaurantBranding() {
+  const restaurantId = useRestaurantIds()[0];
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (branding: RestaurantBranding) => {
+      if (!restaurantId) throw new Error("no current restaurant");
+      const { error } = await supabase.from("restaurant_branding").upsert(
+        {
+          restaurant_id: restaurantId,
+          palette: branding.palette,
+          tagline: branding.tagline?.trim() || null,
+          voice_tone: branding.voiceTone,
+        },
+        { onConflict: "restaurant_id" },
+      );
+      if (error) throw error;
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["restaurant-branding"] }),
+  });
+}
