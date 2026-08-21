@@ -10,7 +10,6 @@ import {
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
-  CircleDollarSign,
   Clock,
   ExternalLink,
   FileSearch,
@@ -110,7 +109,6 @@ import {
   useEnqueueOcr,
   useIngredients,
   useOriginalInvoiceUrl,
-  useCreateManualExpense,
   useExpenseCategorySpend,
   dateInRange,
   usePromoteSenderAndAssignVendor,
@@ -224,7 +222,6 @@ function InvoicesPage() {
   const [vendorFilter, setVendorFilter] = useState<string>("all");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [ocrSheetInvoiceId, setOcrSheetInvoiceId] = useState<string | null | undefined>(undefined);
-  const [manualExpenseOpen, setManualExpenseOpen] = useState(false);
   const [page, setPage] = useState(1);
   const [invoiceToDelete, setInvoiceToDelete] = useState<RealInvoice | null>(null);
   const [insightsSettingsOpen, setInsightsSettingsOpen] = useState(false);
@@ -598,14 +595,6 @@ function InvoicesPage() {
                 variant="outline"
                 size="sm"
                 className="h-9 gap-1.5"
-                onClick={() => setManualExpenseOpen(true)}
-              >
-                <CircleDollarSign className="h-3.5 w-3.5" /> Log expense
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-9 gap-1.5"
                 onClick={() => setOcrSheetInvoiceId(null)}
               >
                 <Upload className="h-3.5 w-3.5" /> Upload invoice
@@ -859,8 +848,6 @@ function InvoicesPage() {
         invoiceId={ocrSheetInvoiceId}
         onClose={() => setOcrSheetInvoiceId(undefined)}
       />
-
-      <ManualExpenseDialog open={manualExpenseOpen} onOpenChange={setManualExpenseOpen} />
 
       <InsightsSettingsSheet open={insightsSettingsOpen} onOpenChange={setInsightsSettingsOpen} />
 
@@ -1323,161 +1310,6 @@ function InsightsSettingsSheet({
         </div>
       </SheetContent>
     </Sheet>
-  );
-}
-
-// For a paid-with-no-paper-trail expense — cash to a landlord or a
-// repair person, for example. Skips OCR/upload entirely: pick a
-// vendor, type the amount, done. Logged straight in as approved since
-// there's nothing to extract or double-check against a document.
-function ManualExpenseDialog({
-  open,
-  onOpenChange,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-}) {
-  const { data: vendors = [] } = useRealVendors();
-  const createManualExpense = useCreateManualExpense();
-
-  const [vendorId, setVendorId] = useState("");
-  const [amountInput, setAmountInput] = useState("");
-  const [dateInput, setDateInput] = useState("");
-  const [note, setNote] = useState("");
-
-  useEffect(() => {
-    if (open) {
-      setVendorId("");
-      setAmountInput("");
-      setDateInput(isoDate(new Date()));
-      setNote("");
-      createManualExpense.reset();
-    }
-    // createManualExpense's identity changes every render — only re-arm on open
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
-
-  const parsedCents = Math.round(parseFloat(amountInput) * 100);
-  const isValid =
-    !!vendorId &&
-    amountInput.trim() !== "" &&
-    Number.isFinite(parsedCents) &&
-    parsedCents > 0 &&
-    !!dateInput;
-
-  function handleSubmit() {
-    if (!isValid) return;
-    createManualExpense.mutate(
-      {
-        vendorId,
-        totalCents: parsedCents,
-        invoiceDate: dateInput,
-        note: note.trim() || null,
-      },
-      { onSuccess: () => onOpenChange(false) },
-    );
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <CircleDollarSign className="h-5 w-5" /> Log an expense
-          </DialogTitle>
-        </DialogHeader>
-
-        <div className="space-y-4">
-          <p className="text-sm text-muted-foreground">
-            For anything with no invoice to upload — cash paid for rent, a repair, or any other
-            vendor. Recorded as approved right away.
-          </p>
-
-          <div className="space-y-1.5">
-            <FormLabel htmlFor="manual-expense-vendor">Vendor</FormLabel>
-            <select
-              id="manual-expense-vendor"
-              value={vendorId}
-              onChange={(e) => setVendorId(e.target.value)}
-              className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-            >
-              <option value="">Select a vendor…</option>
-              {VENDOR_CATEGORIES.map((c) => {
-                const vendorsInCategory = vendors.filter((v) => v.category === c.value);
-                if (vendorsInCategory.length === 0) return null;
-                return (
-                  <optgroup key={c.value} label={c.label}>
-                    {vendorsInCategory.map((v) => (
-                      <option key={v.id} value={v.id}>
-                        {v.name}
-                      </option>
-                    ))}
-                  </optgroup>
-                );
-              })}
-            </select>
-            {vendors.length === 0 && (
-              <p className="text-xs text-muted-foreground">
-                No vendors yet — add one in the Vendors tab of Inventory first.
-              </p>
-            )}
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <FormLabel htmlFor="manual-expense-amount">Amount</FormLabel>
-              <div className="relative">
-                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
-                  $
-                </span>
-                <Input
-                  id="manual-expense-amount"
-                  type="number"
-                  min={0}
-                  step="0.01"
-                  placeholder="0.00"
-                  value={amountInput}
-                  onChange={(e) => setAmountInput(e.target.value)}
-                  className="pl-6"
-                />
-              </div>
-            </div>
-            <div className="space-y-1.5">
-              <FormLabel htmlFor="manual-expense-date">Date</FormLabel>
-              <Input
-                id="manual-expense-date"
-                type="date"
-                value={dateInput}
-                onChange={(e) => setDateInput(e.target.value)}
-              />
-            </div>
-          </div>
-
-          <div className="space-y-1.5">
-            <FormLabel htmlFor="manual-expense-note">Reference / note (optional)</FormLabel>
-            <Input
-              id="manual-expense-note"
-              placeholder="e.g. paid by check #204"
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-            />
-          </div>
-
-          {createManualExpense.isError && (
-            <p className="text-xs text-destructive">Couldn't save that expense — try again.</p>
-          )}
-        </div>
-
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button onClick={handleSubmit} disabled={!isValid || createManualExpense.isPending}>
-            {createManualExpense.isPending ? "Saving…" : "Log expense"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   );
 }
 

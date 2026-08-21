@@ -56,6 +56,7 @@ export const ROUTE_PERMISSION: Record<string, PermissionKey> = {
   "/invoice-line-items": "invoices",
   "/invoice-savings": "invoices",
   "/vendor-spend": "invoices",
+  "/log-expense": "invoices",
   "/reviews": "reviews",
   "/seo": "seo",
   "/marketing": "marketing",

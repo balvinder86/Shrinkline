@@ -26,6 +26,7 @@ import { Route as PnlRouteImport } from './routes/pnl'
 import { Route as MarketingRouteImport } from './routes/marketing'
 import { Route as LoyaltyRouteImport } from './routes/loyalty'
 import { Route as LoginRouteImport } from './routes/login'
+import { Route as LogExpenseRouteImport } from './routes/log-expense'
 import { Route as LaborRouteImport } from './routes/labor'
 import { Route as InvoicesRouteImport } from './routes/invoices'
 import { Route as InvoiceSavingsRouteImport } from './routes/invoice-savings'
@@ -122,6 +123,11 @@ const LoginRoute = LoginRouteImport.update({
   path: '/login',
   getParentRoute: () => rootRouteImport,
 } as any)
+const LogExpenseRoute = LogExpenseRouteImport.update({
+  id: '/log-expense',
+  path: '/log-expense',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const LaborRoute = LaborRouteImport.update({
   id: '/labor',
   path: '/labor',
@@ -184,6 +190,7 @@ export interface FileRoutesByFullPath {
   '/invoice-savings': typeof InvoiceSavingsRoute
   '/invoices': typeof InvoicesRoute
   '/labor': typeof LaborRoute
+  '/log-expense': typeof LogExpenseRoute
   '/login': typeof LoginRoute
   '/loyalty': typeof LoyaltyRoute
   '/marketing': typeof MarketingRoute
@@ -213,6 +220,7 @@ export interface FileRoutesByTo {
   '/invoice-savings': typeof InvoiceSavingsRoute
   '/invoices': typeof InvoicesRoute
   '/labor': typeof LaborRoute
+  '/log-expense': typeof LogExpenseRoute
   '/login': typeof LoginRoute
   '/loyalty': typeof LoyaltyRoute
   '/marketing': typeof MarketingRoute
@@ -243,6 +251,7 @@ export interface FileRoutesById {
   '/invoice-savings': typeof InvoiceSavingsRoute
   '/invoices': typeof InvoicesRoute
   '/labor': typeof LaborRoute
+  '/log-expense': typeof LogExpenseRoute
   '/login': typeof LoginRoute
   '/loyalty': typeof LoyaltyRoute
   '/marketing': typeof MarketingRoute
@@ -274,6 +283,7 @@ export interface FileRouteTypes {
     | '/invoice-savings'
     | '/invoices'
     | '/labor'
+    | '/log-expense'
     | '/login'
     | '/loyalty'
     | '/marketing'
@@ -303,6 +313,7 @@ export interface FileRouteTypes {
     | '/invoice-savings'
     | '/invoices'
     | '/labor'
+    | '/log-expense'
     | '/login'
     | '/loyalty'
     | '/marketing'
@@ -332,6 +343,7 @@ export interface FileRouteTypes {
     | '/invoice-savings'
     | '/invoices'
     | '/labor'
+    | '/log-expense'
     | '/login'
     | '/loyalty'
     | '/marketing'
@@ -362,6 +374,7 @@ export interface RootRouteChildren {
   InvoiceSavingsRoute: typeof InvoiceSavingsRoute
   InvoicesRoute: typeof InvoicesRoute
   LaborRoute: typeof LaborRoute
+  LogExpenseRoute: typeof LogExpenseRoute
   LoginRoute: typeof LoginRoute
   LoyaltyRoute: typeof LoyaltyRoute
   MarketingRoute: typeof MarketingRoute
@@ -502,6 +515,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LoginRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/log-expense': {
+      id: '/log-expense'
+      path: '/log-expense'
+      fullPath: '/log-expense'
+      preLoaderRoute: typeof LogExpenseRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/labor': {
       id: '/labor'
       path: '/labor'
@@ -586,6 +606,7 @@ const rootRouteChildren: RootRouteChildren = {
   InvoiceSavingsRoute: InvoiceSavingsRoute,
   InvoicesRoute: InvoicesRoute,
   LaborRoute: LaborRoute,
+  LogExpenseRoute: LogExpenseRoute,
   LoginRoute: LoginRoute,
   LoyaltyRoute: LoyaltyRoute,
   MarketingRoute: MarketingRoute,

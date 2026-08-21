@@ -31,6 +31,7 @@ export type TranslationDict = {
     invoiceLineItems: string;
     invoiceSavings: string;
     vendorSpend: string;
+    logExpense: string;
     performance: string;
     reviews: string;
     seo: string;
@@ -79,6 +80,7 @@ export const translations: Record<Language, TranslationDict> = {
       invoiceLineItems: "Line items",
       invoiceSavings: "Savings",
       vendorSpend: "Vendor spend",
+      logExpense: "Log expense",
       performance: "Performance",
       reviews: "Reviews",
       seo: "SEO",
@@ -135,6 +137,7 @@ export const translations: Record<Language, TranslationDict> = {
       invoiceLineItems: "Artículos",
       invoiceSavings: "Ahorros",
       vendorSpend: "Gasto por proveedor",
+      logExpense: "Registrar gasto",
       performance: "Rendimiento",
       reviews: "Reseñas",
       seo: "SEO",

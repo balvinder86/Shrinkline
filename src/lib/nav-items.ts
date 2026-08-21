@@ -22,6 +22,7 @@ import {
   PackageSearch,
   LineChart,
   PiggyBank,
+  CircleDollarSign,
   type LucideIcon,
 } from "lucide-react";
 
@@ -79,6 +80,12 @@ export const NAV_OVERVIEW: NavItem[] = [
         permission: "invoices",
       },
       { titleKey: "vendorSpend", url: "/vendor-spend", icon: Truck, permission: "invoices" },
+      {
+        titleKey: "logExpense",
+        url: "/log-expense",
+        icon: CircleDollarSign,
+        permission: "invoices",
+      },
     ],
   },
   {
