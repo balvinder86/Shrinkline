@@ -7,13 +7,24 @@
 // memberships entirely.
 //
 //   { action: "list_tenants" }
+//   { action: "get_tenant", restaurant_id }
+//   { action: "get_platform_summary" }
 //   { action: "create_tenant", name, location_name?, location_timezone?, owner_email }
 //
-// list_tenants includes taxSettingsComplete/taxDocumentCount — status
-// only (has the tenant filled this in, how many documents), never the
-// actual EIN/tax ID values or document contents, which stay owner-only
-// RLS'd to the tenant's own dashboard. Confirmed with the user: this
-// is informational only for now, not a required onboarding gate.
+// list_tenants includes taxSettingsComplete/taxDocumentCount and
+// setupStepsComplete/setupStepsTotal — status only (has the tenant
+// filled this in, how many steps done), never the actual EIN/tax ID
+// values or document contents, which stay owner-only RLS'd to the
+// tenant's own dashboard. Confirmed with the user: this is
+// informational only for now, not a required onboarding gate.
+//
+// setup status is derived from real data (pos_credentials/menu_items/
+// recipe_lines/par_levels/subscriptions existing), the same approach
+// as get_setup_status() (db/phase3/50_setup_status.sql) — that RPC
+// itself can't be reused here since it's membership-gated to the
+// tenant's own members, not callable by a platform admin who isn't a
+// member of every restaurant. getSetupStatus() below re-derives the
+// same booleans directly via the service-role client instead.
 //
 // Invite mechanics are copied from manage-team's "invite" action:
 // generateLink creates the user and hands back a real link without
@@ -49,6 +60,47 @@ async function assertPlatformAdmin(userId: string) {
     .eq("user_id", userId)
     .maybeSingle();
   if (!data) throw new Error("not a platform admin");
+}
+
+type SetupStatus = {
+  posConnected: boolean;
+  menuImported: boolean;
+  recipesDone: boolean;
+  parDone: boolean;
+  billingActive: boolean;
+};
+
+async function getSetupStatus(restaurantId: string): Promise<SetupStatus> {
+  const [{ data: pos }, { data: menu }, { data: recipes }, { data: par }, { data: subscription }] =
+    await Promise.all([
+      supabase.from("pos_credentials").select("id").eq("restaurant_id", restaurantId).limit(1),
+      supabase.from("menu_items").select("id").eq("restaurant_id", restaurantId).limit(1),
+      supabase.from("recipe_lines").select("id").eq("restaurant_id", restaurantId).limit(1),
+      supabase
+        .from("par_levels")
+        .select("id")
+        .eq("restaurant_id", restaurantId)
+        .not("par_quantity", "is", null)
+        .limit(1),
+      supabase
+        .from("subscriptions")
+        .select("status")
+        .eq("restaurant_id", restaurantId)
+        .maybeSingle(),
+    ]);
+
+  return {
+    posConnected: (pos ?? []).length > 0,
+    menuImported: (menu ?? []).length > 0,
+    recipesDone: (recipes ?? []).length > 0,
+    parDone: (par ?? []).length > 0,
+    billingActive: subscription?.status === "active" || subscription?.status === "trialing",
+  };
+}
+
+function countStepsComplete(setup: SetupStatus): number {
+  return [setup.posConnected, setup.recipesDone, setup.parDone, setup.billingActive].filter(Boolean)
+    .length;
 }
 
 Deno.serve(async (req) => {
@@ -131,6 +183,8 @@ Deno.serve(async (req) => {
             }),
           );
 
+          const setup = await getSetupStatus(r.id);
+
           return {
             id: r.id,
             name: r.name,
@@ -141,11 +195,139 @@ Deno.serve(async (req) => {
             ownerEmails,
             taxSettingsComplete: !!taxSettings,
             taxDocumentCount: taxDocumentCount ?? 0,
+            setupStepsComplete: countStepsComplete(setup),
+            setupStepsTotal: 4,
           };
         }),
       );
 
       return json({ ok: true, tenants }, 200);
+    }
+
+    if (action === "get_tenant") {
+      const { restaurant_id: restaurantId } = body;
+      if (typeof restaurantId !== "string") {
+        return json({ ok: false, step: "input", error: "restaurant_id is required" }, 400);
+      }
+
+      const { data: restaurant, error: restaurantErr } = await supabase
+        .from("restaurants")
+        .select("id, name, created_at")
+        .eq("id", restaurantId)
+        .maybeSingle();
+      if (restaurantErr) return json({ ok: false, error: restaurantErr.message }, 500);
+      if (!restaurant) return json({ ok: false, step: "input", error: "tenant not found" }, 404);
+
+      const [
+        { data: locations },
+        { data: subscription },
+        { data: members },
+        { data: taxSettings },
+        { count: taxDocumentCount },
+        setup,
+      ] = await Promise.all([
+        supabase
+          .from("locations")
+          .select("id, name, timezone")
+          .eq("restaurant_id", restaurantId)
+          .order("created_at", { ascending: true }),
+        supabase
+          .from("subscriptions")
+          .select("plan_tier, status, quantity, current_period_end, stripe_subscription_id")
+          .eq("restaurant_id", restaurantId)
+          .maybeSingle(),
+        supabase.from("memberships").select("user_id, role").eq("restaurant_id", restaurantId),
+        // Status only, same as list_tenants — never the actual EIN/tax
+        // ID values or document contents.
+        supabase
+          .from("restaurant_tax_settings")
+          .select("restaurant_id")
+          .eq("restaurant_id", restaurantId)
+          .maybeSingle(),
+        supabase
+          .from("tax_documents")
+          .select("id", { count: "exact", head: true })
+          .eq("restaurant_id", restaurantId),
+        getSetupStatus(restaurantId),
+      ]);
+
+      const membersWithEmail = await Promise.all(
+        (members ?? []).map(async (m) => {
+          const { data: u } = await supabase.auth.admin.getUserById(m.user_id);
+          return { userId: m.user_id, role: m.role, email: u.user?.email ?? "unknown" };
+        }),
+      );
+
+      return json(
+        {
+          ok: true,
+          tenant: {
+            id: restaurant.id,
+            name: restaurant.name,
+            createdAt: restaurant.created_at,
+            locations: locations ?? [],
+            subscription: subscription
+              ? {
+                  planTier: subscription.plan_tier,
+                  status: subscription.status,
+                  quantity: subscription.quantity,
+                  currentPeriodEnd: subscription.current_period_end,
+                  stripeSubscriptionId: subscription.stripe_subscription_id,
+                }
+              : null,
+            members: membersWithEmail,
+            taxSettingsComplete: !!taxSettings,
+            taxDocumentCount: taxDocumentCount ?? 0,
+            setup,
+          },
+        },
+        200,
+      );
+    }
+
+    if (action === "get_platform_summary") {
+      const { data: restaurants, error: restaurantsErr } = await supabase
+        .from("restaurants")
+        .select("id, name, created_at")
+        .order("created_at", { ascending: false });
+      if (restaurantsErr) return json({ ok: false, error: restaurantsErr.message }, 500);
+
+      const [{ count: totalLocations }, { data: subscriptions }] = await Promise.all([
+        supabase.from("locations").select("id", { count: "exact", head: true }),
+        supabase.from("subscriptions").select("plan_tier, status"),
+      ]);
+
+      // "Current effective tier" — only active/trialing subscriptions
+      // count toward boh/full; everything else (no subscription row,
+      // or one that's past_due/canceled) counts as "none", same
+      // status set tierAllows() (src/lib/billing/tierGate.ts) treats
+      // as actually granting access.
+      const activeSubscriptions = (subscriptions ?? []).filter(
+        (s) => s.status === "active" || s.status === "trialing",
+      );
+      const planTierBreakdown = {
+        boh: activeSubscriptions.filter((s) => s.plan_tier === "boh").length,
+        full: activeSubscriptions.filter((s) => s.plan_tier === "full").length,
+        none: (restaurants ?? []).length - activeSubscriptions.length,
+      };
+
+      return json(
+        {
+          ok: true,
+          summary: {
+            totalTenants: (restaurants ?? []).length,
+            activeSubscriptions: activeSubscriptions.length,
+            planTierBreakdown,
+            totalLocations: totalLocations ?? 0,
+            recentTenants: (restaurants ?? []).slice(0, 5).map((r) => ({
+              id: r.id,
+              name: r.name,
+              createdAt: r.created_at,
+            })),
+          },
+        },
+        200,
+      );
     }
 
     if (action === "create_tenant") {
