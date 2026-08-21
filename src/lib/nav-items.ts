@@ -21,6 +21,7 @@ import {
   Scale,
   PackageSearch,
   LineChart,
+  PiggyBank,
   type LucideIcon,
 } from "lucide-react";
 
@@ -53,7 +54,33 @@ export const NAV_OVERVIEW: NavItem[] = [
   // Reuses "product_mix" — Recipes is the cost/recipe side of Product
   // Mix's real menu items, same domain, no new permission needed.
   { titleKey: "recipes", url: "/recipes", icon: ChefHat, permission: "product_mix" },
-  { titleKey: "invoices", url: "/invoices", icon: Receipt, permission: "invoices" },
+  {
+    titleKey: "invoices",
+    url: "/invoices",
+    icon: Receipt,
+    permission: "invoices",
+    // Line items/Savings/Vendor spend were tabs inside /invoices —
+    // promoted to real sub-pages, same nested-children treatment as
+    // Inventory below. "Vendor spend" is deliberately distinct from
+    // the real Vendors catalog page (under Inventory's own children)
+    // — this one is an invoice-spend breakdown, not vendor management.
+    children: [
+      { titleKey: "invoices", url: "/invoices", icon: Receipt, permission: "invoices" },
+      {
+        titleKey: "invoiceLineItems",
+        url: "/invoice-line-items",
+        icon: Receipt,
+        permission: "invoices",
+      },
+      {
+        titleKey: "invoiceSavings",
+        url: "/invoice-savings",
+        icon: PiggyBank,
+        permission: "invoices",
+      },
+      { titleKey: "vendorSpend", url: "/vendor-spend", icon: Truck, permission: "invoices" },
+    ],
+  },
   {
     titleKey: "inventory",
     url: "/inventory",

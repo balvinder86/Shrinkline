@@ -111,7 +111,6 @@ import {
   useIngredients,
   useOriginalInvoiceUrl,
   useCreateManualExpense,
-  useCategorySpend,
   useExpenseCategorySpend,
   dateInRange,
   usePromoteSenderAndAssignVendor,
@@ -121,7 +120,6 @@ import {
   useSavingsSummary,
   useSetInvoiceDiscount,
   useSetInvoiceVendor,
-  useTopLineItems,
   useUpdateInvoiceLineIngredient,
   useUploadInvoice,
   useVendors as useRealVendors,
@@ -256,8 +254,6 @@ function InvoicesPage() {
   const { data: realInvoices = [] } = useRealInvoices();
   const { data: realVendors = [] } = useRealVendors();
   const { data: vendorSpend = [] } = useVendorSpendSummary(dateRange);
-  const { data: topLineItems = [] } = useTopLineItems(dateRange);
-  const { data: categorySpend = [] } = useCategorySpend(dateRange);
   const { data: expenseCategorySpend = [] } = useExpenseCategorySpend(dateRange);
   const { data: savingsSummary } = useSavingsSummary(dateRange);
 
@@ -592,15 +588,6 @@ function InvoicesPage() {
                 <TabsTrigger value="invoices" className="gap-1.5">
                   <Inbox className="h-3.5 w-3.5" /> All invoices
                 </TabsTrigger>
-                <TabsTrigger value="vendors" className="gap-1.5">
-                  <Truck className="h-3.5 w-3.5" /> Vendors
-                </TabsTrigger>
-                <TabsTrigger value="items" className="gap-1.5">
-                  <Receipt className="h-3.5 w-3.5" /> Line items
-                </TabsTrigger>
-                <TabsTrigger value="savings" className="gap-1.5">
-                  <PiggyBank className="h-3.5 w-3.5" /> Savings
-                </TabsTrigger>
                 <TabsTrigger value="automation" className="gap-1.5">
                   <Bot className="h-3.5 w-3.5" /> Automation
                 </TabsTrigger>
@@ -859,203 +846,6 @@ function InvoicesPage() {
                 </span>
               </div>
             </Card>
-          </TabsContent>
-
-          {/* Vendors tab */}
-          <TabsContent value="vendors" className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-              {vendorSpend.map((v) => (
-                <Card key={v.vendorId} className="p-5">
-                  <div className="flex items-start justify-between">
-                    <div className="min-w-0">
-                      <div className="font-display text-lg">{v.name}</div>
-                      {v.contactName && (
-                        <div className="truncate text-xs text-muted-foreground">
-                          {v.contactName}
-                        </div>
-                      )}
-                    </div>
-                    <div className="flex shrink-0 flex-col items-end gap-1">
-                      {v.terms && (
-                        <Badge variant="outline" className="text-xs">
-                          {v.terms}
-                        </Badge>
-                      )}
-                      <Badge
-                        className="text-xs text-white hover:opacity-90"
-                        style={{ background: VENDOR_CATEGORY_COLOR[v.category] }}
-                      >
-                        {VENDOR_CATEGORY_LABEL[v.category]}
-                      </Badge>
-                    </div>
-                  </div>
-
-                  <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
-                    <div>
-                      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                        Approved spend
-                      </div>
-                      <div className="font-display text-lg">
-                        {formatMoney(v.approvedSpendCents / 100, { compact: true })}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                        Invoices
-                      </div>
-                      <div className="font-display text-lg">{v.approvedInvoiceCount}</div>
-                      {v.pendingInvoiceCount > 0 && (
-                        <div className="text-xs text-amber-700">
-                          {v.pendingInvoiceCount} pending review
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {(v.email || v.phone) && (
-                    <>
-                      <Separator className="my-4" />
-                      <div className="space-y-1 text-xs text-muted-foreground">
-                        {v.email && <div>{v.email}</div>}
-                        {v.phone && <div>{v.phone}</div>}
-                      </div>
-                    </>
-                  )}
-                </Card>
-              ))}
-              {vendorSpend.length === 0 && (
-                <p className="col-span-full py-10 text-center text-sm text-muted-foreground">
-                  No vendors yet — add one in Inventory &amp; Ordering.
-                </p>
-              )}
-            </div>
-          </TabsContent>
-
-          {/* Line items tab — real spend/price-trend from invoice_lines
-              on approved invoices. No time window applied (see
-              useTopLineItems) since real invoice volume is still too
-              low for "last 30 days"/"MTD" to be meaningful rather than
-              just hiding real spend. "Savings" per item is dropped —
-              discounts are only tracked at the invoice level. */}
-          <TabsContent value="items" className="space-y-4">
-            <div className="grid gap-4 lg:grid-cols-3">
-              <Card className="p-5 lg:col-span-2">
-                <div>
-                  <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
-                    Top line items
-                  </div>
-                  <h3 className="mt-1 font-display text-xl">Where you're spending the most</h3>
-                  <p className="mt-0.5 text-xs text-muted-foreground">
-                    All approved invoices — matched line items only
-                  </p>
-                </div>
-                <div className="mt-3 overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Item</TableHead>
-                      <TableHead>Vendor</TableHead>
-                      <TableHead className="text-right">Spend</TableHead>
-                      <TableHead className="text-right">Δ price</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {topLineItems.map((i) => (
-                      <TableRow key={i.ingredientId}>
-                        <TableCell className="font-medium">{i.name}</TableCell>
-                        <TableCell className="text-xs text-muted-foreground">
-                          {i.vendorLabel}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {formatMoney(i.spendCents / 100)}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {i.priceChangePct == null ? (
-                            <span className="text-xs text-muted-foreground">—</span>
-                          ) : (
-                            <span
-                              className={`inline-flex items-center gap-0.5 text-xs font-medium ${
-                                i.priceChangePct > 0
-                                  ? "text-rose-600"
-                                  : i.priceChangePct < 0
-                                    ? "text-emerald-600"
-                                    : "text-muted-foreground"
-                              }`}
-                            >
-                              {i.priceChangePct > 0 ? (
-                                <ArrowUpRight className="h-3 w-3" />
-                              ) : i.priceChangePct < 0 ? (
-                                <ArrowDownRight className="h-3 w-3" />
-                              ) : null}
-                              {i.priceChangePct === 0 ? "—" : `${Math.abs(i.priceChangePct)}%`}
-                            </span>
-                          )}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                    {topLineItems.length === 0 && (
-                      <TableRow>
-                        <TableCell
-                          colSpan={4}
-                          className="py-10 text-center text-sm text-muted-foreground"
-                        >
-                          No matched line items on approved invoices yet.
-                        </TableCell>
-                      </TableRow>
-                    )}
-                  </TableBody>
-                </Table>
-                </div>
-              </Card>
-
-              <Card className="p-5">
-                <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
-                  Category spend
-                </div>
-                <h3 className="mt-1 font-display text-xl">By category</h3>
-                <p className="mt-0.5 text-xs text-muted-foreground">All approved invoices</p>
-                {categorySpend.length === 0 ? (
-                  <p className="py-10 text-center text-sm text-muted-foreground">
-                    No matched line items yet.
-                  </p>
-                ) : (
-                  <div className="mt-3 h-[280px]">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart
-                        data={categorySpend.map((c) => ({
-                          name: c.category,
-                          value: c.spendCents / 100,
-                        }))}
-                        layout="vertical"
-                        margin={{ left: 10, right: 10 }}
-                      >
-                        <CartesianGrid
-                          stroke="var(--border)"
-                          strokeDasharray="3 3"
-                          horizontal={false}
-                        />
-                        <XAxis type="number" hide />
-                        <YAxis
-                          type="category"
-                          dataKey="name"
-                          stroke="var(--muted-foreground)"
-                          fontSize={11}
-                          width={100}
-                        />
-                        <Tooltip formatter={(v: number) => formatMoney(v)} />
-                        <Bar dataKey="value" radius={[0, 6, 6, 0]} fill="var(--primary)" />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                )}
-              </Card>
-            </div>
-          </TabsContent>
-
-          {/* Savings tab — real discounts entered during invoice review,
-              never projected/AI-estimated */}
-          <TabsContent value="savings" className="space-y-4">
-            <SavingsTab dateRange={dateRange} />
           </TabsContent>
 
           {/* Automation tab */}
@@ -2316,113 +2106,6 @@ function InvoiceOcrSheet({
         onCapture={handleCameraCapture}
       />
     </Sheet>
-  );
-}
-
-// =====================================================
-// Savings tab — real discounts, typed in by the reviewer off the
-// actual invoice at approve time (see useSetInvoiceDiscount). No
-// projected/AI-estimated savings anywhere on this tab.
-// =====================================================
-
-function SavingsTab({ dateRange }: { dateRange: DateRange }) {
-  const { data } = useSavingsSummary(dateRange);
-  const totalDiscountCents = data?.totalDiscountCents ?? 0;
-  const invoicesWithDiscountCount = data?.invoicesWithDiscountCount ?? 0;
-  const approvedInvoiceCount = data?.approvedInvoiceCount ?? 0;
-  const byVendor = data?.byVendor ?? [];
-  const invoices = data?.invoices ?? [];
-
-  return (
-    <div className="space-y-4">
-      <div className="grid gap-4 md:grid-cols-3">
-        <Card className="p-5">
-          <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
-            Total savings captured
-          </div>
-          <div className="mt-1 font-display text-3xl">${(totalDiscountCents / 100).toFixed(2)}</div>
-          <div className="mt-1 text-xs text-muted-foreground">from approved invoices</div>
-        </Card>
-        <Card className="p-5">
-          <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
-            Invoices with a discount logged
-          </div>
-          <div className="mt-1 font-display text-3xl">
-            {invoicesWithDiscountCount}
-            <span className="text-lg text-muted-foreground">/{approvedInvoiceCount}</span>
-          </div>
-          <div className="mt-1 text-xs text-muted-foreground">
-            of approved invoices — discount is entered manually during review
-          </div>
-        </Card>
-        <Card className="p-5">
-          <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
-            Avg. savings per logged invoice
-          </div>
-          <div className="mt-1 font-display text-3xl">
-            $
-            {(
-              (invoicesWithDiscountCount > 0 ? totalDiscountCents / invoicesWithDiscountCount : 0) /
-              100
-            ).toFixed(2)}
-          </div>
-        </Card>
-      </div>
-
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card className="p-5">
-          <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
-            Savings by vendor
-          </div>
-          <h3 className="mt-1 font-display text-xl">Where the discounts came from</h3>
-          <div className="mt-4 space-y-3">
-            {byVendor.map((v) => (
-              <div key={v.vendorId} className="flex items-center justify-between">
-                <div>
-                  <div className="text-sm font-medium">{v.name}</div>
-                  <div className="text-xs text-muted-foreground">
-                    {v.invoiceCount} invoice{v.invoiceCount === 1 ? "" : "s"}
-                  </div>
-                </div>
-                <div className="font-display">{formatMoney(v.discountCents / 100)}</div>
-              </div>
-            ))}
-            {byVendor.length === 0 && (
-              <p className="py-6 text-center text-sm text-muted-foreground">
-                No discounts logged yet.
-              </p>
-            )}
-          </div>
-        </Card>
-
-        <Card className="p-5">
-          <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
-            Recent
-          </div>
-          <h3 className="mt-1 font-display text-xl">Invoices with a discount</h3>
-          <div className="mt-4 space-y-3">
-            {invoices.map((i) => (
-              <div key={i.id} className="flex items-center justify-between">
-                <div>
-                  <div className="text-sm font-medium">{i.vendorName ?? "Unknown vendor"}</div>
-                  <div className="text-xs text-muted-foreground">
-                    {i.invoiceNumber ?? "—"} · {i.invoiceDate ?? "—"}
-                  </div>
-                </div>
-                <div className="font-display text-emerald-700">
-                  −{formatMoney(i.discountCents / 100)}
-                </div>
-              </div>
-            ))}
-            {invoices.length === 0 && (
-              <p className="py-6 text-center text-sm text-muted-foreground">
-                No discounts logged yet.
-              </p>
-            )}
-          </div>
-        </Card>
-      </div>
-    </div>
   );
 }
 

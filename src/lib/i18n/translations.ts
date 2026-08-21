@@ -28,6 +28,9 @@ export type TranslationDict = {
     wasteLog: string;
     inventoryVariance: string;
     invoices: string;
+    invoiceLineItems: string;
+    invoiceSavings: string;
+    vendorSpend: string;
     performance: string;
     reviews: string;
     seo: string;
@@ -73,6 +76,9 @@ export const translations: Record<Language, TranslationDict> = {
       wasteLog: "Waste Log",
       inventoryVariance: "Inventory Variance",
       invoices: "Invoices",
+      invoiceLineItems: "Line items",
+      invoiceSavings: "Savings",
+      vendorSpend: "Vendor spend",
       performance: "Performance",
       reviews: "Reviews",
       seo: "SEO",
@@ -126,6 +132,9 @@ export const translations: Record<Language, TranslationDict> = {
       wasteLog: "Registro de desperdicio",
       inventoryVariance: "Variación de inventario",
       invoices: "Facturas",
+      invoiceLineItems: "Artículos",
+      invoiceSavings: "Ahorros",
+      vendorSpend: "Gasto por proveedor",
       performance: "Rendimiento",
       reviews: "Reseñas",
       seo: "SEO",

@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as WasteLogRouteImport } from './routes/waste-log'
 import { Route as VendorsRouteImport } from './routes/vendors'
+import { Route as VendorSpendRouteImport } from './routes/vendor-spend'
 import { Route as VarianceRouteImport } from './routes/variance'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as SetPasswordRouteImport } from './routes/set-password'
@@ -27,6 +28,8 @@ import { Route as LoyaltyRouteImport } from './routes/loyalty'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as LaborRouteImport } from './routes/labor'
 import { Route as InvoicesRouteImport } from './routes/invoices'
+import { Route as InvoiceSavingsRouteImport } from './routes/invoice-savings'
+import { Route as InvoiceLineItemsRouteImport } from './routes/invoice-line-items'
 import { Route as InventoryVarianceRouteImport } from './routes/inventory-variance'
 import { Route as InventoryCountRouteImport } from './routes/inventory-count'
 import { Route as InventoryRouteImport } from './routes/inventory'
@@ -42,6 +45,11 @@ const WasteLogRoute = WasteLogRouteImport.update({
 const VendorsRoute = VendorsRouteImport.update({
   id: '/vendors',
   path: '/vendors',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const VendorSpendRoute = VendorSpendRouteImport.update({
+  id: '/vendor-spend',
+  path: '/vendor-spend',
   getParentRoute: () => rootRouteImport,
 } as any)
 const VarianceRoute = VarianceRouteImport.update({
@@ -124,6 +132,16 @@ const InvoicesRoute = InvoicesRouteImport.update({
   path: '/invoices',
   getParentRoute: () => rootRouteImport,
 } as any)
+const InvoiceSavingsRoute = InvoiceSavingsRouteImport.update({
+  id: '/invoice-savings',
+  path: '/invoice-savings',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const InvoiceLineItemsRoute = InvoiceLineItemsRouteImport.update({
+  id: '/invoice-line-items',
+  path: '/invoice-line-items',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const InventoryVarianceRoute = InventoryVarianceRouteImport.update({
   id: '/inventory-variance',
   path: '/inventory-variance',
@@ -162,6 +180,8 @@ export interface FileRoutesByFullPath {
   '/inventory': typeof InventoryRoute
   '/inventory-count': typeof InventoryCountRoute
   '/inventory-variance': typeof InventoryVarianceRoute
+  '/invoice-line-items': typeof InvoiceLineItemsRoute
+  '/invoice-savings': typeof InvoiceSavingsRoute
   '/invoices': typeof InvoicesRoute
   '/labor': typeof LaborRoute
   '/login': typeof LoginRoute
@@ -178,6 +198,7 @@ export interface FileRoutesByFullPath {
   '/set-password': typeof SetPasswordRoute
   '/settings': typeof SettingsRoute
   '/variance': typeof VarianceRoute
+  '/vendor-spend': typeof VendorSpendRoute
   '/vendors': typeof VendorsRoute
   '/waste-log': typeof WasteLogRoute
 }
@@ -188,6 +209,8 @@ export interface FileRoutesByTo {
   '/inventory': typeof InventoryRoute
   '/inventory-count': typeof InventoryCountRoute
   '/inventory-variance': typeof InventoryVarianceRoute
+  '/invoice-line-items': typeof InvoiceLineItemsRoute
+  '/invoice-savings': typeof InvoiceSavingsRoute
   '/invoices': typeof InvoicesRoute
   '/labor': typeof LaborRoute
   '/login': typeof LoginRoute
@@ -204,6 +227,7 @@ export interface FileRoutesByTo {
   '/set-password': typeof SetPasswordRoute
   '/settings': typeof SettingsRoute
   '/variance': typeof VarianceRoute
+  '/vendor-spend': typeof VendorSpendRoute
   '/vendors': typeof VendorsRoute
   '/waste-log': typeof WasteLogRoute
 }
@@ -215,6 +239,8 @@ export interface FileRoutesById {
   '/inventory': typeof InventoryRoute
   '/inventory-count': typeof InventoryCountRoute
   '/inventory-variance': typeof InventoryVarianceRoute
+  '/invoice-line-items': typeof InvoiceLineItemsRoute
+  '/invoice-savings': typeof InvoiceSavingsRoute
   '/invoices': typeof InvoicesRoute
   '/labor': typeof LaborRoute
   '/login': typeof LoginRoute
@@ -231,6 +257,7 @@ export interface FileRoutesById {
   '/set-password': typeof SetPasswordRoute
   '/settings': typeof SettingsRoute
   '/variance': typeof VarianceRoute
+  '/vendor-spend': typeof VendorSpendRoute
   '/vendors': typeof VendorsRoute
   '/waste-log': typeof WasteLogRoute
 }
@@ -243,6 +270,8 @@ export interface FileRouteTypes {
     | '/inventory'
     | '/inventory-count'
     | '/inventory-variance'
+    | '/invoice-line-items'
+    | '/invoice-savings'
     | '/invoices'
     | '/labor'
     | '/login'
@@ -259,6 +288,7 @@ export interface FileRouteTypes {
     | '/set-password'
     | '/settings'
     | '/variance'
+    | '/vendor-spend'
     | '/vendors'
     | '/waste-log'
   fileRoutesByTo: FileRoutesByTo
@@ -269,6 +299,8 @@ export interface FileRouteTypes {
     | '/inventory'
     | '/inventory-count'
     | '/inventory-variance'
+    | '/invoice-line-items'
+    | '/invoice-savings'
     | '/invoices'
     | '/labor'
     | '/login'
@@ -285,6 +317,7 @@ export interface FileRouteTypes {
     | '/set-password'
     | '/settings'
     | '/variance'
+    | '/vendor-spend'
     | '/vendors'
     | '/waste-log'
   id:
@@ -295,6 +328,8 @@ export interface FileRouteTypes {
     | '/inventory'
     | '/inventory-count'
     | '/inventory-variance'
+    | '/invoice-line-items'
+    | '/invoice-savings'
     | '/invoices'
     | '/labor'
     | '/login'
@@ -311,6 +346,7 @@ export interface FileRouteTypes {
     | '/set-password'
     | '/settings'
     | '/variance'
+    | '/vendor-spend'
     | '/vendors'
     | '/waste-log'
   fileRoutesById: FileRoutesById
@@ -322,6 +358,8 @@ export interface RootRouteChildren {
   InventoryRoute: typeof InventoryRoute
   InventoryCountRoute: typeof InventoryCountRoute
   InventoryVarianceRoute: typeof InventoryVarianceRoute
+  InvoiceLineItemsRoute: typeof InvoiceLineItemsRoute
+  InvoiceSavingsRoute: typeof InvoiceSavingsRoute
   InvoicesRoute: typeof InvoicesRoute
   LaborRoute: typeof LaborRoute
   LoginRoute: typeof LoginRoute
@@ -338,6 +376,7 @@ export interface RootRouteChildren {
   SetPasswordRoute: typeof SetPasswordRoute
   SettingsRoute: typeof SettingsRoute
   VarianceRoute: typeof VarianceRoute
+  VendorSpendRoute: typeof VendorSpendRoute
   VendorsRoute: typeof VendorsRoute
   WasteLogRoute: typeof WasteLogRoute
 }
@@ -356,6 +395,13 @@ declare module '@tanstack/react-router' {
       path: '/vendors'
       fullPath: '/vendors'
       preLoaderRoute: typeof VendorsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/vendor-spend': {
+      id: '/vendor-spend'
+      path: '/vendor-spend'
+      fullPath: '/vendor-spend'
+      preLoaderRoute: typeof VendorSpendRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/variance': {
@@ -470,6 +516,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof InvoicesRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/invoice-savings': {
+      id: '/invoice-savings'
+      path: '/invoice-savings'
+      fullPath: '/invoice-savings'
+      preLoaderRoute: typeof InvoiceSavingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/invoice-line-items': {
+      id: '/invoice-line-items'
+      path: '/invoice-line-items'
+      fullPath: '/invoice-line-items'
+      preLoaderRoute: typeof InvoiceLineItemsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/inventory-variance': {
       id: '/inventory-variance'
       path: '/inventory-variance'
@@ -522,6 +582,8 @@ const rootRouteChildren: RootRouteChildren = {
   InventoryRoute: InventoryRoute,
   InventoryCountRoute: InventoryCountRoute,
   InventoryVarianceRoute: InventoryVarianceRoute,
+  InvoiceLineItemsRoute: InvoiceLineItemsRoute,
+  InvoiceSavingsRoute: InvoiceSavingsRoute,
   InvoicesRoute: InvoicesRoute,
   LaborRoute: LaborRoute,
   LoginRoute: LoginRoute,
@@ -538,6 +600,7 @@ const rootRouteChildren: RootRouteChildren = {
   SetPasswordRoute: SetPasswordRoute,
   SettingsRoute: SettingsRoute,
   VarianceRoute: VarianceRoute,
+  VendorSpendRoute: VendorSpendRoute,
   VendorsRoute: VendorsRoute,
   WasteLogRoute: WasteLogRoute,
 }
