@@ -9,6 +9,12 @@
 //   { action: "list_tenants" }
 //   { action: "create_tenant", name, location_name?, location_timezone?, owner_email }
 //
+// list_tenants includes taxSettingsComplete/taxDocumentCount — status
+// only (has the tenant filled this in, how many documents), never the
+// actual EIN/tax ID values or document contents, which stay owner-only
+// RLS'd to the tenant's own dashboard. Confirmed with the user: this
+// is informational only for now, not a required onboarding gate.
+//
 // Invite mechanics are copied from manage-team's "invite" action:
 // generateLink creates the user and hands back a real link without
 // sending anything; if the email already has a real account,
@@ -81,23 +87,42 @@ Deno.serve(async (req) => {
 
       const tenants = await Promise.all(
         (restaurants ?? []).map(async (r) => {
-          const [{ count: locationCount }, { data: subscription }, { data: owners }] =
-            await Promise.all([
-              supabase
-                .from("locations")
-                .select("id", { count: "exact", head: true })
-                .eq("restaurant_id", r.id),
-              supabase
-                .from("subscriptions")
-                .select("plan_tier, status")
-                .eq("restaurant_id", r.id)
-                .maybeSingle(),
-              supabase
-                .from("memberships")
-                .select("user_id")
-                .eq("restaurant_id", r.id)
-                .eq("role", "owner"),
-            ]);
+          const [
+            { count: locationCount },
+            { data: subscription },
+            { data: owners },
+            { data: taxSettings },
+            { count: taxDocumentCount },
+          ] = await Promise.all([
+            supabase
+              .from("locations")
+              .select("id", { count: "exact", head: true })
+              .eq("restaurant_id", r.id),
+            supabase
+              .from("subscriptions")
+              .select("plan_tier, status")
+              .eq("restaurant_id", r.id)
+              .maybeSingle(),
+            supabase
+              .from("memberships")
+              .select("user_id")
+              .eq("restaurant_id", r.id)
+              .eq("role", "owner"),
+            // Status only — never the actual EIN/tax ID values or
+            // document contents, which stay owner-only RLS'd to the
+            // tenant's own dashboard (db/phase2/72_tax_compliance.sql).
+            // The portal only needs to know whether each tenant has
+            // filled this in at all, not what they entered.
+            supabase
+              .from("restaurant_tax_settings")
+              .select("restaurant_id")
+              .eq("restaurant_id", r.id)
+              .maybeSingle(),
+            supabase
+              .from("tax_documents")
+              .select("id", { count: "exact", head: true })
+              .eq("restaurant_id", r.id),
+          ]);
 
           const ownerEmails = await Promise.all(
             (owners ?? []).map(async (o) => {
@@ -114,6 +139,8 @@ Deno.serve(async (req) => {
             planTier: subscription?.plan_tier ?? null,
             status: subscription?.status ?? null,
             ownerEmails,
+            taxSettingsComplete: !!taxSettings,
+            taxDocumentCount: taxDocumentCount ?? 0,
           };
         }),
       );
