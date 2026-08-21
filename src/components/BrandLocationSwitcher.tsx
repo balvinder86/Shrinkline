@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { ChevronsUpDown, Plus, UtensilsCrossed } from "lucide-react";
+import { useNavigate } from "@tanstack/react-router";
+import { ChevronsUpDown, Plus, Settings, UtensilsCrossed } from "lucide-react";
 
 import {
   DropdownMenu,
@@ -242,6 +243,7 @@ function AddLocationDialog({
 // happen, in the sidebar header where it's the first thing visible.
 export function BrandLocationSwitcher() {
   const { t } = useLanguage();
+  const navigate = useNavigate();
   const { restaurants, currentRestaurantId, currentRestaurant, setCurrentRestaurantId } =
     useCurrentRestaurant();
   const { locations, currentLocationId, currentLocation, setCurrentLocationId } =
@@ -288,6 +290,12 @@ export function BrandLocationSwitcher() {
           <DropdownMenuItem className="gap-2" onSelect={() => setAddBrandOpen(true)}>
             <Plus className="h-3.5 w-3.5" /> Add brand
           </DropdownMenuItem>
+          <DropdownMenuItem
+            className="gap-2"
+            onSelect={() => navigate({ to: "/settings", search: { section: "profile" } })}
+          >
+            <Settings className="h-3.5 w-3.5" /> Manage brands
+          </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuLabel className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
             {t.profile.location}
@@ -304,6 +312,12 @@ export function BrandLocationSwitcher() {
           </DropdownMenuRadioGroup>
           <DropdownMenuItem className="gap-2" onSelect={() => setAddLocationOpen(true)}>
             <Plus className="h-3.5 w-3.5" /> Add location
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            className="gap-2"
+            onSelect={() => navigate({ to: "/settings", search: { section: "locations" } })}
+          >
+            <Settings className="h-3.5 w-3.5" /> Manage locations
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

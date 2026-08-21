@@ -71,6 +71,7 @@ import {
   useLocationsForSettings,
   useCreateLocation,
   useUpdateLocation,
+  useDeleteLocation,
   useRestaurantProfile,
   useUpdateRestaurantProfileDetails,
   useUploadRestaurantLogo,
@@ -85,16 +86,20 @@ import {
   useDeleteTaxDocument,
   useTaxDocumentSignedUrl,
   TAX_DOC_TYPE_OPTIONS,
+  usePendingClosureRequest,
+  useRequestBrandClosure,
   type RestaurantProfileDetails,
   type RestaurantBranding,
   type TaxSettings,
 } from "@/lib/settings/queries";
 import { useBrandsOverview } from "@/lib/restaurants/queries";
 import { AddBrandDialog } from "@/components/BrandLocationSwitcher";
+import { useCurrentMembership } from "@/lib/permissions";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -643,21 +648,192 @@ function ProfileSection() {
           )}
         </div>
       </Card>
+
+      {useCurrentMembership()?.role === "owner" && <CloseBrandCard />}
     </div>
+  );
+}
+
+// Deleting a whole tenant (all its data, plus cancelling any active
+// Stripe subscription) is a platform-operator action from the company
+// portal — same reasoning as tenant creation already being portal-only,
+// not self-serve here. This just files the request; owner-only,
+// mirrors Tax & compliance's owner-only RLS.
+function CloseBrandCard() {
+  const { currentRestaurant } = useCurrentRestaurant();
+  const { data: pending, isLoading } = usePendingClosureRequest();
+  const [dialogOpen, setDialogOpen] = useState(false);
+
+  if (isLoading) return null;
+
+  return (
+    <Card className="border-destructive/30 p-6">
+      <div className="text-[11px] uppercase tracking-[0.2em] text-destructive/80">Danger zone</div>
+      <div className="mt-2 flex items-start justify-between gap-4">
+        <div>
+          <div className="text-sm font-medium">Close this brand</div>
+          <p className="mt-1 max-w-md text-xs text-muted-foreground">
+            Requests that {currentRestaurant?.name ?? "this brand"} and all of its data be
+            permanently closed. This doesn't delete anything immediately — the Shrinkline team
+            handles the actual shutdown (including cancelling billing) from the company portal.
+          </p>
+        </div>
+        {pending ? (
+          <Badge variant="outline" className="shrink-0 text-muted-foreground">
+            Request pending
+          </Badge>
+        ) : (
+          <Button
+            size="sm"
+            variant="outline"
+            className="shrink-0 border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+            onClick={() => setDialogOpen(true)}
+          >
+            Close this brand
+          </Button>
+        )}
+      </div>
+      <CloseBrandDialog open={dialogOpen} onOpenChange={setDialogOpen} />
+    </Card>
+  );
+}
+
+function CloseBrandDialog({
+  open,
+  onOpenChange,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+}) {
+  const { currentRestaurant } = useCurrentRestaurant();
+  const requestClosure = useRequestBrandClosure();
+  const [confirmText, setConfirmText] = useState("");
+  const [note, setNote] = useState("");
+
+  useEffect(() => {
+    if (!open) {
+      setConfirmText("");
+      setNote("");
+    }
+  }, [open]);
+
+  const brandName = currentRestaurant?.name ?? "";
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-[440px]">
+        <DialogHeader>
+          <DialogTitle>Request to close {brandName}?</DialogTitle>
+          <DialogDescription>
+            This sends a closure request to the Shrinkline team — it doesn't delete anything on its
+            own. We'll follow up to confirm before permanently closing the account and cancelling
+            any active subscription.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div className="space-y-1.5">
+            <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              Type "{brandName}" to confirm
+            </Label>
+            <Input value={confirmText} onChange={(e) => setConfirmText(e.target.value)} autoFocus />
+          </div>
+          <Field label="Reason (optional)">
+            <Textarea
+              rows={3}
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="Anything the team should know before closing this out."
+            />
+          </Field>
+        </div>
+        {requestClosure.isError && (
+          <p className="text-xs text-destructive">{(requestClosure.error as Error).message}</p>
+        )}
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button
+            variant="destructive"
+            disabled={confirmText !== brandName || requestClosure.isPending}
+            onClick={() => requestClosure.mutate(note, { onSuccess: () => onOpenChange(false) })}
+          >
+            {requestClosure.isPending ? "Sending…" : "Send request"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
 /* ---------- Locations ---------- */
 
+function DeleteLocationDialog({
+  location,
+  open,
+  onOpenChange,
+}: {
+  location: { id: string; name: string };
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+}) {
+  const deleteLocation = useDeleteLocation();
+  const [confirmText, setConfirmText] = useState("");
+
+  useEffect(() => {
+    if (!open) setConfirmText("");
+  }, [open]);
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-[420px]">
+        <DialogHeader>
+          <DialogTitle>Delete {location.name}?</DialogTitle>
+          <DialogDescription>
+            This permanently deletes this location and everything tied to it — sales, invoices,
+            inventory counts, schedules, purchase orders. There's no undo.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-1.5">
+          <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+            Type "{location.name}" to confirm
+          </Label>
+          <Input value={confirmText} onChange={(e) => setConfirmText(e.target.value)} autoFocus />
+        </div>
+        {deleteLocation.isError && (
+          <p className="text-xs text-destructive">{(deleteLocation.error as Error).message}</p>
+        )}
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button
+            variant="destructive"
+            disabled={confirmText !== location.name || deleteLocation.isPending}
+            onClick={() =>
+              deleteLocation.mutate(location.id, { onSuccess: () => onOpenChange(false) })
+            }
+          >
+            {deleteLocation.isPending ? "Deleting…" : "Delete location"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function LocationEditor({
   location,
+  isOnlyLocation,
 }: {
   location: { id: string; name: string; timezone: string };
+  isOnlyLocation: boolean;
 }) {
   const updateLocation = useUpdateLocation();
   const [name, setName] = useState(location.name);
   const [timezone, setTimezone] = useState(location.timezone);
   const [saved, setSaved] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const dirty = name.trim() !== location.name || timezone !== location.timezone;
 
   return (
@@ -723,7 +899,18 @@ function LocationEditor({
             {(updateLocation.error as Error).message}
           </span>
         )}
+        <Button
+          size="sm"
+          variant="ghost"
+          className="ml-auto gap-1.5 text-muted-foreground hover:text-destructive"
+          disabled={isOnlyLocation}
+          title={isOnlyLocation ? "A restaurant needs at least one location" : undefined}
+          onClick={() => setDeleteOpen(true)}
+        >
+          <Trash2 className="h-3.5 w-3.5" /> Delete
+        </Button>
       </div>
+      <DeleteLocationDialog location={location} open={deleteOpen} onOpenChange={setDeleteOpen} />
     </Card>
   );
 }
@@ -811,7 +998,7 @@ function LocationsSection() {
         <div className="grid gap-4 md:grid-cols-2">
           {adding && <AddLocationCard onDone={() => setAdding(false)} />}
           {locations.map((l) => (
-            <LocationEditor key={l.id} location={l} />
+            <LocationEditor key={l.id} location={l} isOnlyLocation={locations.length === 1} />
           ))}
         </div>
       )}

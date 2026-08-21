@@ -289,6 +289,40 @@ export function useUpdateLocation() {
   });
 }
 
+// Hard delete — locations cascade to every table keyed by location_id
+// (sales, invoices, inventory counts, schedules, purchase orders, all
+// `on delete cascade`), so this genuinely erases that location's
+// history. The UI blocks calling this on a restaurant's last remaining
+// location and requires typing the location's name to confirm; this
+// hook itself trusts the caller already did that.
+export function useDeleteLocation() {
+  const restaurantId = useRestaurantIds()[0];
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { data, error } = await supabase.from("locations").delete().eq("id", id).select("id");
+      if (error) throw error;
+      if (!data || data.length === 0) {
+        throw new Error("Nothing was deleted — this location may not belong to your restaurant.");
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["settings-locations"] });
+      // Same three follow-up invalidations as useCreateLocation, in
+      // reverse: the sidebar switcher and Brands overview card both
+      // read location lists that need to drop the deleted one too.
+      queryClient.invalidateQueries({ queryKey: ["locations-for-switcher"] });
+      queryClient.invalidateQueries({ queryKey: ["brands-overview"] });
+      if (restaurantId) {
+        supabase.functions
+          .invoke("sync-subscription-quantity", { body: { restaurant_id: restaurantId } })
+          .catch((e) => console.error("sync-subscription-quantity failed:", e))
+          .finally(() => queryClient.invalidateQueries({ queryKey: ["subscription"] }));
+      }
+    },
+  });
+}
+
 export const VOICE_TONE_OPTIONS = [
   { value: "warm", label: "Warm & welcoming" },
   { value: "playful", label: "Playful & bold" },
@@ -508,5 +542,59 @@ export function useTaxDocumentSignedUrl() {
       if (error) throw error;
       return data.signedUrl;
     },
+  });
+}
+
+export type ClosureRequest = {
+  id: string;
+  note: string | null;
+  status: string;
+  createdAt: string;
+};
+
+// Settings > Restaurant profile > "Close this brand"
+// (db/phase2/73_tenant_closure_requests.sql). This never deletes
+// anything itself — actually deleting a tenant + cancelling its Stripe
+// subscription is a platform-operator action from the company portal,
+// same reasoning as tenant creation already being portal-only. This
+// just records the owner's request so the portal side can act on it.
+export function usePendingClosureRequest() {
+  const restaurantId = useRestaurantIds()[0];
+  return useQuery({
+    queryKey: ["tenant-closure-request", restaurantId],
+    enabled: !!restaurantId,
+    queryFn: async (): Promise<ClosureRequest | null> => {
+      const { data, error } = await supabase
+        .from("tenant_closure_requests")
+        .select("id, note, status, created_at")
+        .eq("restaurant_id", restaurantId!)
+        .eq("status", "pending")
+        .order("created_at", { ascending: false })
+        .maybeSingle();
+      if (error) throw error;
+      if (!data) return null;
+      return { id: data.id, note: data.note, status: data.status, createdAt: data.created_at };
+    },
+  });
+}
+
+export function useRequestBrandClosure() {
+  const restaurantId = useRestaurantIds()[0];
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (note: string) => {
+      if (!restaurantId) throw new Error("no current restaurant");
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) throw new Error("not signed in");
+      const { error } = await supabase.from("tenant_closure_requests").insert({
+        restaurant_id: restaurantId,
+        requested_by: user.id,
+        note: note.trim() || null,
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["tenant-closure-request"] }),
   });
 }
