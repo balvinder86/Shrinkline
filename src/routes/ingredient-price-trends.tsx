@@ -12,6 +12,7 @@ import {
 } from "recharts";
 
 import { Topbar } from "@/components/dashboard/Topbar";
+import { AiRecommendationsPanel } from "@/components/insights/AiRecommendationsPanel";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
@@ -64,22 +65,32 @@ function formatDate(iso: string) {
   });
 }
 
-function PctBadge({ pct }: { pct: number | null }) {
+// Shows the % move (as before) plus, when the raw cents are known, the
+// actual dollar amount underneath — "how much is the change" in real
+// money, not just a percentage that requires doing the math yourself.
+function PctBadge({ pct, deltaCents }: { pct: number | null; deltaCents?: number | null }) {
   if (pct == null) {
     return <span className="text-xs text-muted-foreground">—</span>;
   }
+  const isUp = pct > 0;
+  const isDown = pct < 0;
+  const tone = isUp ? "text-rose-600" : isDown ? "text-emerald-600" : "text-muted-foreground";
   return (
-    <span
-      className={`inline-flex items-center gap-0.5 text-sm font-medium ${
-        pct > 0 ? "text-rose-600" : pct < 0 ? "text-emerald-600" : "text-muted-foreground"
-      }`}
-    >
-      {pct > 0 ? (
-        <ArrowUpRight className="h-3.5 w-3.5" />
-      ) : pct < 0 ? (
-        <ArrowDownRight className="h-3.5 w-3.5" />
-      ) : null}
-      {pct === 0 ? "—" : `${Math.abs(pct).toFixed(1)}%`}
+    <span className="inline-flex flex-col items-end">
+      <span className={`inline-flex items-center gap-0.5 text-sm font-medium ${tone}`}>
+        {isUp ? (
+          <ArrowUpRight className="h-3.5 w-3.5" />
+        ) : isDown ? (
+          <ArrowDownRight className="h-3.5 w-3.5" />
+        ) : null}
+        {pct === 0 ? "—" : `${Math.abs(pct).toFixed(1)}%`}
+      </span>
+      {deltaCents != null && deltaCents !== 0 && (
+        <span className={`text-[11px] tabular-nums ${tone} opacity-80`}>
+          {isUp ? "+" : "−"}
+          {formatUnitCost(Math.abs(deltaCents))}
+        </span>
+      )}
     </span>
   );
 }
@@ -144,7 +155,10 @@ function IngredientDetail({ ingredient }: { ingredient: IngredientPriceMover }) 
               Since first recorded
             </div>
             <div className="mt-1 font-display text-lg">
-              <PctBadge pct={ingredient.changePct} />
+              <PctBadge
+                pct={ingredient.changePct}
+                deltaCents={ingredient.currentCostCents - ingredient.firstCostCents}
+              />
             </div>
             <div className="mt-0.5 text-xs text-muted-foreground">
               {formatUnitCost(ingredient.firstCostCents)} on {formatDate(ingredient.firstDate)}
@@ -155,7 +169,14 @@ function IngredientDetail({ ingredient }: { ingredient: IngredientPriceMover }) 
               Last change
             </div>
             <div className="mt-1 font-display text-lg">
-              <PctBadge pct={ingredient.lastMovePct} />
+              <PctBadge
+                pct={ingredient.lastMovePct}
+                deltaCents={
+                  ingredient.lastMoveCostCents != null
+                    ? ingredient.currentCostCents - ingredient.lastMoveCostCents
+                    : null
+                }
+              />
             </div>
             <div className="mt-0.5 text-xs text-muted-foreground">
               {ingredient.lastMoveCostCents != null
@@ -253,6 +274,14 @@ function IngredientPriceTrendsPage() {
     <>
       <Topbar eyebrow="Financials" title="Ingredient Price Trends" />
       <main className="space-y-6 px-6 py-6">
+        {/* Same vendor/ingredient price-drift signal this page's own table
+            is built from (see invoiceDrift.ts in the insights service) —
+            genuinely AI-generated, grounded in real invoice history, not
+            a stub. Shares the "invoices" tab's dismissal state on purpose:
+            it's the same underlying alert either way, dismissing it here
+            or on Invoices should collapse both. */}
+        <AiRecommendationsPanel tab="invoices" />
+
         <Card className="p-5">
           <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
             Ingredient Price Trends
@@ -298,7 +327,9 @@ function IngredientPriceTrendsPage() {
             value={isLoading || !biggestMover ? "—" : biggestMover.name}
             hint={
               biggestMover
-                ? `${biggestMover.changePct != null ? `${biggestMover.changePct > 0 ? "+" : ""}${biggestMover.changePct.toFixed(1)}%` : "—"} since first recorded`
+                ? `${biggestMover.changePct != null ? `${biggestMover.changePct > 0 ? "+" : ""}${biggestMover.changePct.toFixed(1)}%` : "—"} (${
+                    biggestMover.changePct != null && biggestMover.changePct > 0 ? "+" : "−"
+                  }${formatUnitCost(Math.abs(biggestMover.currentCostCents - biggestMover.firstCostCents))}) since first recorded`
                 : undefined
             }
             icon={TrendingUp}
@@ -362,10 +393,20 @@ function IngredientPriceTrendsPage() {
                         {formatUnitCost(r.currentCostCents)}
                       </TableCell>
                       <TableCell className="text-right">
-                        <PctBadge pct={r.changePct} />
+                        <PctBadge
+                          pct={r.changePct}
+                          deltaCents={r.currentCostCents - r.firstCostCents}
+                        />
                       </TableCell>
                       <TableCell className="text-right">
-                        <PctBadge pct={r.lastMovePct} />
+                        <PctBadge
+                          pct={r.lastMovePct}
+                          deltaCents={
+                            r.lastMoveCostCents != null
+                              ? r.currentCostCents - r.lastMoveCostCents
+                              : null
+                          }
+                        />
                       </TableCell>
                       <TableCell className="text-right text-sm text-muted-foreground">
                         {formatDate(r.latestDate)}
