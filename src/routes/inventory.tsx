@@ -966,6 +966,11 @@ function InventoryPage() {
                             </TableCell>
                             <TableCell>
                               <p className="font-medium text-ink">{item.name}</p>
+                              <p className="text-xs text-stone-500">
+                                {item.lastCounted === "—"
+                                  ? "Never counted"
+                                  : `Last counted ${item.lastCounted}`}
+                              </p>
                             </TableCell>
                             <TableCell className="text-sm text-stone-700">{item.vendor}</TableCell>
                             <TableCell>

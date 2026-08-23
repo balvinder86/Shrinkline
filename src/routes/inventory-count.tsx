@@ -553,6 +553,11 @@ function InventoryCountPage() {
                             <p className="text-xs text-stone-500">
                               priced per {unitLabel(item.unit)}
                             </p>
+                            <p className="text-xs text-stone-400">
+                              {item.lastCounted === "—"
+                                ? "Never counted"
+                                : `Last counted ${item.lastCounted}`}
+                            </p>
                           </TableCell>
                           <TableCell>
                             <select

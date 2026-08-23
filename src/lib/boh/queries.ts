@@ -412,9 +412,16 @@ export type InventoryItem = {
   // "Where it physically lives" (Walk-in, Freezer…) — independent of
   // category, see storage_locations above. Null until assigned.
   storageLocationId: string | null;
+  // Date of the most recent saved Inventory Count that included this
+  // ingredient (db/phase2/65_inventory_counts.sql) — "—" if it's never
+  // been through a saved count at this location. Every full count
+  // snapshots every current item, so this is really "when was this
+  // location last walked and this item still around" — an item added
+  // after the last count correctly shows "—" until the next one.
+  lastCounted: string;
 };
 
-function formatLastOrdered(iso: string | null): string {
+function formatShortDate(iso: string | null): string {
   if (!iso) return "—";
   return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "2-digit" });
 }
@@ -426,20 +433,39 @@ export function useInventoryItems() {
     queryKey: ["inventory-items", restaurantId, locationId],
     enabled: !!restaurantId && !!locationId,
     queryFn: async (): Promise<InventoryItem[]> => {
-      const [ingredientsRes, stockRes, parRes, vendorsRes] = await Promise.all([
+      const [ingredientsRes, stockRes, parRes, vendorsRes, countLinesRes] = await Promise.all([
         supabase.from("ingredients").select("*").eq("restaurant_id", restaurantId!).order("name"),
         supabase.from("ingredient_stock").select("*").eq("location_id", locationId!),
         supabase.from("par_levels").select("*").eq("location_id", locationId!),
         supabase.from("vendors").select("id, name").eq("restaurant_id", restaurantId!),
+        supabase
+          .from("inventory_count_lines")
+          .select("ingredient_id, inventory_counts!inner(counted_at, location_id)")
+          .eq("restaurant_id", restaurantId!)
+          .eq("inventory_counts.location_id", locationId!)
+          .order("counted_at", { foreignTable: "inventory_counts", ascending: false }),
       ]);
       if (ingredientsRes.error) throw ingredientsRes.error;
       if (stockRes.error) throw stockRes.error;
       if (parRes.error) throw parRes.error;
       if (vendorsRes.error) throw vendorsRes.error;
+      if (countLinesRes.error) throw countLinesRes.error;
 
       const stockByIngredient = new Map((stockRes.data ?? []).map((r) => [r.ingredient_id, r]));
       const parByIngredient = new Map((parRes.data ?? []).map((r) => [r.ingredient_id, r]));
       const vendorNameById = new Map((vendorsRes.data ?? []).map((v) => [v.id, v.name as string]));
+      // Rows arrive newest-count-first (the order() above), so the
+      // first time an ingredient_id is seen is its most recent count —
+      // later duplicates from older counts are just skipped.
+      const lastCountedByIngredient = new Map<string, string>();
+      for (const row of (countLinesRes.data ?? []) as unknown as {
+        ingredient_id: string;
+        inventory_counts: { counted_at: string } | null;
+      }[]) {
+        if (!lastCountedByIngredient.has(row.ingredient_id) && row.inventory_counts) {
+          lastCountedByIngredient.set(row.ingredient_id, row.inventory_counts.counted_at);
+        }
+      }
 
       return (ingredientsRes.data ?? []).map((ing) => {
         const stock = stockByIngredient.get(ing.id);
@@ -458,10 +484,11 @@ export function useInventoryItems() {
           weeklyUsage: avgDailyUsage != null ? Math.round(avgDailyUsage * 7) : 0,
           suggestedPar:
             par?.suggested_par_quantity != null ? Number(par.suggested_par_quantity) : null,
-          lastOrdered: formatLastOrdered(stock?.last_ordered_at ?? null),
+          lastOrdered: formatShortDate(stock?.last_ordered_at ?? null),
           containerSizeMl: ing.container_size_ml != null ? Number(ing.container_size_ml) : null,
           containerSizeG: ing.container_size_g != null ? Number(ing.container_size_g) : null,
           storageLocationId: ing.storage_location_id ?? null,
+          lastCounted: formatShortDate(lastCountedByIngredient.get(ing.id) ?? null),
         };
       });
     },
