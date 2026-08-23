@@ -24,7 +24,8 @@ async function getThresholdPct(restaurantId: string): Promise<number> {
     .select("invoice_drift_threshold_pct")
     .eq("restaurant_id", restaurantId)
     .maybeSingle();
-  if (error) throw new Error(`load ai_insights_settings for ${restaurantId} failed: ${error.message}`);
+  if (error)
+    throw new Error(`load ai_insights_settings for ${restaurantId} failed: ${error.message}`);
   return data?.invoice_drift_threshold_pct ?? DEFAULT_THRESHOLD_PCT;
 }
 

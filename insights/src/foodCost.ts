@@ -17,9 +17,12 @@ type IngredientCostJoin = { unit_cost_cents: number | null } | null;
 
 // PostgREST caps an unpaginated read at 1000 rows — ported alongside
 // fetchRecipeCostContext/useFoodCostSummary since both rely on it.
+// Exported so productMix.ts (same per-item recipe-cost need) can reuse
+// this and fetchRecipeCostContext/resolveItemCostCents below rather
+// than a second copy.
 const SUPABASE_PAGE_SIZE = 1000;
 
-async function fetchAllRows<T>(
+export async function fetchAllRows<T>(
   makeQuery: (
     from: number,
     to: number,
@@ -38,7 +41,7 @@ async function fetchAllRows<T>(
   return all;
 }
 
-async function fetchRecipeCostContext(locationId: string) {
+export async function fetchRecipeCostContext(locationId: string) {
   const [recipeLinesRes, prepRecipeLinesRes, prepRecipesRes] = await Promise.all([
     supabase
       .from("recipe_lines")
@@ -113,10 +116,15 @@ async function fetchRecipeCostContext(locationId: string) {
     recipeLinesByMenuItem.set(row.menu_item_pos_id, list);
   }
 
-  return { recipeLinesByMenuItem, prepRecipeLinesByPrepId, prepRecipeYieldById, ingredientCostById };
+  return {
+    recipeLinesByMenuItem,
+    prepRecipeLinesByPrepId,
+    prepRecipeYieldById,
+    ingredientCostById,
+  };
 }
 
-function resolveItemCostCents(
+export function resolveItemCostCents(
   menuItemPosId: string,
   ctx: Awaited<ReturnType<typeof fetchRecipeCostContext>>,
 ): number | null {

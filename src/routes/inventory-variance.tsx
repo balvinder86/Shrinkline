@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { AlertTriangle, PackageSearch, Scale, TrendingDown, TrendingUp } from "lucide-react";
 
 import { Topbar } from "@/components/dashboard/Topbar";
+import { AiRecommendationsPanel } from "@/components/insights/AiRecommendationsPanel";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -108,6 +109,8 @@ function InventoryVariancePage() {
       <Topbar eyebrow="Stock & purchasing" title="Inventory Variance" />
 
       <main className="px-8 py-8 max-w-[1500px] mx-auto space-y-8">
+        <AiRecommendationsPanel tab="variance" />
+
         <div>
           <p className="text-xs uppercase tracking-[0.18em] text-terracotta font-semibold">
             Stock & purchasing

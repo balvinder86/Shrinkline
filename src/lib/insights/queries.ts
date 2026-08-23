@@ -14,7 +14,14 @@ function useCurrentRestaurantId(): string | undefined {
   return useRestaurantIds()[0];
 }
 
-export type RecommendationTab = "food_cost" | "inventory" | "invoices" | "recipes";
+export type RecommendationTab =
+  | "food_cost"
+  | "inventory"
+  | "invoices"
+  | "recipes"
+  | "product_mix"
+  | "waste"
+  | "variance";
 export type RecommendationSeverity = "info" | "warning" | "critical";
 
 export type AiRecommendation = {

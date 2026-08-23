@@ -44,6 +44,7 @@ import {
 } from "recharts";
 
 import { Topbar } from "@/components/dashboard/Topbar";
+import { AiRecommendationsPanel } from "@/components/insights/AiRecommendationsPanel";
 import { quadrant, QUAD_COLOR, formatItemPrice } from "@/lib/boh/menuEngineering";
 import { formatDateRange } from "@/lib/date-range";
 import { useDateRange } from "@/lib/date-range-context";
@@ -322,6 +323,8 @@ function ProductMixPage() {
     <div className="min-h-screen bg-background">
       <Topbar eyebrow="Menu performance" title="Product Mix" />
       <main className="px-8 py-8 max-w-[1600px] mx-auto space-y-8">
+        <AiRecommendationsPanel tab="product_mix" />
+
         {/* Header */}
         <header>
           <p className="text-xs tracking-[0.2em] uppercase text-muted-foreground mb-2">
@@ -869,8 +872,6 @@ function ProductMixPage() {
               </Card>
             </div>
           </TabsContent>
-
-          {/* AI ENGINEER */}
         </Tabs>
       </main>
 
@@ -953,7 +954,7 @@ function ProductMixPage() {
                 </div>
                 <div>
                   <div className="text-xs uppercase tracking-widest text-muted-foreground mb-2">
-                    AI suggestion
+                    Trend note
                   </div>
                   <div className="p-3 rounded-md bg-[#fbf5ee] border border-[#e8d5b9] text-sm">
                     {selected.soldPrevWk === 0

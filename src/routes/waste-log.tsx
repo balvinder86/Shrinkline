@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { AlertTriangle, ClipboardList, DollarSign, Trash2 } from "lucide-react";
 
 import { Topbar } from "@/components/dashboard/Topbar";
+import { AiRecommendationsPanel } from "@/components/insights/AiRecommendationsPanel";
 import { useDateRange } from "@/lib/date-range-context";
 import { formatDateRange } from "@/lib/date-range";
 import { Card } from "@/components/ui/card";
@@ -163,6 +164,8 @@ function WasteLogPage() {
     <>
       <Topbar eyebrow="Stock & purchasing" title="Waste Log" />
       <main className="space-y-6 px-6 py-6">
+        <AiRecommendationsPanel tab="waste" />
+
         <div className="grid gap-4 md:grid-cols-3">
           <KPI
             label="Total waste cost"

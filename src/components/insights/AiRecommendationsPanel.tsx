@@ -21,6 +21,9 @@ const PANEL_TITLE: Record<RecommendationTab, string> = {
   food_cost: "Price Alerts",
   inventory: "Alerts",
   recipes: "Alerts",
+  product_mix: "Menu Insights",
+  waste: "Waste Alerts",
+  variance: "Variance Alerts",
 };
 
 const SEVERITY_STYLE: Record<RecommendationSeverity, { badge: string; icon: string }> = {
