@@ -17,8 +17,10 @@ function presetsFor(
   const startOfMonth = new Date(end.getFullYear(), end.getMonth(), 1);
   const startOfLastMonth = new Date(end.getFullYear(), end.getMonth() - 1, 1);
   const endOfLastMonth = addDays(startOfMonth, -1);
+  const yesterday = addDays(end, -1);
   return [
     { id: "today", label: t.dateRange.today, range: { from: end, to: end } },
+    { id: "yesterday", label: t.dateRange.yesterday, range: { from: yesterday, to: yesterday } },
     { id: "last7", label: t.dateRange.last7Days, range: { from: addDays(end, -6), to: end } },
     { id: "last30", label: t.dateRange.last30Days, range: { from: addDays(end, -29), to: end } },
     { id: "thisMonth", label: t.dateRange.thisMonth, range: { from: startOfMonth, to: end } },

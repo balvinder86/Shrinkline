@@ -49,6 +49,7 @@ export type TranslationDict = {
   topbar: { searchPlaceholder: string; noMatch: string };
   dateRange: {
     today: string;
+    yesterday: string;
     last7Days: string;
     last30Days: string;
     thisMonth: string;
@@ -103,6 +104,7 @@ export const translations: Record<Language, TranslationDict> = {
     },
     dateRange: {
       today: "Today",
+      yesterday: "Yesterday",
       last7Days: "Last 7 days",
       last30Days: "Last 30 days",
       thisMonth: "This month",
@@ -160,6 +162,7 @@ export const translations: Record<Language, TranslationDict> = {
     },
     dateRange: {
       today: "Hoy",
+      yesterday: "Ayer",
       last7Days: "Últimos 7 días",
       last30Days: "Últimos 30 días",
       thisMonth: "Este mes",
