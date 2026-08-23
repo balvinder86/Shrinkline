@@ -370,6 +370,22 @@ Deno.serve(async (req) => {
         return json({ ok: false, step: "location", error: locationErr.message }, 500);
       }
 
+      // Same default set create_restaurant() seeds for self-serve brand
+      // creation (db/phase2/74_storage_locations.sql) — a tenant
+      // onboarded from the portal shouldn't start missing what every
+      // other restaurant gets. Best-effort: not worth failing tenant
+      // creation over, these are just a starting point the owner can
+      // rename/delete freely from Settings.
+      const { error: storageLocationsErr } = await supabase.from("storage_locations").insert([
+        { restaurant_id: restaurantId, name: "Walk-in" },
+        { restaurant_id: restaurantId, name: "Freezer" },
+        { restaurant_id: restaurantId, name: "Prep area" },
+        { restaurant_id: restaurantId, name: "Liquor" },
+      ]);
+      if (storageLocationsErr) {
+        console.error("storage_locations seed failed:", storageLocationsErr.message);
+      }
+
       // Same generateLink-or-lookup-existing-user pattern as
       // manage-team's "invite" action — see file header.
       const { data: linkData, error: linkErr } = await supabase.auth.admin.generateLink({

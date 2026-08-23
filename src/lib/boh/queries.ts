@@ -409,6 +409,9 @@ export type InventoryItem = {
   // unit family at a time.
   containerSizeMl: number | null;
   containerSizeG: number | null;
+  // "Where it physically lives" (Walk-in, Freezer…) — independent of
+  // category, see storage_locations above. Null until assigned.
+  storageLocationId: string | null;
 };
 
 function formatLastOrdered(iso: string | null): string {
@@ -458,6 +461,7 @@ export function useInventoryItems() {
           lastOrdered: formatLastOrdered(stock?.last_ordered_at ?? null),
           containerSizeMl: ing.container_size_ml != null ? Number(ing.container_size_ml) : null,
           containerSizeG: ing.container_size_g != null ? Number(ing.container_size_g) : null,
+          storageLocationId: ing.storage_location_id ?? null,
         };
       });
     },
@@ -583,6 +587,7 @@ export type InventoryItemInput = {
   costCents: number | null;
   containerSizeMl?: number | null;
   containerSizeG?: number | null;
+  storageLocationId?: string | null;
 };
 
 export function useCreateInventoryItem() {
@@ -603,6 +608,7 @@ export function useCreateInventoryItem() {
           vendor_id: input.vendorId,
           container_size_ml: input.containerSizeMl ?? null,
           container_size_g: input.containerSizeG ?? null,
+          storage_location_id: input.storageLocationId ?? null,
         })
         .select("id")
         .single();
@@ -766,6 +772,7 @@ export type InventoryItemFieldsInput = {
   costCents: number | null;
   containerSizeMl?: number | null;
   containerSizeG?: number | null;
+  storageLocationId?: string | null;
 };
 
 export function useUpdateInventoryItem() {
@@ -782,6 +789,7 @@ export function useUpdateInventoryItem() {
           vendor_id: input.vendorId,
           container_size_ml: input.containerSizeMl ?? null,
           container_size_g: input.containerSizeG ?? null,
+          storage_location_id: input.storageLocationId ?? null,
         })
         .eq("id", id);
       if (error) throw error;
@@ -819,6 +827,100 @@ export function useUpdateOnHand() {
         },
         { onConflict: "location_id,ingredient_id" },
       );
+      if (error) throw error;
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["inventory-items"] }),
+  });
+}
+
+// ------------------------------------------------------------
+// Storage locations — a second, independent grouping axis from
+// ingredients.category (db/phase2/74_storage_locations.sql). Category
+// is the menu/costing taxonomy shared with Recipes; storage location
+// is "where it physically lives" (Walk-in, Freezer, Prep area,
+// Liquor…), assigned manually per ingredient so the Inventory Count
+// sheet can be grouped by where you'd actually go find the item, not
+// what it costs into. A real per-tenant table, not a fixed list — the
+// defaults are just a starting point, fully editable/extendable.
+// ------------------------------------------------------------
+export type StorageLocation = { id: string; name: string };
+
+export function useStorageLocations() {
+  const restaurantId = useCurrentRestaurantId();
+  return useQuery({
+    queryKey: ["storage-locations", restaurantId],
+    enabled: !!restaurantId,
+    queryFn: async (): Promise<StorageLocation[]> => {
+      const { data, error } = await supabase
+        .from("storage_locations")
+        .select("id, name")
+        .eq("restaurant_id", restaurantId!)
+        .order("name");
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+}
+
+export function useCreateStorageLocation() {
+  const restaurantId = useCurrentRestaurantId();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (name: string): Promise<StorageLocation> => {
+      if (!restaurantId) throw new Error("no current restaurant");
+      const { data, error } = await supabase
+        .from("storage_locations")
+        .insert({ restaurant_id: restaurantId, name: name.trim() })
+        .select("id, name")
+        .single();
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["storage-locations"] }),
+  });
+}
+
+// Lightweight — just the one field, so assigning a location while
+// walking a physical count doesn't need the full name/category/unit
+// round-trip useUpdateInventoryItem requires.
+export function useAssignStorageLocation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      ingredientId,
+      storageLocationId,
+    }: {
+      ingredientId: string;
+      storageLocationId: string | null;
+    }) => {
+      const { error } = await supabase
+        .from("ingredients")
+        .update({ storage_location_id: storageLocationId })
+        .eq("id", ingredientId);
+      if (error) throw error;
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["inventory-items"] }),
+  });
+}
+
+// Same shape as useBulkAssignVendor — set many ingredients to one
+// storage location at once (e.g. select everything in "All" that's
+// still Unassigned, assign to Walk-in in one go) instead of walking
+// the count sheet row by row.
+export function useBulkAssignStorageLocation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      ingredientIds,
+      storageLocationId,
+    }: {
+      ingredientIds: string[];
+      storageLocationId: string | null;
+    }) => {
+      const { error } = await supabase
+        .from("ingredients")
+        .update({ storage_location_id: storageLocationId })
+        .in("id", ingredientIds);
       if (error) throw error;
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["inventory-items"] }),

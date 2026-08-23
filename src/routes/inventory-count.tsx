@@ -1,12 +1,16 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Fragment, useEffect, useMemo, useState } from "react";
-import { ClipboardCheck, Search, TrendingDown, TrendingUp } from "lucide-react";
+import { ClipboardCheck, Plus, Search, TrendingDown, TrendingUp } from "lucide-react";
 
 import {
   useInventoryCounts,
   useInventoryItems,
   useIngredients,
   useSaveInventoryCount,
+  useStorageLocations,
+  useCreateStorageLocation,
+  useAssignStorageLocation,
+  useBulkAssignStorageLocation,
   type InventoryItem,
   type SaveInventoryCountLine,
 } from "@/lib/boh/queries";
@@ -16,6 +20,7 @@ import { compatibleLineUnits, convertQuantityToIngredientUnit, unitLabel } from 
 import { Topbar } from "@/components/dashboard/Topbar";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -35,6 +40,17 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+
+const UNASSIGNED = "Unassigned";
+type GroupBy = "category" | "location";
 
 // The quantity as typed may be in a different (but compatible) unit
 // than the ingredient's own priced unit — a keg-tracked beer counted
@@ -107,7 +123,14 @@ function InventoryCountPage() {
   const { data: items = [] } = useInventoryItems();
   const { data: ingredients = [] } = useIngredients();
   const { data: counts = [] } = useInventoryCounts();
+  const { data: storageLocations = [] } = useStorageLocations();
+  const assignStorageLocation = useAssignStorageLocation();
+  const bulkAssignStorageLocation = useBulkAssignStorageLocation();
   const saveCount = useSaveInventoryCount();
+  const storageLocationNameById = useMemo(
+    () => new Map(storageLocations.map((l) => [l.id, l.name])),
+    [storageLocations],
+  );
 
   // InventoryItem.cost defaults uncosted ingredients to $0 (same
   // convention the Items page's own on-hand-value KPI already uses),
@@ -126,12 +149,16 @@ function InventoryCountPage() {
     [items, trueCostCentsById],
   );
 
-  const [tab, setTab] = useState<Category | "All">("All");
+  const [groupBy, setGroupBy] = useState<GroupBy>("category");
+  const [tab, setTab] = useState<string>("All");
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
   const [notes, setNotes] = useState("");
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savedMessage, setSavedMessage] = useState<string | null>(null);
+  const [addLocationOpen, setAddLocationOpen] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkStorageLocationId, setBulkStorageLocationId] = useState("");
 
   // Seeded once from the current on-hand numbers (in each item's own
   // unit) as a starting point to correct while walking the count — not
@@ -156,32 +183,94 @@ function InventoryCountPage() {
   }, [seeded, items]);
 
   useEffect(() => {
+    setTab("All");
+  }, [groupBy]);
+
+  useEffect(() => {
     setPage(1);
   }, [tab, query]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return items.filter((i) => {
-      if (tab !== "All" && i.category !== tab) return false;
+      if (tab !== "All") {
+        if (groupBy === "category") {
+          if (i.category !== tab) return false;
+        } else if (tab === UNASSIGNED) {
+          if (i.storageLocationId != null) return false;
+        } else if (i.storageLocationId !== tab) {
+          return false;
+        }
+      }
       if (q && !i.name.toLowerCase().includes(q)) return false;
       return true;
     });
-  }, [items, tab, query]);
+  }, [items, tab, query, groupBy]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / COUNT_PAGE_SIZE));
   const paged = useMemo(
     () => filtered.slice((page - 1) * COUNT_PAGE_SIZE, page * COUNT_PAGE_SIZE),
     [filtered, page],
   );
+  // section.key groups rows and drives the "All" section headers;
+  // section.label is what's actually shown (a storage location's real
+  // name, looked up by id, rather than its id).
   const sections = useMemo(() => {
-    if (tab !== "All") return [{ category: tab, items: paged }];
-    const extraCategories = Array.from(
-      new Set(paged.map((i) => i.category).filter((c) => !CATEGORIES.includes(c as Category))),
-    ).sort();
-    return [...CATEGORIES, ...extraCategories]
-      .map((c) => ({ category: c, items: paged.filter((i) => i.category === c) }))
+    if (groupBy === "category") {
+      if (tab !== "All") return [{ key: tab, label: tab, items: paged }];
+      const extraCategories = Array.from(
+        new Set(paged.map((i) => i.category).filter((c) => !CATEGORIES.includes(c as Category))),
+      ).sort();
+      return [...CATEGORIES, ...extraCategories]
+        .map((c) => ({ key: c, label: c, items: paged.filter((i) => i.category === c) }))
+        .filter((s) => s.items.length > 0);
+    }
+    if (tab !== "All") {
+      const label = tab === UNASSIGNED ? UNASSIGNED : (storageLocationNameById.get(tab) ?? tab);
+      return [{ key: tab, label, items: paged }];
+    }
+    const groups = [
+      ...storageLocations.map((l) => ({ key: l.id, label: l.name })),
+      { key: UNASSIGNED, label: UNASSIGNED },
+    ];
+    return groups
+      .map((g) => ({
+        ...g,
+        items: paged.filter((i) =>
+          g.key === UNASSIGNED ? i.storageLocationId == null : i.storageLocationId === g.key,
+        ),
+      }))
       .filter((s) => s.items.length > 0);
-  }, [paged, tab]);
+  }, [paged, tab, groupBy, storageLocations, storageLocationNameById]);
+
+  const toggleSelect = (id: string, checked: boolean) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  };
+  // Selects every item matching the current filter, not just the
+  // current page — same "select all" scope useBulkAssignVendor's UI
+  // uses on the Ordering page, so a bulk assign can cover a whole
+  // filtered set (e.g. everything in "Alcohol") in one action.
+  const allFilteredSelected = filtered.length > 0 && filtered.every((i) => selectedIds.has(i.id));
+  const toggleSelectAll = (checked: boolean) => {
+    setSelectedIds(checked ? new Set(filtered.map((i) => i.id)) : new Set());
+  };
+  const applyBulkStorageLocation = () => {
+    if (selectedIds.size === 0) return;
+    bulkAssignStorageLocation.mutate(
+      { ingredientIds: Array.from(selectedIds), storageLocationId: bulkStorageLocationId || null },
+      {
+        onSuccess: () => {
+          setSelectedIds(new Set());
+          setBulkStorageLocationId("");
+        },
+      },
+    );
+  };
 
   // Live total across EVERY item, not just the current page/filter —
   // a count sheet you're only halfway through paging through should
@@ -308,18 +397,59 @@ function InventoryCountPage() {
           </div>
 
           <div className="p-5 flex items-center gap-3 flex-wrap">
+            <div className="inline-flex rounded-md border border-stone-200 bg-white p-0.5 text-xs shrink-0">
+              <button
+                type="button"
+                onClick={() => setGroupBy("category")}
+                className={`rounded px-2.5 py-1.5 font-medium ${
+                  groupBy === "category" ? "bg-ink text-cream" : "text-stone-600"
+                }`}
+              >
+                Category
+              </button>
+              <button
+                type="button"
+                onClick={() => setGroupBy("location")}
+                className={`rounded px-2.5 py-1.5 font-medium ${
+                  groupBy === "location" ? "bg-ink text-cream" : "text-stone-600"
+                }`}
+              >
+                Storage location
+              </button>
+            </div>
             <div className="max-w-full overflow-x-auto">
-              <Tabs value={tab} onValueChange={(v) => setTab(v as Category | "All")}>
+              <Tabs value={tab} onValueChange={setTab}>
                 <TabsList className="bg-cream border border-stone-200">
                   <TabsTrigger value="All">All</TabsTrigger>
-                  {CATEGORIES.map((c) => (
-                    <TabsTrigger key={c} value={c}>
-                      {c}
-                    </TabsTrigger>
-                  ))}
+                  {groupBy === "category"
+                    ? CATEGORIES.map((c) => (
+                        <TabsTrigger key={c} value={c}>
+                          {c}
+                        </TabsTrigger>
+                      ))
+                    : [
+                        ...storageLocations.map((l) => (
+                          <TabsTrigger key={l.id} value={l.id}>
+                            {l.name}
+                          </TabsTrigger>
+                        )),
+                        <TabsTrigger key={UNASSIGNED} value={UNASSIGNED}>
+                          {UNASSIGNED}
+                        </TabsTrigger>,
+                      ]}
                 </TabsList>
               </Tabs>
             </div>
+            {groupBy === "location" && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-1.5 shrink-0"
+                onClick={() => setAddLocationOpen(true)}
+              >
+                <Plus className="h-3.5 w-3.5" /> Add location
+              </Button>
+            )}
             <div className="relative flex-1 min-w-[220px] max-w-md">
               <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-stone-400" />
               <Input
@@ -331,11 +461,53 @@ function InventoryCountPage() {
             </div>
           </div>
 
+          {selectedIds.size > 0 && (
+            <div className="px-5 pb-5">
+              <Card className="border-stone-200 bg-cream p-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-sm font-medium text-ink">
+                    {selectedIds.size} item{selectedIds.size === 1 ? "" : "s"} selected
+                  </span>
+                  <select
+                    value={bulkStorageLocationId}
+                    onChange={(e) => setBulkStorageLocationId(e.target.value)}
+                    className="h-9 rounded-md border border-stone-200 bg-white px-2 text-sm"
+                  >
+                    <option value="">Unassigned</option>
+                    {storageLocations.map((l) => (
+                      <option key={l.id} value={l.id}>
+                        {l.name}
+                      </option>
+                    ))}
+                  </select>
+                  <Button
+                    size="sm"
+                    disabled={bulkAssignStorageLocation.isPending}
+                    onClick={applyBulkStorageLocation}
+                  >
+                    {bulkAssignStorageLocation.isPending ? "Assigning…" : "Assign location"}
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => setSelectedIds(new Set())}>
+                    Clear selection
+                  </Button>
+                </div>
+              </Card>
+            </div>
+          )}
+
           <div className="overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow className="bg-stone-50/60">
+                  <TableHead className="w-[40px]">
+                    <Checkbox
+                      checked={allFilteredSelected}
+                      onCheckedChange={(checked) => toggleSelectAll(checked === true)}
+                      aria-label="Select all items"
+                    />
+                  </TableHead>
                   <TableHead>Item</TableHead>
+                  <TableHead>Location</TableHead>
                   <TableHead>Unit cost</TableHead>
                   <TableHead className="text-center">Counted qty & unit</TableHead>
                   <TableHead className="text-right">Value</TableHead>
@@ -343,14 +515,14 @@ function InventoryCountPage() {
               </TableHeader>
               <TableBody>
                 {sections.map((section) => (
-                  <Fragment key={section.category}>
+                  <Fragment key={section.key}>
                     {tab === "All" && (
-                      <TableRow key={`${section.category}-header`} className="bg-stone-50/40">
+                      <TableRow key={`${section.key}-header`} className="bg-stone-50/40">
                         <TableCell
-                          colSpan={4}
+                          colSpan={6}
                           className="text-xs font-semibold uppercase tracking-wider text-stone-500 py-2"
                         >
-                          {section.category} · {section.items.length}
+                          {section.label} · {section.items.length}
                         </TableCell>
                       </TableRow>
                     )}
@@ -370,10 +542,36 @@ function InventoryCountPage() {
                       return (
                         <TableRow key={item.id} className="hover:bg-stone-50/50">
                           <TableCell>
+                            <Checkbox
+                              checked={selectedIds.has(item.id)}
+                              onCheckedChange={(checked) => toggleSelect(item.id, checked === true)}
+                              aria-label={`Select ${item.name}`}
+                            />
+                          </TableCell>
+                          <TableCell>
                             <p className="font-medium text-ink">{item.name}</p>
                             <p className="text-xs text-stone-500">
                               priced per {unitLabel(item.unit)}
                             </p>
+                          </TableCell>
+                          <TableCell>
+                            <select
+                              value={item.storageLocationId ?? ""}
+                              onChange={(e) =>
+                                assignStorageLocation.mutate({
+                                  ingredientId: item.id,
+                                  storageLocationId: e.target.value || null,
+                                })
+                              }
+                              className="h-8 w-32 rounded-md border border-stone-200 bg-white px-1.5 text-xs text-stone-700"
+                            >
+                              <option value="">Unassigned</option>
+                              {storageLocations.map((l) => (
+                                <option key={l.id} value={l.id}>
+                                  {l.name}
+                                </option>
+                              ))}
+                            </select>
                           </TableCell>
                           <TableCell className="text-sm text-stone-700">
                             {hasCost ? formatMoney(item.cost) : "— no cost"}
@@ -430,7 +628,7 @@ function InventoryCountPage() {
                 ))}
                 {filtered.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={4} className="text-center py-10 text-sm text-stone-500">
+                    <TableCell colSpan={6} className="text-center py-10 text-sm text-stone-500">
                       No items match this filter.
                     </TableCell>
                   </TableRow>
@@ -569,6 +767,61 @@ function InventoryCountPage() {
           </div>
         </Card>
       </main>
+
+      <AddStorageLocationDialog open={addLocationOpen} onOpenChange={setAddLocationOpen} />
     </div>
+  );
+}
+
+function AddStorageLocationDialog({
+  open,
+  onOpenChange,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+}) {
+  const createStorageLocation = useCreateStorageLocation();
+  const [name, setName] = useState("");
+
+  useEffect(() => {
+    if (!open) setName("");
+  }, [open]);
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-[400px]">
+        <DialogHeader>
+          <DialogTitle>Add a storage location</DialogTitle>
+          <DialogDescription>
+            e.g. "Walk-in," "Dry storage shelf 2" — anywhere items physically live, for grouping the
+            count sheet.
+          </DialogDescription>
+        </DialogHeader>
+        <Input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="e.g. Bar well"
+          autoFocus
+        />
+        {createStorageLocation.isError && (
+          <p className="text-xs text-terracotta">
+            {(createStorageLocation.error as Error).message}
+          </p>
+        )}
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button
+            disabled={!name.trim() || createStorageLocation.isPending}
+            onClick={() =>
+              createStorageLocation.mutate(name.trim(), { onSuccess: () => onOpenChange(false) })
+            }
+          >
+            {createStorageLocation.isPending ? "Adding…" : "Add location"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

@@ -15,6 +15,7 @@ import {
   useCreatePurchaseOrders,
   useExtractInventoryItems,
   useBulkCreateInventoryItems,
+  useStorageLocations,
   type Vendor,
   type InventoryItem,
   type ExtractedInventoryItem,
@@ -201,6 +202,10 @@ type ItemDraft = {
   // containerSizeValue 0 means "not set."
   containerSizeValue: number;
   containerSizeUnit: string;
+  // "Where it physically lives" (Walk-in, Freezer…) — independent of
+  // category, used to group the Inventory Count sheet. "" means
+  // unassigned.
+  storageLocationId: string;
 };
 
 function InventoryPage() {
@@ -216,6 +221,7 @@ function InventoryPage() {
   const { data: usageTrend = [] } = useUsageTrend();
   const createPurchaseOrders = useCreatePurchaseOrders();
   const { data: vendors = [] } = useVendors();
+  const { data: storageLocations = [] } = useStorageLocations();
   const navigate = useNavigate();
   const [tab, setTab] = useState<Category | "All">("All");
   const [query, setQuery] = useState("");
@@ -251,6 +257,7 @@ function InventoryPage() {
     weeklyUsage: 0,
     containerSizeValue: 0,
     containerSizeUnit: "ml",
+    storageLocationId: "",
   });
   const [itemToDelete, setItemToDelete] = useState<Item | null>(null);
 
@@ -468,6 +475,7 @@ function InventoryPage() {
       weeklyUsage: 0,
       containerSizeValue: 0,
       containerSizeUnit: "ml",
+      storageLocationId: "",
     });
     setItemDialogOpen(true);
   };
@@ -488,6 +496,7 @@ function InventoryPage() {
       // re-enter in. Defaults to ml when neither is set yet.
       containerSizeValue: item.containerSizeMl ?? item.containerSizeG ?? 0,
       containerSizeUnit: item.containerSizeG != null && item.containerSizeMl == null ? "g" : "ml",
+      storageLocationId: item.storageLocationId ?? "",
     });
     setItemDialogOpen(true);
   };
@@ -518,6 +527,7 @@ function InventoryPage() {
             null,
           )
         : null;
+    const storageLocationId = itemDraft.storageLocationId || null;
     if (itemEditingId) {
       updateItem.mutate({
         id: itemEditingId,
@@ -528,6 +538,7 @@ function InventoryPage() {
         costCents,
         containerSizeMl,
         containerSizeG,
+        storageLocationId,
       });
       updateOnHand(itemEditingId, itemDraft.onHand);
       updatePar(itemEditingId, itemDraft.par);
@@ -542,6 +553,7 @@ function InventoryPage() {
         costCents,
         containerSizeMl,
         containerSizeG,
+        storageLocationId,
       });
     }
     setItemDialogOpen(false);
@@ -1304,6 +1316,25 @@ function InventoryPage() {
               </select>
             </div>
             <div>
+              <Label htmlFor="item-storage-location">Storage location</Label>
+              <select
+                id="item-storage-location"
+                value={itemDraft.storageLocationId}
+                onChange={(e) => setItemDraft({ ...itemDraft, storageLocationId: e.target.value })}
+                className="h-10 w-full rounded-md border border-stone-200 bg-white px-2 text-sm"
+              >
+                <option value="">Unassigned</option>
+                {storageLocations.map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.name}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-xs text-stone-500">
+                Where it physically lives — groups Inventory Count. Add new ones there.
+              </p>
+            </div>
+            <div>
               <Label htmlFor="item-vendor">Vendor</Label>
               <select
                 id="item-vendor"
@@ -1736,9 +1767,7 @@ function KpiCard({
         {icon}
         <span>{label}</span>
         {trend === "up" && <TrendingUp className="h-3 w-3 text-emerald-600 ml-auto" />}
-        {trend === "down" && (
-          <TrendingDown className="h-3 w-3 text-terracotta ml-auto" />
-        )}
+        {trend === "down" && <TrendingDown className="h-3 w-3 text-terracotta ml-auto" />}
       </div>
       <p className="font-serif text-3xl text-ink mt-2 tabular-nums">{value}</p>
       {hint && <p className="text-xs text-stone-500 mt-1">{hint}</p>}
