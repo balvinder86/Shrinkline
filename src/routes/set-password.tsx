@@ -1,6 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState, type FormEvent } from "react";
 import type { EmailOtpType } from "@supabase/supabase-js";
+import { UtensilsCrossed } from "lucide-react";
 
 import { supabase } from "@/lib/supabase/client";
 import { Card } from "@/components/ui/card";
@@ -15,6 +16,20 @@ export const Route = createFileRoute("/set-password")({
   }),
   component: SetPasswordPage,
 });
+
+// Same mark BrandLocationSwitcher uses in the sidebar header — kept
+// consistent with the login page's own BrandMark rather than a second
+// slightly-different copy, since these two pages are the only ones a
+// signed-out visitor ever sees.
+function BrandMark({ className = "h-12 w-12" }: { className?: string }) {
+  return (
+    <div
+      className={`grid ${className} shrink-0 place-items-center rounded-xl bg-primary text-primary-foreground shadow-soft`}
+    >
+      <UtensilsCrossed className="h-1/2 w-1/2" />
+    </div>
+  );
+}
 
 function SetPasswordPage() {
   const navigate = useNavigate();
@@ -88,10 +103,18 @@ function SetPasswordPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4">
-      <Card className="w-full max-w-sm p-6">
-        <h1 className="text-xl font-semibold text-foreground">Set your password</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Shrinkline owner dashboard</p>
+    <div className="flex min-h-screen flex-col items-center justify-center bg-cream px-4 py-12">
+      <div className="mb-8 flex flex-col items-center gap-2">
+        <BrandMark />
+        <span className="font-display text-2xl text-ink">Shrinkline</span>
+        <span className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
+          Owner Dashboard
+        </span>
+      </div>
+
+      <Card className="w-full max-w-sm p-8 shadow-card">
+        <h1 className="font-display text-2xl text-foreground">Set your password</h1>
+        <p className="mt-1 text-sm text-muted-foreground">One more step before you're in.</p>
 
         {stage === "confirm" && (
           <div className="mt-6 space-y-4">
