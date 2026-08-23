@@ -44,6 +44,37 @@ export function useCreateRestaurant() {
   });
 }
 
+// Real, self-serve hard delete — see
+// supabase/functions/delete-restaurant/index.ts for why this has to be
+// an edge function (cancelling any active Stripe subscription needs
+// the secret key, which never reaches the client) rather than a plain
+// client-side delete against `restaurants`.
+export function useDeleteRestaurant() {
+  const { refetchMemberships } = useAuth();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (restaurantId: string) => {
+      const { data, error } = await supabase.functions.invoke("delete-restaurant", {
+        body: { restaurant_id: restaurantId },
+      });
+      if (error || !(data as { ok?: boolean } | null)?.ok) {
+        throw new Error(
+          (data as { error?: string } | null)?.error ?? error?.message ?? "request failed",
+        );
+      }
+    },
+    onSuccess: async () => {
+      // Same reasoning as useCreateRestaurant — memberships only
+      // refetches on session change, and RestaurantProvider's
+      // currentRestaurantId self-heals to whatever's left once
+      // restaurantIds (derived from memberships) drops the deleted one.
+      await refetchMemberships();
+      queryClient.invalidateQueries({ queryKey: ["restaurant-names"] });
+      queryClient.invalidateQueries({ queryKey: ["brands-overview"] });
+    },
+  });
+}
+
 export type BrandOverview = {
   id: string;
   name: string;

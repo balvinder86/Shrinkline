@@ -86,15 +86,12 @@ import {
   useDeleteTaxDocument,
   useTaxDocumentSignedUrl,
   TAX_DOC_TYPE_OPTIONS,
-  usePendingClosureRequest,
-  useRequestBrandClosure,
   type RestaurantProfileDetails,
   type RestaurantBranding,
   type TaxSettings,
 } from "@/lib/settings/queries";
-import { useBrandsOverview } from "@/lib/restaurants/queries";
+import { useBrandsOverview, useDeleteRestaurant } from "@/lib/restaurants/queries";
 import { AddBrandDialog } from "@/components/BrandLocationSwitcher";
-import { useCurrentMembership } from "@/lib/permissions";
 import {
   Dialog,
   DialogContent,
@@ -338,6 +335,8 @@ function BrandsCard() {
   const { data: brands = [], isLoading } = useBrandsOverview();
   const { currentRestaurantId, setCurrentRestaurantId } = useCurrentRestaurant();
   const [addBrandOpen, setAddBrandOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
+  const ownedCount = brands.filter((b) => b.role === "owner").length;
 
   return (
     <Card className="p-6">
@@ -356,6 +355,7 @@ function BrandsCard() {
         ) : (
           brands.map((b) => {
             const isCurrent = b.id === currentRestaurantId;
+            const canDelete = b.role === "owner" && ownedCount > 1;
             return (
               <div
                 key={b.id}
@@ -370,25 +370,103 @@ function BrandsCard() {
                     {b.role} · {b.locations.length} location{b.locations.length === 1 ? "" : "s"}
                   </div>
                 </div>
-                {isCurrent ? (
-                  <Badge className="shrink-0">Current</Badge>
-                ) : (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="shrink-0"
-                    onClick={() => setCurrentRestaurantId(b.id)}
-                  >
-                    Switch
-                  </Button>
-                )}
+                <div className="flex shrink-0 items-center gap-2">
+                  {isCurrent ? (
+                    <Badge>Current</Badge>
+                  ) : (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setCurrentRestaurantId(b.id)}
+                    >
+                      Switch
+                    </Button>
+                  )}
+                  {b.role === "owner" && (
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                      disabled={!canDelete}
+                      title={!canDelete ? "You can't delete your only brand" : undefined}
+                      onClick={() => setDeleteTarget({ id: b.id, name: b.name })}
+                      aria-label={`Delete ${b.name}`}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  )}
+                </div>
               </div>
             );
           })
         )}
       </div>
       <AddBrandDialog open={addBrandOpen} onOpenChange={setAddBrandOpen} />
+      <DeleteBrandDialog
+        brand={deleteTarget}
+        open={deleteTarget != null}
+        onOpenChange={(v) => {
+          if (!v) setDeleteTarget(null);
+        }}
+      />
     </Card>
+  );
+}
+
+function DeleteBrandDialog({
+  brand,
+  open,
+  onOpenChange,
+}: {
+  brand: { id: string; name: string } | null;
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+}) {
+  const deleteRestaurant = useDeleteRestaurant();
+  const [confirmText, setConfirmText] = useState("");
+
+  useEffect(() => {
+    if (!open) setConfirmText("");
+  }, [open]);
+
+  if (!brand) return null;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-[440px]">
+        <DialogHeader>
+          <DialogTitle>Delete {brand.name}?</DialogTitle>
+          <DialogDescription>
+            This permanently deletes {brand.name} and everything tied to it — locations, menu,
+            invoices, staff access, all of it. Any active subscription is cancelled immediately.
+            There's no undo.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-1.5">
+          <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+            Type "{brand.name}" to confirm
+          </Label>
+          <Input value={confirmText} onChange={(e) => setConfirmText(e.target.value)} autoFocus />
+        </div>
+        {deleteRestaurant.isError && (
+          <p className="text-xs text-destructive">{(deleteRestaurant.error as Error).message}</p>
+        )}
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button
+            variant="destructive"
+            disabled={confirmText !== brand.name || deleteRestaurant.isPending}
+            onClick={() =>
+              deleteRestaurant.mutate(brand.id, { onSuccess: () => onOpenChange(false) })
+            }
+          >
+            {deleteRestaurant.isPending ? "Deleting…" : "Delete brand"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -648,121 +726,7 @@ function ProfileSection() {
           )}
         </div>
       </Card>
-
-      {useCurrentMembership()?.role === "owner" && <CloseBrandCard />}
     </div>
-  );
-}
-
-// Deleting a whole tenant (all its data, plus cancelling any active
-// Stripe subscription) is a platform-operator action from the company
-// portal — same reasoning as tenant creation already being portal-only,
-// not self-serve here. This just files the request; owner-only,
-// mirrors Tax & compliance's owner-only RLS.
-function CloseBrandCard() {
-  const { currentRestaurant } = useCurrentRestaurant();
-  const { data: pending, isLoading } = usePendingClosureRequest();
-  const [dialogOpen, setDialogOpen] = useState(false);
-
-  if (isLoading) return null;
-
-  return (
-    <Card className="border-destructive/30 p-6">
-      <div className="text-[11px] uppercase tracking-[0.2em] text-destructive/80">Danger zone</div>
-      <div className="mt-2 flex items-start justify-between gap-4">
-        <div>
-          <div className="text-sm font-medium">Close this brand</div>
-          <p className="mt-1 max-w-md text-xs text-muted-foreground">
-            Requests that {currentRestaurant?.name ?? "this brand"} and all of its data be
-            permanently closed. This doesn't delete anything immediately — the Shrinkline team
-            handles the actual shutdown (including cancelling billing) from the company portal.
-          </p>
-        </div>
-        {pending ? (
-          <Badge variant="outline" className="shrink-0 text-muted-foreground">
-            Request pending
-          </Badge>
-        ) : (
-          <Button
-            size="sm"
-            variant="outline"
-            className="shrink-0 border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
-            onClick={() => setDialogOpen(true)}
-          >
-            Close this brand
-          </Button>
-        )}
-      </div>
-      <CloseBrandDialog open={dialogOpen} onOpenChange={setDialogOpen} />
-    </Card>
-  );
-}
-
-function CloseBrandDialog({
-  open,
-  onOpenChange,
-}: {
-  open: boolean;
-  onOpenChange: (v: boolean) => void;
-}) {
-  const { currentRestaurant } = useCurrentRestaurant();
-  const requestClosure = useRequestBrandClosure();
-  const [confirmText, setConfirmText] = useState("");
-  const [note, setNote] = useState("");
-
-  useEffect(() => {
-    if (!open) {
-      setConfirmText("");
-      setNote("");
-    }
-  }, [open]);
-
-  const brandName = currentRestaurant?.name ?? "";
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[440px]">
-        <DialogHeader>
-          <DialogTitle>Request to close {brandName}?</DialogTitle>
-          <DialogDescription>
-            This sends a closure request to the Shrinkline team — it doesn't delete anything on its
-            own. We'll follow up to confirm before permanently closing the account and cancelling
-            any active subscription.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="space-y-3">
-          <div className="space-y-1.5">
-            <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              Type "{brandName}" to confirm
-            </Label>
-            <Input value={confirmText} onChange={(e) => setConfirmText(e.target.value)} autoFocus />
-          </div>
-          <Field label="Reason (optional)">
-            <Textarea
-              rows={3}
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              placeholder="Anything the team should know before closing this out."
-            />
-          </Field>
-        </div>
-        {requestClosure.isError && (
-          <p className="text-xs text-destructive">{(requestClosure.error as Error).message}</p>
-        )}
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button
-            variant="destructive"
-            disabled={confirmText !== brandName || requestClosure.isPending}
-            onClick={() => requestClosure.mutate(note, { onSuccess: () => onOpenChange(false) })}
-          >
-            {requestClosure.isPending ? "Sending…" : "Send request"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   );
 }
 
