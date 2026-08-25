@@ -37,14 +37,28 @@ function SetPasswordPage() {
   const tokenHash = params.get("token_hash");
   const otpType = params.get("type") as EmailOtpType | null;
 
-  // Three stages: "confirm" (token_hash present, needs an explicit click
+  // Supabase's own hosted verify redirect (what invite/recovery emails
+  // actually link to) reports failure via a URL *hash* fragment —
+  // #error=access_denied&error_code=otp_expired&error_description=... —
+  // not a query param, and not a thrown exception this page's own code
+  // would ever see. Read once, before deciding the initial stage, so a
+  // dead link (already used, or genuinely expired) shows a real message
+  // instead of silently falling into "checking" and hanging forever on
+  // "Verifying your link…" while it waits for a session that's never
+  // coming — confirmed live: a re-clicked invite link did exactly that.
+  const hashParams = new URLSearchParams(window.location.hash.slice(1));
+  const authError = hashParams.get("error");
+  const authErrorDescription = hashParams.get("error_description");
+
+  // Four stages: "confirm" (token_hash present, needs an explicit click
   // before we ever call verifyOtp — email security scanners prefetch
   // links, which would silently burn a one-time token on page load if we
   // verified automatically), "checking" (no token_hash, e.g. a direct
   // /set-password visit — fall back to checking for an existing session),
-  // "ready" (session established, show the password form).
-  const [stage, setStage] = useState<"confirm" | "checking" | "ready">(
-    tokenHash && otpType ? "confirm" : "checking",
+  // "ready" (session established, show the password form), "expired"
+  // (the link itself was already used or is genuinely expired).
+  const [stage, setStage] = useState<"confirm" | "checking" | "ready" | "expired">(
+    authError ? "expired" : tokenHash && otpType ? "confirm" : "checking",
   );
   const [confirmError, setConfirmError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
@@ -134,6 +148,26 @@ function SetPasswordPage() {
 
         {stage === "checking" && (
           <p className="mt-6 text-sm text-muted-foreground">Verifying your link…</p>
+        )}
+
+        {stage === "expired" && (
+          <div className="mt-6 space-y-4">
+            <Alert variant="destructive">
+              <AlertDescription>
+                {authErrorDescription
+                  ? authErrorDescription.replace(/\+/g, " ")
+                  : "This link is invalid or has expired."}
+              </AlertDescription>
+            </Alert>
+            <p className="text-sm text-muted-foreground">
+              Links only work once — if it's already been opened (including by an email security
+              scanner), it won't work a second time. Ask for a new invite, or if your account is
+              already active, use "Forgot password?" on the sign-in page instead.
+            </p>
+            <Button className="w-full" variant="outline" onClick={() => navigate({ to: "/login" })}>
+              Go to sign in
+            </Button>
+          </div>
         )}
 
         {stage === "ready" && (
