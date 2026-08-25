@@ -61,6 +61,8 @@ import {
   useConnectToast,
   useGmailConnection,
   useConnectGmail,
+  useSquareConnection,
+  useConnectSquare,
 } from "@/lib/integrations/queries";
 import { useAuth } from "@/lib/supabase/auth-context";
 import { useCurrentRestaurant } from "@/lib/restaurant-context";
@@ -1236,6 +1238,8 @@ function IntegrationsSection() {
   const { data: toastConnection } = useToastConnection();
   const { data: gmailConnection, refetch: refetchGmail } = useGmailConnection();
   const connectGmail = useConnectGmail();
+  const { data: squareConnection, refetch: refetchSquare } = useSquareConnection();
+  const connectSquare = useConnectSquare();
   const [infoRow, setInfoRow] = useState<AppRow | null>(null);
 
   // "Not built" rows still get a real onClick — opens
@@ -1253,15 +1257,19 @@ function IntegrationsSection() {
     message?: string;
   } | null>(null);
 
-  // The Gmail OAuth callback (connect-gmail-callback) redirects back
-  // here with ?gmail=connected|error — a full page load, not a
-  // client-side navigation, so this only needs to run once on mount.
+  // The Gmail/Square OAuth callbacks redirect back here with
+  // ?gmail=connected|error or ?square=connected|error — a full page
+  // load, not a client-side navigation, so this only needs to run
+  // once on mount.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const status = params.get("gmail");
+    const gmailStatus = params.get("gmail");
+    const squareStatus = params.get("square");
+    const status = gmailStatus ?? squareStatus;
     if (status === "connected" || status === "error") {
       setCallbackBanner({ status, message: params.get("message") ?? undefined });
-      refetchGmail();
+      if (gmailStatus) refetchGmail();
+      if (squareStatus) refetchSquare();
       window.history.replaceState({}, "", window.location.pathname);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1278,6 +1286,13 @@ function IntegrationsSection() {
   const gmailDesc = gmailConnection
     ? `Reads vendor invoice emails, sends purchase orders. Connected as ${gmailConnection.connectedEmail}.`
     : "Reads vendor invoice emails, sends purchase orders.";
+
+  const squareLastSyncedLabel = squareConnection?.lastSyncedAt
+    ? `Last synced ${new Date(squareConnection.lastSyncedAt).toLocaleString()}.`
+    : "Not synced yet.";
+  const squareDesc = squareConnection
+    ? `Syncs orders, menu, and labor. ${squareLastSyncedLabel}`
+    : "Syncs orders, menu, and labor.";
 
   // Everything past Toast/Gmail below is "Not built" — no real
   // credential, no real sync — kept in the list only as a roadmap of
@@ -1299,14 +1314,10 @@ function IntegrationsSection() {
     },
     {
       name: "Square",
-      cat: "Payments",
-      status: "Not built",
-      desc: "Card processing & online ordering.",
-      howToConnect: [
-        "Register a Square Developer app and implement its OAuth flow — the same shape of work as the Toast connection above.",
-        "Once connected, sync orders and payments via Square's Orders and Payments APIs.",
-        "Realistic to build — Square's API is well-documented and doesn't require a partner approval process.",
-      ],
+      cat: "Point of sale",
+      status: squareConnection ? "Connected" : "Available",
+      desc: squareDesc,
+      onClick: () => connectSquare.mutate(),
     },
     {
       name: "QuickBooks Online",

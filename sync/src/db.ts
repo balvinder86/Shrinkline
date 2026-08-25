@@ -41,6 +41,51 @@ export async function getSecret(
   return parsed;
 }
 
+// A Square credential also needs the location's own timezone (Search
+// Timecards' workday filter requires one, and Square orders don't
+// carry an explicit "business date" the way Toast's do — the sync
+// loop derives one from each order's closed_at using this).
+export type SquareCredential = PosCredential & { timezone: string };
+
+export async function getSquareCredentials(): Promise<SquareCredential[]> {
+  const { data, error } = await supabase
+    .from("pos_credentials")
+    .select(
+      "restaurant_id, location_id, provider, pos_location_ref, vault_secret_name, api_hostname, last_synced_at, locations (timezone)",
+    )
+    .eq("provider", "square");
+  if (error) throw new Error(`load pos_credentials (square) failed: ${error.message}`);
+  type Row = PosCredential & { locations: { timezone: string } | null };
+  return ((data ?? []) as unknown as Row[]).map((row) => ({
+    restaurant_id: row.restaurant_id,
+    location_id: row.location_id,
+    provider: row.provider,
+    pos_location_ref: row.pos_location_ref,
+    vault_secret_name: row.vault_secret_name,
+    api_hostname: row.api_hostname,
+    last_synced_at: row.last_synced_at,
+    timezone: row.locations?.timezone ?? "America/Chicago",
+  }));
+}
+
+// Only the merchant-specific refresh token + merchant id live in
+// Vault — the Square application's own client_id/client_secret
+// (shared across every Square-connected tenant, since this is one
+// registered Shrinkline OAuth app, not a per-tenant credential the
+// way Toast's is) live in SQUARE_APPLICATION_ID/SECRET env vars
+// instead, read directly where needed.
+export async function getSquareSecret(
+  vaultSecretName: string,
+): Promise<{ refreshToken: string; merchantId: string }> {
+  const { data, error } = await supabase.rpc("get_pos_secret", { secret_name: vaultSecretName });
+  if (error || !data)
+    throw new Error(`vault secret '${vaultSecretName}' not found: ${error?.message ?? ""}`);
+  const parsed = JSON.parse(data);
+  if (!parsed.refreshToken)
+    throw new Error(`vault secret '${vaultSecretName}' missing refreshToken`);
+  return parsed;
+}
+
 // Tenant identity ALWAYS comes from the credential row, never from the
 // vendor payload — this is what keeps a bug in the API response from
 // ever writing data under the wrong restaurant_id/location_id.
@@ -213,7 +258,7 @@ export async function upsertRevenueCenters(
 }
 
 export type LaborShiftRow = {
-  toastTimeEntryRef: string;
+  posTimeEntryRef: string;
   employeeRef: string;
   employeeName: string;
   jobRef: string | null;
@@ -238,7 +283,7 @@ export async function upsertLaborShifts(
       restaurant_id: cred.restaurant_id,
       location_id: cred.location_id,
       business_date: isoDate,
-      toast_time_entry_ref: r.toastTimeEntryRef,
+      pos_time_entry_ref: r.posTimeEntryRef,
       employee_ref: r.employeeRef,
       employee_name: r.employeeName,
       job_ref: r.jobRef,
@@ -251,7 +296,7 @@ export async function upsertLaborShifts(
       labor_cost_cents: r.laborCostCents,
       updated_at: new Date().toISOString(),
     })),
-    { onConflict: "location_id,toast_time_entry_ref" },
+    { onConflict: "location_id,pos_time_entry_ref" },
   );
   if (error) throw new Error(`upsert labor_shifts failed: ${error.message}`);
 }

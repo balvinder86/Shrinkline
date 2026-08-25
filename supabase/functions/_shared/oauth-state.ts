@@ -34,8 +34,16 @@ function fromBase64Url(s: string): Uint8Array {
 
 const STATE_TTL_MS = 10 * 60 * 1000; // 10 minutes — plenty for a real consent click-through
 
-export async function signState(secret: string, restaurantId: string): Promise<string> {
-  const payload = JSON.stringify({ restaurantId, exp: Date.now() + STATE_TTL_MS });
+// locationId is optional — Gmail/Search Console only ever needed
+// restaurantId (one connected inbox/site per restaurant); Square's
+// callback also needs to know which location the credential belongs
+// to, since pos_credentials is keyed by location, not restaurant.
+export async function signState(
+  secret: string,
+  restaurantId: string,
+  locationId?: string,
+): Promise<string> {
+  const payload = JSON.stringify({ restaurantId, locationId, exp: Date.now() + STATE_TTL_MS });
   const payloadB64 = toBase64Url(new TextEncoder().encode(payload));
   const key = await hmacKey(secret);
   const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payloadB64));
@@ -45,7 +53,7 @@ export async function signState(secret: string, restaurantId: string): Promise<s
 export async function verifyState(
   secret: string,
   state: string,
-): Promise<{ restaurantId: string }> {
+): Promise<{ restaurantId: string; locationId?: string }> {
   const [payloadB64, sigB64] = state.split(".");
   if (!payloadB64 || !sigB64) throw new Error("malformed state");
 
@@ -64,5 +72,8 @@ export async function verifyState(
   }
   if (Date.now() > payload.exp) throw new Error("state expired — please try connecting again");
 
-  return { restaurantId: payload.restaurantId };
+  return {
+    restaurantId: payload.restaurantId,
+    locationId: typeof payload.locationId === "string" ? payload.locationId : undefined,
+  };
 }

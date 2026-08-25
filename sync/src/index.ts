@@ -12,8 +12,19 @@ import {
   type ToastJob,
 } from "./toast.js";
 import {
+  refreshAccessToken,
+  fetchOrdersForRange,
+  fetchCatalogItems,
+  fetchTeamMembers,
+  fetchTimecardsForRange,
+  type SquareOrder,
+  type SquareTeamMember,
+} from "./square.js";
+import {
   getToastCredentials,
   getSecret,
+  getSquareCredentials,
+  getSquareSecret,
   upsertRawEvents,
   replacePmixForDate,
   upsertMenuItemPriceTiers,
@@ -23,6 +34,7 @@ import {
   upsertLaborShifts,
   updateLastSyncedAt,
   type PosCredential,
+  type SquareCredential,
   type LaborShiftRow,
   type PriceTierUpsert,
 } from "./db.js";
@@ -144,7 +156,7 @@ function aggregatePmixByTier(orders: ToastOrder[]) {
   return Array.from(map.values());
 }
 
-async function syncCredential(cred: PosCredential) {
+async function syncToastCredential(cred: PosCredential) {
   console.log(`[toast-sync] ${cred.location_id}: starting`);
   const { clientId, clientSecret } = await getSecret(cred.vault_secret_name);
   const token = await authenticate(cred.api_hostname, clientId, clientSecret);
@@ -274,7 +286,7 @@ async function syncCredential(cred: PosCredential) {
             regularHours * wageCents + overtimeHours * wageCents * OVERTIME_MULTIPLIER,
           );
           return {
-            toastTimeEntryRef: entry.guid,
+            posTimeEntryRef: entry.guid,
             employeeRef: entry.employeeReference?.guid ?? "unknown",
             employeeName: employee
               ? `${employee.firstName} ${employee.lastName}`.trim()
@@ -302,18 +314,219 @@ async function syncCredential(cred: PosCredential) {
   console.log(`[toast-sync] ${cred.location_id}: done — ${totalOrders} orders total`);
 }
 
+const SQUARE_APPLICATION_ID = process.env.SQUARE_APPLICATION_ID ?? "";
+const SQUARE_APPLICATION_SECRET = process.env.SQUARE_APPLICATION_SECRET ?? "";
+
+// Square doesn't stamp orders/timecards with an explicit "business
+// date" the way Toast does — this derives one from a real timestamp
+// in the location's own timezone, matching the yyyymmdd convention
+// businessDatesBetween/toBusinessDateString already use above.
+function businessDateInTimezone(iso: string, timezone: string): string {
+  const formatted = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date(iso));
+  return formatted.replace(/-/g, "");
+}
+
+function toHyphenatedDate(businessDate: string): string {
+  return `${businessDate.slice(0, 4)}-${businessDate.slice(4, 6)}-${businessDate.slice(6, 8)}`;
+}
+
+// Buckets completed orders' line items by business date and menu
+// item — same reduction aggregatePmix does for Toast, adapted to
+// Square's field names (quantity is a string, total_money.amount is
+// already in cents) and to Square orders spanning a real date range
+// in one call instead of one-day-at-a-time.
+function aggregateSquarePmixByDate(orders: SquareOrder[], timezone: string) {
+  const byDate = new Map<string, Map<string, { name: string; qty: number; netCents: number }>>();
+  for (const order of orders) {
+    if (order.state !== "COMPLETED") continue;
+    const stamp = order.closed_at ?? order.created_at;
+    if (!stamp) continue;
+    const businessDate = businessDateInTimezone(stamp, timezone);
+    const itemMap = byDate.get(businessDate) ?? new Map();
+    for (const line of order.line_items ?? []) {
+      const posId = line.catalog_object_id;
+      if (!posId) continue;
+      const cur = itemMap.get(posId) ?? { name: line.name ?? "Unknown Item", qty: 0, netCents: 0 };
+      cur.qty += Number(line.quantity ?? "1");
+      cur.netCents += line.total_money?.amount ?? 0;
+      itemMap.set(posId, cur);
+    }
+    byDate.set(businessDate, itemMap);
+  }
+  return byDate;
+}
+
+async function syncSquareCredential(cred: SquareCredential) {
+  console.log(`[square-sync] ${cred.location_id}: starting`);
+  if (!SQUARE_APPLICATION_ID || !SQUARE_APPLICATION_SECRET) {
+    throw new Error("SQUARE_APPLICATION_ID/SQUARE_APPLICATION_SECRET must be set");
+  }
+  const { refreshToken } = await getSquareSecret(cred.vault_secret_name);
+  const { accessToken: token } = await refreshAccessToken(
+    cred.api_hostname,
+    SQUARE_APPLICATION_ID,
+    SQUARE_APPLICATION_SECRET,
+    refreshToken,
+  );
+
+  const now = new Date();
+  const start = cred.last_synced_at
+    ? new Date(new Date(cred.last_synced_at).getTime() - 24 * 60 * 60 * 1000) // 1-day overlap buffer
+    : new Date(now.getTime() - (BACKFILL_DAYS - 1) * 24 * 60 * 60 * 1000);
+
+  let totalOrders = 0;
+  try {
+    const orders = await fetchOrdersForRange(
+      cred.api_hostname,
+      token,
+      cred.pos_location_ref,
+      start.toISOString(),
+      now.toISOString(),
+    );
+    totalOrders = orders.length;
+
+    await upsertRawEvents(
+      cred,
+      "order",
+      orders.map((o) => ({
+        posRef: o.id,
+        businessDate: o.closed_at ? o.closed_at.slice(0, 10) : null,
+        payload: o,
+      })),
+    );
+
+    const byDate = aggregateSquarePmixByDate(orders, cred.timezone);
+    for (const [businessDate, itemMap] of byDate) {
+      const pmixRows = Array.from(itemMap.entries()).map(([menuItemPosId, v]) => ({
+        menuItemPosId,
+        name: v.name,
+        quantitySold: v.qty,
+        netSalesCents: v.netCents,
+      }));
+      await replacePmixForDate(cred, businessDate, pmixRows);
+    }
+    console.log(
+      `[square-sync] ${cred.location_id}: ${totalOrders} orders across ${byDate.size} business date(s)`,
+    );
+  } catch (e) {
+    console.error(`[square-sync] ${cred.location_id}: order sync failed (non-fatal): ${e}`);
+  }
+
+  try {
+    const menuItems = await fetchCatalogItems(cred.api_hostname, token);
+    await upsertMenuItems(cred, menuItems);
+    await upsertRawEvents(cred, "menu", [
+      { posRef: "current", businessDate: null, payload: menuItems },
+    ]);
+    console.log(`[square-sync] ${cred.location_id}: ${menuItems.length} menu items synced`);
+  } catch (e) {
+    console.error(`[square-sync] ${cred.location_id}: menu sync failed (non-fatal): ${e}`);
+  }
+
+  // No revenue-center sync — Square has no equivalent concept (no
+  // physical-area grouping the way Toast's revenue centers are).
+  // Channel Mix is left genuinely empty for Square locations rather
+  // than mapping something conceptually different (ordering channel)
+  // into the same field — confirmed with the tenant-owner.
+
+  try {
+    const [teamMembers, timecards] = await Promise.all([
+      fetchTeamMembers(cred.api_hostname, token, cred.pos_location_ref),
+      fetchTimecardsForRange(
+        cred.api_hostname,
+        token,
+        cred.pos_location_ref,
+        toHyphenatedDate(businessDateInTimezone(start.toISOString(), cred.timezone)),
+        toHyphenatedDate(businessDateInTimezone(now.toISOString(), cred.timezone)),
+        cred.timezone,
+      ),
+    ]);
+    const teamMemberById = new Map<string, SquareTeamMember>(teamMembers.map((t) => [t.id, t]));
+
+    const rowsByDate = new Map<string, LaborShiftRow[]>();
+    for (const tc of timecards) {
+      const businessDate = businessDateInTimezone(tc.start_at, cred.timezone);
+      const member = teamMemberById.get(tc.team_member_id);
+      const wageCents = tc.wage?.hourly_rate?.amount ?? 0;
+      // v1 simplification, confirmed with the tenant-owner: Square's
+      // timecards don't come pre-split into regular/overtime hours
+      // the way Toast's time entries do, and computing a correct
+      // weekly split ourselves is real, non-trivial aggregation
+      // (tricky at week boundaries during incremental syncs). Every
+      // worked hour (minus real unpaid break time, which Square does
+      // give per-timecard) is stored as regular for now, rather than
+      // guessing at a weekly split.
+      let regularHours = 0;
+      if (tc.end_at) {
+        const workedMs = new Date(tc.end_at).getTime() - new Date(tc.start_at).getTime();
+        const unpaidBreakMs = (tc.breaks ?? [])
+          .filter((b) => b.is_paid === false && b.start_at && b.end_at)
+          .reduce(
+            (sum, b) => sum + (new Date(b.end_at!).getTime() - new Date(b.start_at!).getTime()),
+            0,
+          );
+        regularHours = Math.max(0, (workedMs - unpaidBreakMs) / 3_600_000);
+      }
+      const row: LaborShiftRow = {
+        posTimeEntryRef: tc.id,
+        employeeRef: tc.team_member_id,
+        employeeName: member
+          ? `${member.given_name ?? ""} ${member.family_name ?? ""}`.trim() || "Unknown employee"
+          : "Unknown employee",
+        jobRef: null,
+        jobTitle: tc.wage?.title ?? null,
+        inAt: tc.start_at,
+        outAt: tc.end_at ?? null,
+        regularHours,
+        overtimeHours: 0,
+        wageCents,
+        laborCostCents: Math.round(regularHours * wageCents),
+      };
+      const list = rowsByDate.get(businessDate) ?? [];
+      list.push(row);
+      rowsByDate.set(businessDate, list);
+    }
+    let totalShifts = 0;
+    for (const [businessDate, rows] of rowsByDate) {
+      await upsertLaborShifts(cred, businessDate, rows);
+      totalShifts += rows.length;
+    }
+    console.log(`[square-sync] ${cred.location_id}: ${totalShifts} labor shifts synced`);
+  } catch (e) {
+    console.error(`[square-sync] ${cred.location_id}: labor sync failed (non-fatal): ${e}`);
+  }
+
+  await updateLastSyncedAt(cred, now);
+  console.log(`[square-sync] ${cred.location_id}: done — ${totalOrders} orders total`);
+}
+
 async function main() {
-  const credentials = await getToastCredentials();
-  if (credentials.length === 0) {
-    console.log("[toast-sync] no toast pos_credentials rows found — nothing to do");
+  const [toastCredentials, squareCredentials] = await Promise.all([
+    getToastCredentials(),
+    getSquareCredentials(),
+  ]);
+  if (toastCredentials.length === 0 && squareCredentials.length === 0) {
+    console.log("[sync] no pos_credentials rows found — nothing to do");
     return;
   }
-  for (const cred of credentials) {
+  for (const cred of toastCredentials) {
     try {
-      await syncCredential(cred);
+      await syncToastCredential(cred);
     } catch (e) {
       // One location's failure shouldn't block the others.
       console.error(`[toast-sync] ${cred.location_id}: FAILED — ${e}`);
+    }
+  }
+  for (const cred of squareCredentials) {
+    try {
+      await syncSquareCredential(cred);
+    } catch (e) {
+      console.error(`[square-sync] ${cred.location_id}: FAILED — ${e}`);
     }
   }
 }

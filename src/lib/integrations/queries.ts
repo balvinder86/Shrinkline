@@ -119,3 +119,56 @@ export function useConnectGmail() {
     },
   });
 }
+
+export type SquareConnection = {
+  posLocationRef: string;
+  lastSyncedAt: string | null;
+};
+
+// Direct RLS-scoped read, not an Edge Function call — pos_credentials
+// already has a tenant_isolation policy allowing this, same pattern
+// as useGmailConnection above.
+export function useSquareConnection() {
+  const restaurantId = useCurrentRestaurantId();
+  return useQuery({
+    queryKey: ["square-connection", restaurantId],
+    enabled: !!restaurantId,
+    queryFn: async (): Promise<SquareConnection | null> => {
+      const { data, error } = await supabase
+        .from("pos_credentials")
+        .select("pos_location_ref, last_synced_at")
+        .eq("restaurant_id", restaurantId!)
+        .eq("provider", "square")
+        .maybeSingle();
+      if (error) throw error;
+      if (!data) return null;
+      return { posLocationRef: data.pos_location_ref, lastSyncedAt: data.last_synced_at };
+    },
+  });
+}
+
+// Calls connect-square-start for a real Square consent URL, then does
+// a full browser redirect — same shape as useConnectGmail. Needs
+// location_id (unlike Gmail) since pos_credentials is keyed by
+// location, same requirement Toast's connect flow already has.
+export function useConnectSquare() {
+  const restaurantId = useCurrentRestaurantId();
+  const locationId = useCurrentLocationId();
+  return useMutation({
+    mutationFn: async () => {
+      if (!restaurantId || !locationId) throw new Error("no current restaurant/location");
+      const { data, error } = await supabase.functions.invoke("connect-square-start", {
+        body: { restaurant_id: restaurantId, location_id: locationId },
+      });
+      if (error || !(data as { ok?: boolean } | null)?.ok) {
+        throw new Error(
+          (data as { error?: string } | null)?.error ??
+            error?.message ??
+            "could not start connection",
+        );
+      }
+      const { authUrl } = data as { authUrl: string };
+      window.location.href = authUrl;
+    },
+  });
+}
