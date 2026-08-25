@@ -73,7 +73,15 @@ function LoginPage() {
     });
     setSubmitting(false);
     if (error) {
-      setError(error.message);
+      // A failed send (e.g. the email provider rejecting the recipient)
+      // surfaces here as a 500 with no usable message field — supabase-js
+      // then has nothing to show but "{}". Give a real fallback rather
+      // than rendering that literal string.
+      setError(
+        error.message && error.message !== "{}"
+          ? error.message
+          : "We couldn't send that email right now. Please try again shortly, or contact support if it keeps happening.",
+      );
       return;
     }
     setInfo("Check your email for a password reset link.");
