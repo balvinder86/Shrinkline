@@ -10,6 +10,7 @@
 //   { action: "get_tenant", restaurant_id }
 //   { action: "get_platform_summary" }
 //   { action: "create_tenant", name, location_name?, location_timezone?, owner_email }
+//   { action: "resend_invite", restaurant_id }
 //
 // list_tenants includes taxSettingsComplete/taxDocumentCount and
 // setupStepsComplete/setupStepsTotal — status only (has the tenant
@@ -451,8 +452,66 @@ Deno.serve(async (req) => {
       return json({ ok: true, restaurantId, ownerUserId, inviteLink, alreadyRegistered }, 200);
     }
 
+    // For a tenant whose original invite link died (already used —
+    // links are one-time — or genuinely expired) before they ever set
+    // a password. Uses a "recovery" link rather than re-inviting: the
+    // account already exists and is confirmed at this point, recovery
+    // is the semantically correct type for "let this existing user set
+    // their password," and it's the same link type login.tsx's own
+    // "Forgot password?" flow produces. Same as create_tenant's
+    // inviteLink, this is never auto-emailed — no outbound mailer is
+    // wired up here — the operator copies/sends it themselves.
+    if (action === "resend_invite") {
+      const { restaurant_id: restaurantId } = body;
+      if (!restaurantId) {
+        return json({ ok: false, step: "input", error: "restaurant_id is required" }, 400);
+      }
+
+      const { data: ownerMembership, error: memErr } = await supabase
+        .from("memberships")
+        .select("user_id")
+        .eq("restaurant_id", restaurantId)
+        .eq("role", "owner")
+        .maybeSingle();
+      if (memErr) return json({ ok: false, step: "db", error: memErr.message }, 500);
+      if (!ownerMembership) {
+        return json({ ok: false, step: "db", error: "no owner found for this restaurant" }, 404);
+      }
+
+      const { data: userRes, error: userErr } = await supabase.auth.admin.getUserById(
+        ownerMembership.user_id,
+      );
+      if (userErr || !userRes?.user?.email) {
+        return json(
+          { ok: false, step: "auth", error: userErr?.message ?? "could not resolve owner email" },
+          500,
+        );
+      }
+
+      const { data: linkData, error: linkErr } = await supabase.auth.admin.generateLink({
+        type: "recovery",
+        email: userRes.user.email,
+        options: { redirectTo: `${APP_BASE_URL}/set-password` },
+      });
+      if (linkErr || !linkData?.properties?.action_link) {
+        return json(
+          { ok: false, step: "invite", error: linkErr?.message ?? "could not generate link" },
+          500,
+        );
+      }
+
+      return json(
+        { ok: true, email: userRes.user.email, inviteLink: linkData.properties.action_link },
+        200,
+      );
+    }
+
     return json(
-      { ok: false, step: "input", error: "action must be 'list_tenants' or 'create_tenant'" },
+      {
+        ok: false,
+        step: "input",
+        error: "action must be 'list_tenants', 'create_tenant', or 'resend_invite'",
+      },
       400,
     );
   } catch (e) {
