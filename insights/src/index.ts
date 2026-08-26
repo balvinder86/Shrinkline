@@ -1,4 +1,5 @@
 import { getBatchStatus, ingestBatchResults, submitBatch } from "./claude.js";
+import { sendDigestEmails } from "./digest.js";
 import {
   createBatchRecord,
   getAllLocations,
@@ -69,6 +70,20 @@ async function pollExistingBatch(
   await upsertRecommendations(rows);
   await markBatchIngested(id);
   console.log(`[insights] ${businessDate}: ingested ${rows.length} recommendation(s)`);
+
+  // Digest goes out per restaurant, not per location/row — every
+  // restaurant with at least one location gets a chance at a digest,
+  // even one with zero recommendations today (still worth reporting
+  // low-par/reviews). sendDigestEmails itself no-ops cleanly if
+  // already sent for this business_date.
+  const restaurantIds = new Set(locations.map((l) => l.restaurant_id));
+  for (const restaurantId of restaurantIds) {
+    try {
+      await sendDigestEmails(restaurantId, businessDate);
+    } catch (e) {
+      console.error(`[insights] ${restaurantId}: digest send failed (non-fatal): ${e}`);
+    }
+  }
 }
 
 async function main() {

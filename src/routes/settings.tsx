@@ -93,6 +93,11 @@ import {
   type TaxSettings,
 } from "@/lib/settings/queries";
 import { useBrandsOverview, useDeleteRestaurant } from "@/lib/restaurants/queries";
+import {
+  useNotificationPreferences,
+  useUpdateNotificationPreference,
+  type NotificationEventKey,
+} from "@/lib/notifications/queries";
 import { AddBrandDialog } from "@/components/BrandLocationSwitcher";
 import {
   Dialog,
@@ -1123,90 +1128,72 @@ function BrandingSection() {
 
 /* ---------- Notifications ---------- */
 
+// Only events with a real data source behind them ship here —
+// Schedule conflicts/Reservation activity/Campaign performance/
+// Segment milestones were dropped, same call as the AI-native rollout
+// skipping Loyalty/Scheduling for having no real backend. All four
+// below land in one nightly digest email (insights/src/digest.ts),
+// piggybacked on the existing nightly insights cron — not real-time.
+const NOTIFICATION_EVENTS: { key: NotificationEventKey; t: string; d: string }[] = [
+  { key: "low_inventory", t: "Low inventory alerts", d: "Items below par, in tonight's digest." },
+  { key: "new_review", t: "New reviews", d: "New Google reviews since the last digest." },
+  {
+    key: "negative_review",
+    t: "Negative review (≤3★)",
+    d: "Called out separately in the digest.",
+  },
+  {
+    key: "ai_recommendations",
+    t: "AI recommendations",
+    d: "Same flags shown on the P&L/Inventory/Invoices pages.",
+  },
+];
+
 function NotificationsSection() {
-  const groups = [
-    {
-      title: "Operations",
-      items: [
-        { t: "Low inventory alerts", d: "Notify when an item drops below par." },
-        { t: "Invoice processed", d: "When the AP agent imports a new vendor invoice." },
-        { t: "Schedule conflicts", d: "Overtime risk, no-shows, or unfilled shifts." },
-      ],
-    },
-    {
-      title: "Guest activity",
-      items: [
-        { t: "New reviews", d: "Google, Yelp, TripAdvisor, OpenTable." },
-        { t: "Negative review (≤3★)", d: "Immediate escalation to managers." },
-        { t: "Reservation activity", d: "Large parties, cancellations, no-shows." },
-      ],
-    },
-    {
-      title: "Marketing",
-      items: [
-        { t: "Campaign performance", d: "Daily digest of opens, clicks, attributed revenue." },
-        { t: "Segment milestones", d: "When a segment hits revenue or growth thresholds." },
-      ],
-    },
-  ];
+  const { data: preferences, isLoading } = useNotificationPreferences();
+  const updatePreference = useUpdateNotificationPreference();
+
   return (
     <div className="space-y-6">
       <SectionHeader
         eyebrow="Workspace"
         title="Notifications"
-        description="Choose how and when each event reaches your team."
+        description="Choose which events land in your nightly email digest."
       />
-      <PlaceholderBanner>
-        No notification-preferences table exists — every toggle below is illustrative only, nothing
-        is sent or saved based on these.
-      </PlaceholderBanner>
-      <Card className="p-6 opacity-60">
+      <Card className="p-6">
         <div className="grid grid-cols-[1fr_auto_auto_auto] items-center gap-4 pb-2 text-[11px] uppercase tracking-[0.2em] text-muted-foreground">
           <div>Event</div>
           <div className="flex items-center gap-1">
             <Mail className="h-3 w-3" /> Email
           </div>
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1 opacity-50" title="Coming soon">
             <Smartphone className="h-3 w-3" /> Push
           </div>
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1 opacity-50" title="Coming soon">
             <Phone className="h-3 w-3" /> SMS
           </div>
         </div>
-        {groups.map((g) => (
-          <div key={g.title} className="mt-4 first:mt-0">
-            <div className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground/80">
-              {g.title}
+        <div className="mt-2 divide-y divide-border/60 rounded-lg border border-border/60">
+          {NOTIFICATION_EVENTS.map((it) => (
+            <div
+              key={it.key}
+              className="grid grid-cols-[1fr_auto_auto_auto] items-center gap-4 px-4 py-3"
+            >
+              <div>
+                <div className="text-sm font-medium">{it.t}</div>
+                <div className="text-xs text-muted-foreground">{it.d}</div>
+              </div>
+              <Switch
+                checked={preferences?.[it.key] ?? true}
+                disabled={isLoading || updatePreference.isPending}
+                onCheckedChange={(checked) =>
+                  updatePreference.mutate({ eventKey: it.key, enabled: checked })
+                }
+              />
+              <Switch disabled title="Coming soon" />
+              <Switch disabled title="Coming soon" />
             </div>
-            <div className="divide-y divide-border/60 rounded-lg border border-border/60">
-              {g.items.map((it) => (
-                <div
-                  key={it.t}
-                  className="grid grid-cols-[1fr_auto_auto_auto] items-center gap-4 px-4 py-3"
-                >
-                  <div>
-                    <div className="text-sm font-medium">{it.t}</div>
-                    <div className="text-xs text-muted-foreground">{it.d}</div>
-                  </div>
-                  <Switch defaultChecked disabled />
-                  <Switch defaultChecked disabled />
-                  <Switch disabled />
-                </div>
-              ))}
-            </div>
-          </div>
-        ))}
-      </Card>
-
-      <Card className="p-6 opacity-60">
-        <SectionHeader
-          title="Quiet hours"
-          description="No push or SMS notifications during this window unless marked urgent."
-        />
-        <div className="mt-4 flex items-center gap-3">
-          <Input type="time" defaultValue="23:00" className="h-9 w-32" disabled />
-          <span className="text-sm text-muted-foreground">to</span>
-          <Input type="time" defaultValue="07:00" className="h-9 w-32" disabled />
+          ))}
         </div>
       </Card>
     </div>

@@ -92,6 +92,35 @@ export async function getTabContext(loc: Location): Promise<TabContext> {
   return { lowPar, foodCost, invoiceDrift, productMix, waste, variance };
 }
 
+// Same par_levels query/filter as getTabContext above, standalone —
+// digest.ts needs just this one signal at send time (which runs in a
+// separate process invocation from whatever submitTodaysBatch run
+// originally computed the full TabContext), not the other 5 expensive
+// aggregates that come bundled with it.
+export async function getLowParForLocation(locationId: string): Promise<LowParItem[]> {
+  const { data, error } = await supabase
+    .from("par_levels")
+    .select("par_quantity, suggested_par_quantity, avg_daily_usage, ingredients (name)")
+    .eq("location_id", locationId);
+  if (error) throw new Error(`load par_levels for ${locationId} failed: ${error.message}`);
+
+  type LowParDbRow = {
+    par_quantity: number;
+    suggested_par_quantity: number | null;
+    avg_daily_usage: number | null;
+    ingredients: { name: string } | null;
+  };
+
+  return (data as unknown as LowParDbRow[])
+    .filter((row) => row.avg_daily_usage != null && row.avg_daily_usage < row.par_quantity)
+    .map((row) => ({
+      ingredient_name: row.ingredients?.name ?? "Unknown ingredient",
+      par_quantity: row.par_quantity,
+      suggested_par_quantity: row.suggested_par_quantity,
+      avg_daily_usage: row.avg_daily_usage,
+    }));
+}
+
 export type BatchRecord = {
   id: string;
   business_date: string;
