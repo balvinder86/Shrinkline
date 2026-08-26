@@ -6,7 +6,7 @@
 // (db/phase3/40_platform_admins.sql), a concept independent of
 // memberships entirely.
 //
-//   { action: "list_tenants" }
+//   { action: "list_tenants", search?, page?, page_size? }  — page 1-based, page_size default 20 max 100
 //   { action: "get_tenant", restaurant_id }
 //   { action: "get_platform_summary" }
 //   { action: "create_tenant", name, location_name?, location_timezone?, owner_email }
@@ -136,10 +136,25 @@ Deno.serve(async (req) => {
     const { action } = body;
 
     if (action === "list_tenants") {
-      const { data: restaurants, error: restaurantsErr } = await supabase
+      const { search, page: pageInput, page_size: pageSizeInput } = body;
+      const page = Number.isInteger(pageInput) && pageInput > 0 ? pageInput : 1;
+      const pageSize =
+        Number.isInteger(pageSizeInput) && pageSizeInput > 0 && pageSizeInput <= 100
+          ? pageSizeInput
+          : 20;
+      const from = (page - 1) * pageSize;
+      const to = from + pageSize - 1;
+
+      let query = supabase
         .from("restaurants")
-        .select("id, name, created_at")
-        .order("created_at", { ascending: false });
+        .select("id, name, created_at", { count: "exact" })
+        .order("created_at", { ascending: false })
+        .range(from, to);
+      if (typeof search === "string" && search.trim()) {
+        query = query.ilike("name", `%${search.trim()}%`);
+      }
+
+      const { data: restaurants, error: restaurantsErr, count: total } = await query;
       if (restaurantsErr) return json({ ok: false, error: restaurantsErr.message }, 500);
 
       const tenants = await Promise.all(
@@ -206,7 +221,7 @@ Deno.serve(async (req) => {
         }),
       );
 
-      return json({ ok: true, tenants }, 200);
+      return json({ ok: true, tenants, total: total ?? tenants.length, page, pageSize }, 200);
     }
 
     if (action === "get_tenant") {
