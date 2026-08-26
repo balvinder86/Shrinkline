@@ -11,6 +11,8 @@
 //   { action: "get_platform_summary" }
 //   { action: "create_tenant", name, location_name?, location_timezone?, owner_email }
 //   { action: "resend_invite", restaurant_id }
+//   { action: "update_tenant", restaurant_id, name }
+//   { action: "delete_tenant", restaurant_id }
 //
 // list_tenants includes taxSettingsComplete/taxDocumentCount and
 // setupStepsComplete/setupStepsTotal — status only (has the tenant
@@ -44,6 +46,8 @@ const supabase = createClient(
 );
 
 const APP_BASE_URL = Deno.env.get("APP_BASE_URL")!;
+const STRIPE_SECRET_KEY = Deno.env.get("STRIPE_SECRET_KEY")!;
+const STRIPE_API_VERSION = "2026-07-29.dahlia";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -506,11 +510,89 @@ Deno.serve(async (req) => {
       );
     }
 
+    // Rename only, for now — owner email/plan tier changes touch
+    // auth.users / Stripe and are deliberately out of scope until
+    // there's a real need for them.
+    if (action === "update_tenant") {
+      const { restaurant_id: restaurantId, name } = body;
+      if (typeof restaurantId !== "string") {
+        return json({ ok: false, step: "input", error: "restaurant_id is required" }, 400);
+      }
+      if (typeof name !== "string" || !name.trim()) {
+        return json({ ok: false, step: "input", error: "a non-empty name is required" }, 400);
+      }
+
+      const { error: updateErr } = await supabase
+        .from("restaurants")
+        .update({ name: name.trim() })
+        .eq("id", restaurantId);
+      if (updateErr) return json({ ok: false, step: "db", error: updateErr.message }, 500);
+
+      return json({ ok: true }, 200);
+    }
+
+    // Same shape as delete-restaurant/index.ts's self-serve brand
+    // delete: cancel any active Stripe subscription immediately (not
+    // at period end — there's no restaurant left to bill for once
+    // this runs), then hard-delete the restaurant row, which cascades
+    // to every table keyed by restaurant_id. There's no undo, and
+    // unlike delete-restaurant there's no "must keep one brand" guard
+    // — this is a platform-operator action against any tenant, not a
+    // tenant deleting their own only brand.
+    if (action === "delete_tenant") {
+      const { restaurant_id: restaurantId } = body;
+      if (typeof restaurantId !== "string") {
+        return json({ ok: false, step: "input", error: "restaurant_id is required" }, 400);
+      }
+
+      const { data: subscription, error: subErr } = await supabase
+        .from("subscriptions")
+        .select("stripe_subscription_id")
+        .eq("restaurant_id", restaurantId)
+        .maybeSingle();
+      if (subErr) return json({ ok: false, step: "db", error: subErr.message }, 500);
+
+      if (subscription?.stripe_subscription_id) {
+        const res = await fetch(
+          `https://api.stripe.com/v1/subscriptions/${subscription.stripe_subscription_id}`,
+          {
+            method: "DELETE",
+            headers: {
+              Authorization: `Bearer ${STRIPE_SECRET_KEY}`,
+              "Stripe-Version": STRIPE_API_VERSION,
+            },
+          },
+        );
+        const data = await res.json();
+        // "resource_missing" means Stripe already has no such
+        // subscription (e.g. cancelled out-of-band) — fine to proceed.
+        if (!res.ok && data?.error?.code !== "resource_missing") {
+          return json(
+            {
+              ok: false,
+              step: "stripe",
+              error: data?.error?.message ?? "could not cancel the Stripe subscription",
+            },
+            500,
+          );
+        }
+      }
+
+      const { error: deleteErr } = await supabase
+        .from("restaurants")
+        .delete()
+        .eq("id", restaurantId);
+      if (deleteErr) return json({ ok: false, step: "delete", error: deleteErr.message }, 500);
+
+      return json({ ok: true }, 200);
+    }
+
     return json(
       {
         ok: false,
         step: "input",
-        error: "action must be 'list_tenants', 'create_tenant', or 'resend_invite'",
+        error:
+          "action must be 'list_tenants', 'create_tenant', 'resend_invite', 'update_tenant', or 'delete_tenant'",
       },
       400,
     );
