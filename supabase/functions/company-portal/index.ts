@@ -13,6 +13,8 @@
 //   { action: "resend_invite", restaurant_id }
 //   { action: "update_tenant", restaurant_id, name }
 //   { action: "delete_tenant", restaurant_id }
+//   { action: "change_tenant_plan", restaurant_id, plan_tier }   plan_tier: "boh" | "full"
+//   { action: "cancel_tenant_subscription", restaurant_id }
 //
 // list_tenants includes taxSettingsComplete/taxDocumentCount and
 // setupStepsComplete/setupStepsTotal — status only (has the tenant
@@ -56,6 +58,31 @@ const CORS_HEADERS = {
 
 function json(body: unknown, status: number) {
   return Response.json(body, { status, headers: CORS_HEADERS });
+}
+
+// Same helper as update-subscription-plan/index.ts — kept in sync
+// there rather than factored into _shared, since this is the only
+// other place that needs raw Stripe REST access.
+async function stripeRequest(path: string, method: "GET" | "POST", params?: URLSearchParams) {
+  const isGet = method === "GET";
+  const url =
+    isGet && params
+      ? `https://api.stripe.com/v1/${path}?${params}`
+      : `https://api.stripe.com/v1/${path}`;
+  const res = await fetch(url, {
+    method,
+    headers: {
+      Authorization: `Bearer ${STRIPE_SECRET_KEY}`,
+      "Stripe-Version": STRIPE_API_VERSION,
+      ...(!isGet ? { "Content-Type": "application/x-www-form-urlencoded" } : {}),
+    },
+    body: !isGet ? params : undefined,
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data?.error?.message ?? `Stripe API error (${res.status})`);
+  }
+  return data as Record<string, unknown>;
 }
 
 async function assertPlatformAdmin(userId: string) {
@@ -602,12 +629,148 @@ Deno.serve(async (req) => {
       return json({ ok: true }, 200);
     }
 
+    // Same mechanism as update-subscription-plan/index.ts's owner-only
+    // self-serve "change plan" — just gated by platform admin instead
+    // of restaurant ownership, and no self-serve UI equivalent (the
+    // tenant's own dashboard is where they'd normally do this).
+    // Requires an existing Stripe subscription; the resulting
+    // customer.subscription.updated webhook (stripe-webhook/) is what
+    // actually writes the new plan_tier into the subscriptions mirror
+    // — this never writes to it directly.
+    if (action === "change_tenant_plan") {
+      const { restaurant_id: restaurantId, plan_tier: planTier } = body;
+      if (typeof restaurantId !== "string") {
+        return json({ ok: false, step: "input", error: "restaurant_id is required" }, 400);
+      }
+      if (planTier !== "boh" && planTier !== "full") {
+        return json({ ok: false, step: "input", error: "plan_tier must be 'boh' or 'full'" }, 400);
+      }
+
+      const { data: subscription, error: subErr } = await supabase
+        .from("subscriptions")
+        .select("stripe_subscription_id, plan_tier")
+        .eq("restaurant_id", restaurantId)
+        .maybeSingle();
+      if (subErr) return json({ ok: false, step: "db", error: subErr.message }, 500);
+      if (!subscription?.stripe_subscription_id) {
+        return json(
+          { ok: false, step: "input", error: "this tenant has no active subscription to change" },
+          400,
+        );
+      }
+      if (subscription.plan_tier === planTier) {
+        return json({ ok: false, step: "input", error: `already on the ${planTier} plan` }, 400);
+      }
+
+      try {
+        const priceLookup = (await stripeRequest(
+          "prices",
+          "GET",
+          new URLSearchParams([
+            ["lookup_keys[]", planTier],
+            ["active", "true"],
+          ]),
+        )) as { data: { id: string }[] };
+        if (!priceLookup.data || priceLookup.data.length === 0) {
+          return json(
+            {
+              ok: false,
+              step: "stripe_price",
+              error: `No active Stripe price found with lookup_key "${planTier}".`,
+            },
+            500,
+          );
+        }
+        const newPriceId = priceLookup.data[0].id;
+
+        const stripeSub = await stripeRequest(
+          `subscriptions/${subscription.stripe_subscription_id}`,
+          "GET",
+        );
+        const items = stripeSub.items as { data: { id: string; quantity: number }[] };
+        const currentItem = items?.data?.[0];
+        if (!currentItem) {
+          return json(
+            { ok: false, step: "stripe_subscription", error: "subscription has no line items" },
+            500,
+          );
+        }
+
+        // Quantity must be re-sent explicitly, see
+        // update-subscription-plan/index.ts's own comment on this.
+        await stripeRequest(
+          `subscriptions/${subscription.stripe_subscription_id}`,
+          "POST",
+          new URLSearchParams({
+            "items[0][id]": currentItem.id,
+            "items[0][price]": newPriceId,
+            "items[0][quantity]": String(currentItem.quantity),
+            proration_behavior: "create_prorations",
+          }),
+        );
+      } catch (e) {
+        return json({ ok: false, step: "stripe_update", error: (e as Error).message }, 502);
+      }
+
+      return json({ ok: true }, 200);
+    }
+
+    // Cancels immediately (not at period end) — a platform-admin
+    // cancellation is an operator decision made outside the tenant's
+    // own billing flow, not something that should keep charging them
+    // through the current period. Same webhook-writes-the-mirror rule
+    // as change_tenant_plan above; this never touches the restaurant
+    // row itself, unlike delete_tenant.
+    if (action === "cancel_tenant_subscription") {
+      const { restaurant_id: restaurantId } = body;
+      if (typeof restaurantId !== "string") {
+        return json({ ok: false, step: "input", error: "restaurant_id is required" }, 400);
+      }
+
+      const { data: subscription, error: subErr } = await supabase
+        .from("subscriptions")
+        .select("stripe_subscription_id")
+        .eq("restaurant_id", restaurantId)
+        .maybeSingle();
+      if (subErr) return json({ ok: false, step: "db", error: subErr.message }, 500);
+      if (!subscription?.stripe_subscription_id) {
+        return json(
+          { ok: false, step: "input", error: "this tenant has no active subscription" },
+          400,
+        );
+      }
+
+      const res = await fetch(
+        `https://api.stripe.com/v1/subscriptions/${subscription.stripe_subscription_id}`,
+        {
+          method: "DELETE",
+          headers: {
+            Authorization: `Bearer ${STRIPE_SECRET_KEY}`,
+            "Stripe-Version": STRIPE_API_VERSION,
+          },
+        },
+      );
+      const data = await res.json();
+      if (!res.ok && data?.error?.code !== "resource_missing") {
+        return json(
+          {
+            ok: false,
+            step: "stripe",
+            error: data?.error?.message ?? "could not cancel the Stripe subscription",
+          },
+          500,
+        );
+      }
+
+      return json({ ok: true }, 200);
+    }
+
     return json(
       {
         ok: false,
         step: "input",
         error:
-          "action must be 'list_tenants', 'create_tenant', 'resend_invite', 'update_tenant', or 'delete_tenant'",
+          "action must be 'list_tenants', 'create_tenant', 'resend_invite', 'update_tenant', 'delete_tenant', 'change_tenant_plan', or 'cancel_tenant_subscription'",
       },
       400,
     );
