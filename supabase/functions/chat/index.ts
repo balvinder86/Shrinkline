@@ -1352,7 +1352,7 @@ Deno.serve(async (req) => {
                 "Content-Type": "application/json",
               },
               body: JSON.stringify({
-                model: "claude-opus-5",
+                model: "claude-sonnet-5",
                 max_tokens: 8192,
                 thinking: { type: "adaptive" },
                 system: SYSTEM_PROMPT,

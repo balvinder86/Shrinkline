@@ -88,7 +88,7 @@ export async function submitBatch(
       // comes from anything the model returns.
       custom_id: location.id,
       params: {
-        model: "claude-opus-5",
+        model: "claude-sonnet-5",
         max_tokens: 1024,
         output_config: {
           effort: "medium",
