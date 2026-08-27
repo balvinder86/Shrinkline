@@ -1355,7 +1355,18 @@ Deno.serve(async (req) => {
                 model: "claude-sonnet-5",
                 max_tokens: 8192,
                 thinking: { type: "adaptive" },
-                system: SYSTEM_PROMPT,
+                // Render order is tools -> system -> messages, so one
+                // cache_control breakpoint on the (only) system block
+                // caches both the 9 tool schemas and this prompt
+                // together — identical bytes on every call, both across
+                // this loop's own up-to-6 iterations per message and
+                // across every other user's conversation. GA, no beta
+                // header. Cache reads run ~10% of normal input cost;
+                // min cacheable prefix for claude-sonnet-5 is 1024
+                // tokens, cleared easily by tools+system combined.
+                system: [
+                  { type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } },
+                ],
                 tools: TOOL_DEFINITIONS,
                 messages: anthropicMessages,
                 stream: true,
