@@ -89,7 +89,12 @@ export async function submitBatch(
       custom_id: location.id,
       params: {
         model: "claude-sonnet-5",
-        max_tokens: 1024,
+        // 1024 was too tight: with effort:"medium" enabling thinking by
+        // default, reasoning tokens share this budget with the JSON output,
+        // so a normal-length response could hit the cap mid-string and come
+        // back truncated (invalid JSON) — that crashed ingestBatchResults
+        // for every tenant in the batch, not just the one that truncated.
+        max_tokens: 4096,
         output_config: {
           effort: "medium",
           format: { type: "json_schema", schema: RECOMMENDATIONS_SCHEMA },
@@ -126,13 +131,26 @@ export async function ingestBatchResults(
       );
       continue;
     }
+    if (result.result.message.stop_reason === "max_tokens") {
+      console.error(`[insights] ${locationId}: response hit max_tokens (truncated) — skipping`);
+      continue;
+    }
     // Batch results come back as a plain Message (no client-side .parse()
     // wrapper), so read the guaranteed-valid JSON text block directly
-    // rather than relying on the parsed_output convenience field.
+    // rather than relying on the parsed_output convenience field. Still
+    // guard the parse itself — one malformed result must not crash ingest
+    // for every other tenant in the batch (this took the whole nightly
+    // pipeline down in production before this was added).
     const text = result.result.message.content.find((b) => b.type === "text")?.text ?? "{}";
-    const parsed = JSON.parse(text) as {
+    let parsed: {
       recommendations: { tab: string; severity: string; headline: string; body: string }[];
     };
+    try {
+      parsed = JSON.parse(text);
+    } catch (e) {
+      console.error(`[insights] ${locationId}: failed to parse batch result JSON — skipping`, e);
+      continue;
+    }
     for (const rec of parsed.recommendations ?? []) {
       rows.push({
         restaurant_id: restaurantId,
