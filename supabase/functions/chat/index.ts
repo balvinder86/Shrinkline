@@ -1250,9 +1250,18 @@ const MAX_TOOL_ITERATIONS = 6;
 const MAX_MESSAGES = 40;
 const MAX_MESSAGE_LENGTH = 4000;
 
+// TEMPORARILY DISABLED 2026-08-28 to cut Anthropic API cost while the
+// assistant isn't in active use — hard-stops before any Anthropic call,
+// independent of the frontend widget also being hidden (src/routes/
+// __root.tsx). Re-enable by deleting this block.
+const CHAT_DISABLED = true;
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: CORS_HEADERS });
+  }
+  if (CHAT_DISABLED) {
+    return json({ ok: false, error: "The chat assistant is temporarily unavailable." }, 503);
   }
 
   try {

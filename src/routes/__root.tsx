@@ -232,8 +232,13 @@ function AuthGate() {
       </div>
       {/* Mounted once here (not per-page) so its conversation state
           survives client-side navigation between pages — only present
-          for authenticated users, never on the login page above. */}
-      <ChatWidget />
+          for authenticated users, never on the login page above.
+          TEMPORARILY DISABLED 2026-08-28 to cut Anthropic API cost while
+          usage isn't needed — the chat/index.ts edge function also
+          hard-stops before calling Anthropic as a backend-side safety
+          net, so this is belt-and-suspenders. Re-enable by uncommenting
+          both this line and the early return in chat/index.ts. */}
+      {/* <ChatWidget /> */}
     </SidebarProvider>
   );
 }
