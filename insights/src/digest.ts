@@ -111,12 +111,23 @@ function renderDigestHtml(opts: {
   return `<h2>${restaurantName} — nightly digest</h2>${body}`;
 }
 
+// TEMPORARILY DISABLED 2026-08-31 — nightly digest emails paused for
+// all tenants. Hard-stops before any recipient/content lookup, so no
+// notification_digest_log row gets written either — re-enabling just
+// resumes normal sends on the next nightly run, no backlog catch-up.
+// Re-enable by deleting this block.
+const DIGEST_DISABLED = true;
+
 // One send per opted-in recipient, permission-filtered per section
 // (owners see everything; manager/staff need the matching key granted
 // — same gate chat's own get_ai_recommendations/get_inventory_variance
 // tools use). A recipient with every relevant toggle off, or no
 // permission to any section, is skipped rather than sent an empty email.
 export async function sendDigestEmails(restaurantId: string, businessDate: string): Promise<void> {
+  if (DIGEST_DISABLED) {
+    console.log(`[insights] ${restaurantId}: digest sending is disabled — skipping`);
+    return;
+  }
   if (!RESEND_API_KEY) {
     console.error("[insights] RESEND_API_KEY not set — skipping digest send");
     return;
