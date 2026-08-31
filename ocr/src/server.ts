@@ -215,7 +215,22 @@ export async function handleEnqueue(invoiceId: string) {
   // vast majority) are completely unaffected — still exactly one
   // Mindee call, same as always.
   if (mimeType === "application/pdf") {
-    const pageCount = await getPdfPageCount(fileBuffer);
+    let pageCount: number;
+    try {
+      pageCount = await getPdfPageCount(fileBuffer);
+    } catch (e) {
+      // A PDF pdf-lib can't parse at all is permanently corrupt, not a
+      // transient failure — retrying won't fix broken bytes. Mark
+      // failed now so listNeverEnqueuedInvoices() stops matching it
+      // (its ocr_status is no longer null), instead of leaving it in
+      // limbo where the 5-minute background-recheck sweep re-runs
+      // handleEnqueue (re-billing the classifyDocument call above)
+      // forever. Confirmed live: one bad PDF did exactly this for
+      // days, hitting Claude every 5 minutes with no end condition.
+      console.error(`[enqueue] ${invoiceId}: PDF unparseable, marking failed:`, e);
+      await setFailed(invoiceId);
+      return { jobId: null, failed: true };
+    }
     if (pageCount > 1) {
       const pages = await splitPdfPages(fileBuffer);
       const jobs: { pageNumber: number; mindeeJobId: string }[] = [];

@@ -277,7 +277,18 @@ export async function processRecipeImport(recipeImportId: string): Promise<void>
   const fileBuffer = await downloadRecipeDocFile(row.source_file_url);
 
   if (isPdf) {
-    const pageCount = await getPdfPageCount(fileBuffer);
+    let pageCount: number;
+    try {
+      pageCount = await getPdfPageCount(fileBuffer);
+    } catch (e) {
+      // Permanently corrupt PDF, not transient — same class of bug as
+      // server.ts's invoice enqueue path (see its comment). Mark failed
+      // now so the 5-minute background-recheck sweep stops re-running
+      // this forever.
+      console.error(`[recipe-import] ${recipeImportId}: PDF unparseable, marking failed:`, e);
+      await setRecipeImportFailed(recipeImportId, "PDF could not be read — the file may be corrupted");
+      return;
+    }
     if (pageCount > MAX_PDF_PAGES) {
       await setRecipeImportFailed(
         recipeImportId,
