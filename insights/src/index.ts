@@ -16,7 +16,23 @@ function todaysBusinessDate(): string {
   return new Date().toISOString().slice(0, 10); // YYYY-MM-DD
 }
 
+// TEMPORARILY DISABLED 2026-09-08 — nightly AI recommendations batch
+// submission paused to cut Anthropic API cost. Hard-stops before any
+// tenant context is built or a batch submitted, so no
+// ai_recommendation_batches row gets written either — re-enabling just
+// resumes normal submissions on the next cron tick, no backlog
+// catch-up for the paused days. Existing in-flight batches (already
+// submitted before this was flipped on) still get polled/ingested
+// normally by pollExistingBatch — only new submissions are blocked.
+// Re-enable by deleting this block.
+const INSIGHTS_DISABLED = true;
+
 async function submitTodaysBatch(businessDate: string) {
+  if (INSIGHTS_DISABLED) {
+    console.log(`[insights] ${businessDate}: batch submission is disabled — skipping`);
+    return;
+  }
+
   const locations = await getAllLocations();
 
   const tenants: { location: Location; ctx: TabContext }[] = [];
