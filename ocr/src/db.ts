@@ -1,6 +1,17 @@
 import { createClient } from "@supabase/supabase-js";
-import { classifyDocument } from "./classify.js";
+import { classifyDocument, type DocumentType } from "./classify.js";
 import type { JobCheckResult } from "./mindee.js";
+
+// Sep 8 2026 incident: a multi-page invoice stuck between
+// classifyDocument() (a real, billed Haiku call) and the write that
+// would stop the 5-minute background sweep from re-picking it up
+// generated an unbounded stream of re-billed classify calls for ~15
+// hours before self-resolving — same failure shape as the Aug 25-30
+// incident (169ebef), just from a different exception point that fix
+// didn't cover. This caps classify attempts per invoice across both
+// call sites (handleEnqueue in server.ts, persistResult below) instead
+// of trusting every future exception type to be caught individually.
+export const MAX_CLASSIFY_ATTEMPTS = 3;
 
 const url = process.env.SUPABASE_URL;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -19,16 +30,33 @@ export type Invoice = {
   mindee_job_id: string | null;
   document_type: string | null;
   flags: string[];
+  classify_attempts: number;
 };
 
 export async function getInvoice(invoiceId: string): Promise<Invoice> {
   const { data, error } = await supabase
     .from("invoices")
-    .select("id, restaurant_id, location_id, vendor_id, source_file_url, mindee_job_id, document_type, flags")
+    .select(
+      "id, restaurant_id, location_id, vendor_id, source_file_url, mindee_job_id, document_type, flags, classify_attempts",
+    )
     .eq("id", invoiceId)
     .single();
   if (error || !data) throw new Error(`invoice not found: ${error?.message ?? invoiceId}`);
   return { ...data, flags: data.flags ?? [] };
+}
+
+// Called immediately before every classifyDocument() call this pipeline
+// makes, so an attempt counts even if the call itself (or something
+// shortly after it) throws — the exact gap that let the Sep 8 incident
+// re-bill Haiku for ~15 hours. Not atomic (read-then-write), but both
+// call sites process one invoice at a time sequentially, so there's no
+// concurrent-writer race to guard against here.
+export async function incrementClassifyAttempts(invoiceId: string, next: number) {
+  const { error } = await supabase
+    .from("invoices")
+    .update({ classify_attempts: next })
+    .eq("id", invoiceId);
+  if (error) throw new Error(`update failed: ${error.message}`);
 }
 
 // Sentinel instead of leaving mindee_job_id null for a multi-page
@@ -108,7 +136,9 @@ export async function createInvoiceRowFromTemplate(original: Invoice): Promise<I
       status: "pending_review",
       split_from_invoice_id: original.id,
     })
-    .select("id, restaurant_id, location_id, vendor_id, source_file_url, mindee_job_id, document_type, flags")
+    .select(
+      "id, restaurant_id, location_id, vendor_id, source_file_url, mindee_job_id, document_type, flags, classify_attempts",
+    )
     .single();
   if (error || !data) throw new Error(`create invoice row failed: ${error?.message}`);
   return { ...data, flags: data.flags ?? [] };
@@ -316,9 +346,22 @@ export async function persistResult(invoice: Invoice, result: ReadyResult): Prom
 
   const mimeType = mimeTypeFromPath(invoice.source_file_url ?? "");
   const fileBuffer = invoice.source_file_url ? await downloadInvoiceFile(invoice.source_file_url) : null;
-  const { documentType } = fileBuffer
-    ? await classifyDocument(fileBuffer, mimeType)
-    : { documentType: "unclear" as const };
+  let documentType: DocumentType;
+  if (!fileBuffer) {
+    documentType = "unclear";
+  } else if (invoice.classify_attempts >= MAX_CLASSIFY_ATTEMPTS) {
+    // Degrade to 'unclear' rather than keep re-billing Claude forever —
+    // this function must always reach ocr_status='ready' (see header
+    // comment), so giving up on classification can't mean setFailed()
+    // here the way it does in handleEnqueue.
+    console.error(
+      `[persist] ${invoice.id}: exceeded ${MAX_CLASSIFY_ATTEMPTS} classify attempts, defaulting to 'unclear'`,
+    );
+    documentType = "unclear";
+  } else {
+    await incrementClassifyAttempts(invoice.id, invoice.classify_attempts + 1);
+    ({ documentType } = await classifyDocument(fileBuffer, mimeType));
+  }
 
   // Payroll documents (paychecks, payroll registers, employee earnings
   // reports, etc. — typically from an accountant, not a vendor) often

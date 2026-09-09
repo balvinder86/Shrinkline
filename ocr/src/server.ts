@@ -40,6 +40,8 @@ import {
   setRecipeImportFailed,
   listStuckRecipeImports,
   listNeverStartedRecipeImports,
+  incrementClassifyAttempts,
+  MAX_CLASSIFY_ATTEMPTS,
   type Invoice,
   type ReadyResult,
 } from "./db.js";
@@ -198,6 +200,14 @@ export async function handleEnqueue(invoiceId: string) {
   // the whole original file (page count doesn't matter to it), so it's
   // worth paying even for the common case where the document turns out
   // to be a real invoice and persistResult classifies it again anyway.
+  if (invoice.classify_attempts >= MAX_CLASSIFY_ATTEMPTS) {
+    console.error(
+      `[enqueue] ${invoiceId}: exceeded ${MAX_CLASSIFY_ATTEMPTS} classify attempts, marking failed without retrying`,
+    );
+    await setFailed(invoiceId);
+    return { jobId: null, failed: true };
+  }
+  await incrementClassifyAttempts(invoiceId, invoice.classify_attempts + 1);
   const { documentType: preDocumentType } = await classifyDocument(fileBuffer, mimeType);
   if (preDocumentType === "payroll") {
     await deleteInvoiceAndFile(invoice);
