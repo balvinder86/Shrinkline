@@ -55,12 +55,19 @@ export async function markMessageProcessed(
   messageId: string,
   invoiceId: string | null,
 ) {
-  const { error } = await supabase.from("processed_email_messages").insert({
-    restaurant_id: restaurantId,
-    provider,
-    message_id: messageId,
-    invoice_id: invoiceId,
-  });
+  const row = { restaurant_id: restaurantId, provider, message_id: messageId, invoice_id: invoiceId };
+  let { error } = await supabase.from("processed_email_messages").insert(row);
+  // 23503 = FK violation: the invoice was already deleted by the time we
+  // got here — enqueueOcr classifies synchronously and ocr/ deletes
+  // payroll documents on the spot. Throwing here left the message
+  // unprocessed, so every 15-min run re-ingested and re-classified
+  // (billed Haiku) the same payroll email forever — Sep 23-25 2026
+  // incident, one 6-PDF payroll email re-ingested ~160 times. The
+  // dedup record matters far more than the invoice link, so keep it
+  // with invoice_id null.
+  if (error?.code === "23503") {
+    ({ error } = await supabase.from("processed_email_messages").insert({ ...row, invoice_id: null }));
+  }
   if (error) throw new Error(`insert processed_email_messages failed: ${error.message}`);
 }
 
