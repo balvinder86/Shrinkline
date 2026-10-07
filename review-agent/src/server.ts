@@ -58,6 +58,13 @@ async function scanConfig(config: RestaurantReviewConfig) {
     config.searchQuery,
     (reviewerName, starRating, comment) =>
       generateReply(reviewerName, starRating, comment, config.settings),
+    async (review) =>
+      (await findExistingReview(
+        config.restaurantId,
+        review.reviewerName,
+        review.starRating,
+        review.comment,
+      )) !== null,
     config.maxRepliesPerRun,
     config.autoSend5Star,
   );

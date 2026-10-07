@@ -198,6 +198,7 @@ export async function scanUnrepliedReviews(
   businessProfileId: string,
   searchQuery: string,
   generateReply: GenerateReplyFn,
+  isAlreadySaved: (review: ExtractedReview) => Promise<boolean>,
   cap: number,
   autoSend5Star: boolean,
 ): Promise<{
@@ -208,11 +209,16 @@ export async function scanUnrepliedReviews(
 }> {
   return withGoogleReviewsPanel(cookies, businessProfileId, searchQuery, async (_page, frame) => {
     const found = await loadAllUnrepliedReviews(frame);
-    const total = Math.min(found, cap);
 
+    // Reviews nobody has replied to on Google stay in the Unreplied tab
+    // on every sweep. Checking the DB before drafting (not after) keeps
+    // Claude from re-drafting the same saved reviews every 15 minutes,
+    // and `cap` limits new drafts rather than how far down the list we
+    // look, so newer reviews below already-saved ones still get drafted.
     const drafted: (ExtractedReview & { replyText: string })[] = [];
-    for (let i = 0; i < total; i++) {
+    for (let i = 0; i < found && drafted.length < cap; i++) {
       const review = await extractReviewAt(frame(), i);
+      if (await isAlreadySaved(review)) continue;
       // One failed draft (a Claude API hiccup, a rate limit, an out-of-
       // credits account) used to throw here and lose every review in
       // this batch, including ones already drafted successfully —
