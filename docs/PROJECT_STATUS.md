@@ -20,7 +20,7 @@
 | Nightly AI recommendations | ⏸ **Paused since 2026-09-08** (`INSIGHTS_DISABLED = true`). Last recommendations generated for business date 2026-09-09. |
 | Nightly digest email | ⏸ **Disabled since 2026-08-31** (`DIGEST_DISABLED = true`) |
 | AI chat assistant | ⏸ **Disabled since 2026-08-28** (widget commented out + function returns 503) |
-| Review scraper / AI replies | 🔴 **Broken since 2026-09-01** — newest review row 2026-08-31. User deferred fix. |
+| Review scraper / AI replies | ✅ **Fixed 2026-10-07** (was broken 2026-09-01 → 10-07). Sweeps every 15 min; 2 new reviews drafted on the first run. |
 | Square POS | 💤 Code complete, inert — no Square Developer credentials set |
 | Billing | ✅ Live in Stripe test mode |
 
@@ -87,7 +87,7 @@ Repo layout: see [ARCHITECTURE.md §2](ARCHITECTURE.md#2-repo-layout).
 - **Phase 1 (Toast POS + real auth, Sales/Product Mix)** — ✅ complete since 2026-07-03. Extended 2026-08-24 with a Square adapter (not in the original plan).
 - **Phase 2 (back-of-house wedge)** — ✅ complete and well past original scope: invoice OCR + email ingestion, inventory/par, recipes, food cost %, inventory counts, storage locations, waste log, purchase orders, price trends, AI insights layer.
 - **Phase 3 (Stripe billing/onboarding)** — ✅ done 2026-08-20 (Parts A-F).
-- **Phase 4 (upsell: reviews, marketing, loyalty, scheduling)** — **mixed.** Reviews and Marketing/SEO are real (Reviews currently broken, see §10). Loyalty, Scheduling and Segments are 100% mock UI.
+- **Phase 4 (upsell: reviews, marketing, loyalty, scheduling)** — **mixed.** Reviews and Marketing/SEO are real. Loyalty, Scheduling and Segments are 100% mock UI.
 - **Post-Phase 3 polish (2026-08-20 → 08-31)** — Settings enhancement (branding, integrations dialogs, tax & compliance, brand/location delete, notifications), storage locations, AI-native rollout (new insights tabs), Square adapter, nightly digest.
 - **Cost-control period (2026-08-28 → now)** — chat, digest and nightly insights switched off; three runaway-retry cost incidents fixed (see [OPERATIONS.md §5](OPERATIONS.md#5-cost-incidents-history)). No feature work.
 
@@ -123,7 +123,7 @@ Dated detail: [CHANGELOG.md](CHANGELOG.md).
 | **Labor** | `/labor` | ✅ Real data | Toast/Square shifts via `src/lib/labor/queries.ts`. No AI layer. |
 | **AI Recommendations panel** | on Invoices, P&L, Inventory, Recipes, Product Mix, Waste Log, Inventory Variance | ⏸ Real, **paused** | Panel shows the last batch (2026-09-09) until re-enabled. See §7. |
 | **AI Chat Assistant** | global widget | ⏸ Built, **disabled** | See §0. |
-| **Reviews** | `/reviews` | 🔴 Real, **broken** | Claude-drafted replies, review insights, competitor comparison. Scraper failing since 2026-09-01. |
+| **Reviews** | `/reviews` | ✅ Real | Claude-drafted replies, review insights, competitor comparison. Scraper was down 2026-09-01 → 10-07 (see OPERATIONS §7). |
 | **Marketing / SEO** | `/marketing`, `/seo` | ✅ Real | SEO suggestions, content briefs, schema check, PageSpeed, Search Console, citations, competitor tracking, customers list. |
 | **Loyalty** | `/loyalty` | 🔴 Mock | No schema, no queries. |
 | **Scheduling** | `/scheduling` | 🔴 Mock | Hardcoded forecast/roster. |
@@ -187,7 +187,7 @@ Stripe Billing, two tiers by price `lookup_key`: `boh` (back-of-house) and `full
 ## 10. Known open items (as of 2026-10-07)
 
 **Broken / paused**
-1. **Review scraper broken** since 2026-09-01 (Playwright selector timeout on Google's reviews panel). No new reviews since 2026-08-31. Deferred by the user.
+1. ~~Review scraper broken~~ — **fixed 2026-10-07** (`3b913d0`, `36d892c`). Reviews posted during the outage that already have a reply on Google won't be imported (the scraper only reads the Unreplied tab).
 2. **Nightly AI insights paused** since 2026-09-08. Recommendation panels show stale data from 2026-09-09; consider hiding them or showing a "paused" note while this is off.
 3. **Digest email disabled** since 2026-08-31.
 4. **Chat assistant disabled** since 2026-08-28.

@@ -3,6 +3,8 @@
 > Dated summary of what was built, from `git log` on `main` (Lovable bot sync commits omitted). Newest first. For current status see [PROJECT_STATUS.md](PROJECT_STATUS.md).
 
 ## 2026-09 → 2026-10 — Cost control (no feature work)
+- **10-07** Review scraper fixed: run under `tini` so Chromium can launch again — `3b913d0`; skip already-saved reviews before drafting with Claude — `36d892c`
+- **10-07** Project docs added — `9d2ab47`
 - **09-25** email-ingest keeps its dedup record when the linked invoice was deleted (stops a 15-min re-ingest loop) — `92109da`
 - **09-08** Cap Haiku classify attempts per invoice at 3 (`classify_attempts`) — `da2907b`
 - **09-08** Pause nightly AI insights batch submission — `06a0e08`

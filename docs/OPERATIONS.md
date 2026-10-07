@@ -102,11 +102,16 @@ Also cost-driven: chat disabled (08-28), digest disabled (08-31), insights pause
 
 ---
 
-## 7. Runbook: fix the review scraper (deferred)
+## 7. Review scraper — 2026-10-07 fix and runbook
 
-1. `railway logs` on `review-agent` — confirm the Playwright timeout and which selector.
-2. Check the Google session cookies are still valid (re-login if Google signed it out).
-3. Update the panel selector in `review-agent/src/browser.ts`, push, trigger a scan from `/reviews`.
+**What broke:** from 2026-09-01 the scan timed out on the "Read reviews" button; by October every sweep failed at `browserType.launch` (Chromium exiting with `SIGTRAP`). Root cause: `node` ran as PID 1 with no init process, so the helper processes Chromium leaves behind were never cleaned up and built up over weeks until Chromium couldn't start. **Fix `3b913d0`:** `tini` as the container init (Dockerfile `ENTRYPOINT` + `startCommand` in `railway.json`).
+
+**Cost bug found at the same time, fix `36d892c`:** the scan drafted a Claude reply for every unreplied review on Google (up to `max_replies_per_run`) *before* checking whether it was already saved, so the same reviews were re-drafted and thrown away every 15 minutes. Now it checks the DB first, and the cap counts only new drafts. Healthy steady state in the logs: `found N, drafted 0`.
+
+**If it breaks again:**
+1. `railway logs` in `review-agent/` — look for `[background-sweep] … failed`.
+2. Launch error → container/process problem (check the Dockerfile still uses tini; redeploy to get a clean container).
+3. Timeout on a locator → Google changed the panel or the session expired: re-login and refresh the stored cookies, or update selectors in `review-agent/src/browser.ts`.
 4. Confirm `select max(created_at) from reviews` moves forward.
 
 ## 8. Runbook: go live with Stripe
